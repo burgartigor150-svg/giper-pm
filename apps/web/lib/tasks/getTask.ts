@@ -28,6 +28,8 @@ export async function getTask(projectKey: string, number: number, user: SessionU
       updatedAt: true,
       creatorId: true,
       assigneeId: true,
+      externalId: true,
+      externalSource: true,
       creator: { select: { id: true, name: true, image: true } },
       assignee: { select: { id: true, name: true, image: true } },
       project: {

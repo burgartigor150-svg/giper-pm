@@ -21,6 +21,8 @@ export type TaskForPerm = {
   creatorId: string;
   assigneeId: string | null;
   project: ProjectForPerm;
+  /** When set, this task is a read-only mirror from an external system. */
+  externalSource?: string | null;
 };
 
 // ---- Project ------------------------------------------------------------
@@ -52,8 +54,15 @@ export function canCreateTask(user: SessionUser, project: ProjectForPerm): boole
   return canViewProject(user, project);
 }
 
-/** Edit task: ADMIN, project owner, project LEAD, task creator, or assignee. */
+/**
+ * Edit task: ADMIN, project owner, project LEAD, task creator, or assignee.
+ *
+ * Tasks mirrored from an external system (`externalSource` set) are
+ * read-only on our side — editing must happen in the source-of-truth so
+ * the next sync doesn't overwrite local changes.
+ */
 export function canEditTask(user: SessionUser, task: TaskForPerm): boolean {
+  if (task.externalSource) return false;
   if (user.role === 'ADMIN') return true;
   if (task.creatorId === user.id) return true;
   if (task.assigneeId === user.id) return true;
@@ -66,8 +75,14 @@ export function canViewTask(user: SessionUser, task: TaskForPerm): boolean {
   return canViewProject(user, task.project);
 }
 
-/** Delete task (hard delete): ADMIN, project owner, or project LEAD. PM at global level too. */
+/**
+ * Delete task (hard delete): ADMIN, project owner, or project LEAD. PM at
+ * global level too. Externally-mirrored tasks cannot be deleted from our
+ * side — the next sync would re-create them and the audit history would
+ * desync from the source.
+ */
 export function canDeleteTask(user: SessionUser, task: TaskForPerm): boolean {
+  if (task.externalSource) return false;
   if (user.role === 'ADMIN') return true;
   if (task.project.ownerId === user.id) return true;
   if (user.role === 'PM') return true;

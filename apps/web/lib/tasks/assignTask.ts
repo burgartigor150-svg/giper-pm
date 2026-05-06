@@ -14,6 +14,7 @@ export async function assignTask(
       id: true,
       assigneeId: true,
       creatorId: true,
+      externalSource: true,
       project: {
         select: {
           ownerId: true,

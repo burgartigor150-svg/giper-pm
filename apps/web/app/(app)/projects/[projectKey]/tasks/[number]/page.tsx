@@ -16,6 +16,7 @@ import { CommentForm } from '@/components/domain/CommentForm';
 import { TaskStatusBadge } from '@/components/domain/TaskStatusBadge';
 import { DeleteTaskButton } from '@/components/domain/DeleteTaskButton';
 import { TaskTimerButton } from '@/components/domain/TaskTimerButton';
+import { Bitrix24TaskBadge } from '@/components/domain/Bitrix24Badge';
 
 type Params = Promise<{ projectKey: string; number: string }>;
 
@@ -120,6 +121,9 @@ export default async function TaskDetailPage({ params }: { params: Params }) {
           {task.project.key}-{task.number}
         </span>
         <TaskStatusBadge status={task.status} />
+        {task.externalSource === 'bitrix24' && task.externalId ? (
+          <Bitrix24TaskBadge externalId={task.externalId} />
+        ) : null}
       </div>
 
       <InlineTitle

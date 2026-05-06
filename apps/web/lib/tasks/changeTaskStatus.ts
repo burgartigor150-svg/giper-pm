@@ -25,6 +25,7 @@ export async function changeTaskStatus(
       completedAt: true,
       creatorId: true,
       assigneeId: true,
+      externalSource: true,
       project: {
         select: { ownerId: true, members: { select: { userId: true, role: true } } },
       },

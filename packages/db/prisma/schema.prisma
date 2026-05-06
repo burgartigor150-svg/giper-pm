@@ -38,6 +38,9 @@ model User {
   tgChatId      String?   @unique
   tgUsername    String?
 
+  // External integrations
+  bitrixUserId  String?   @unique // user.ID in cloud Bitrix24
+
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   deletedAt     DateTime?
@@ -175,7 +178,11 @@ model Project {
   deadline      DateTime?
   ownerId       String
   owner         User            @relation("ProjectOwner", fields: [ownerId], references: [id])
-  
+
+  // External integrations (read-only mirror).
+  externalId       String?         // sonet group / repo / external project key
+  externalSource   String?         // "bitrix24" | "github" | ...
+
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
   archivedAt    DateTime?
@@ -184,6 +191,7 @@ model Project {
   tasks         Task[]
   integrations  ProjectIntegration[]
 
+  @@unique([externalSource, externalId])
   @@index([status])
   @@index([ownerId])
 }

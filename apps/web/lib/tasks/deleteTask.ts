@@ -12,6 +12,7 @@ export async function deleteTask(taskId: string, user: SessionUser) {
       number: true,
       creatorId: true,
       assigneeId: true,
+      externalSource: true,
       project: {
         select: {
           ownerId: true,

@@ -15,16 +15,31 @@ export default async function SettingsPage() {
     <div className="mx-auto max-w-3xl space-y-4">
       <h1 className="text-xl font-semibold">{t('title')}</h1>
       {user.role === 'ADMIN' ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>{tUsers('title')}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Link href="/settings/users" className="text-sm underline">
-              {tUsers('title')} →
-            </Link>
-          </CardContent>
-        </Card>
+        <>
+          <Card>
+            <CardHeader>
+              <CardTitle>{tUsers('title')}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Link href="/settings/users" className="text-sm underline">
+                {tUsers('title')} →
+              </Link>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle>Интеграции</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Link
+                href="/settings/integrations/bitrix24"
+                className="text-sm underline"
+              >
+                Bitrix24 →
+              </Link>
+            </CardContent>
+          </Card>
+        </>
       ) : null}
     </div>
   );

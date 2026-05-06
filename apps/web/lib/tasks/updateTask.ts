@@ -18,6 +18,7 @@ export async function updateTask(taskId: string, input: UpdateTaskInput, user: S
       tags: true,
       creatorId: true,
       assigneeId: true,
+      externalSource: true,
       project: {
         select: { ownerId: true, members: { select: { userId: true, role: true } } },
       },
