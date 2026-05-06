@@ -52,6 +52,9 @@ export default async function ProjectOverviewPage({
           <StatusBadge status={project.status} />
         </div>
         <div className="flex items-center gap-2">
+          <Link href={`/projects/${project.key}/board`}>
+            <Button variant="outline" size="sm">Канбан</Button>
+          </Link>
           <Link href={`/projects/${project.key}/list`}>
             <Button variant="outline" size="sm">Задачи</Button>
           </Link>

@@ -199,6 +199,20 @@
     }
   },
   "tasks": {
+    "board": {
+      "title": "Канбан",
+      "onlyMine": "Только мои",
+      "showMore": "Показать ещё ({count})",
+      "empty": "—",
+      "moveError": "Не удалось переместить задачу",
+      "filters": {
+        "assignee": "Исполнитель",
+        "priority": "Приоритет",
+        "anyAssignee": "Любой",
+        "anyPriority": "Все",
+        "search": "Поиск"
+      }
+    },
     "list": {
       "title": "Задачи",
       "create": "Новая задача",

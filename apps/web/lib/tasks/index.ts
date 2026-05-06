@@ -7,3 +7,4 @@ export * from './deleteTask';
 export * from './listTasksForProject';
 export * from './getTask';
 export * from './listRecentTasks';
+export * from './listTasksForBoard';
