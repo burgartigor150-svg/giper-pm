@@ -8,20 +8,13 @@ import {
   CardHeader,
   CardTitle,
 } from '@giper/ui/components/Card';
+import { getT } from '@/lib/i18n';
 
-const messages: Record<string, { title: string; body: string }> = {
-  not_allowed: {
-    title: 'Доступ закрыт',
-    body: 'Этот email не зарегистрирован в giper-pm. Обратитесь к администратору, чтобы получить доступ.',
-  },
-  disabled: {
-    title: 'Аккаунт отключён',
-    body: 'Ваш аккаунт временно отключён. Обратитесь к администратору.',
-  },
-  default: {
-    title: 'Не удалось войти',
-    body: 'Что-то пошло не так. Попробуйте ещё раз или обратитесь к администратору.',
-  },
+type ReasonKey = 'notAllowed' | 'disabled' | 'default';
+
+const REASON_BY_QUERY: Record<string, ReasonKey> = {
+  not_allowed: 'notAllowed',
+  disabled: 'disabled',
 };
 
 export default async function LoginErrorPage({
@@ -30,20 +23,22 @@ export default async function LoginErrorPage({
   searchParams: Promise<{ reason?: string; error?: string }>;
 }) {
   const { reason, error } = await searchParams;
-  const key = reason ?? error ?? 'default';
-  const msg = messages[key] ?? messages.default!;
+  const queryKey = reason ?? error ?? 'default';
+  const reasonKey: ReasonKey = REASON_BY_QUERY[queryKey] ?? 'default';
+
+  const t = await getT('auth.error');
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>{msg.title}</CardTitle>
-        <CardDescription>{msg.body}</CardDescription>
+        <CardTitle>{t(`${reasonKey}.title`)}</CardTitle>
+        <CardDescription>{t(`${reasonKey}.body`)}</CardDescription>
       </CardHeader>
       <CardContent />
       <CardFooter>
         <Link href="/login" className="w-full">
           <Button variant="outline" className="w-full">
-            Вернуться ко входу
+            {t('back')}
           </Button>
         </Link>
       </CardFooter>

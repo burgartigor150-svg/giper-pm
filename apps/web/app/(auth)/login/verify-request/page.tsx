@@ -5,15 +5,15 @@ import {
   CardHeader,
   CardTitle,
 } from '@giper/ui/components/Card';
+import { getT } from '@/lib/i18n';
 
-export default function VerifyRequestPage() {
+export default async function VerifyRequestPage() {
+  const t = await getT('auth.verifyRequest');
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Проверьте почту</CardTitle>
-        <CardDescription>
-          Мы отправили ссылку для входа на ваш email. Откройте её в этом же браузере.
-        </CardDescription>
+        <CardTitle>{t('title')}</CardTitle>
+        <CardDescription>{t('body')}</CardDescription>
       </CardHeader>
       <CardContent />
     </Card>

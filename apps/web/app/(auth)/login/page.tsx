@@ -8,6 +8,7 @@ import {
   CardTitle,
 } from '@giper/ui/components/Card';
 import { signInWithEmail, signInWithGoogle } from '@/actions/auth';
+import { getT } from '@/lib/i18n';
 
 const isEmailEnabled = !!process.env.RESEND_API_KEY;
 
@@ -17,12 +18,13 @@ export default async function LoginPage({
   searchParams: Promise<{ callbackUrl?: string }>;
 }) {
   const { callbackUrl } = await searchParams;
+  const t = await getT('auth.login');
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Вход в giper-pm</CardTitle>
-        <CardDescription>Войдите через Google или по email</CardDescription>
+        <CardTitle>{t('title')}</CardTitle>
+        <CardDescription>{t('subtitle')}</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         <form
@@ -32,7 +34,7 @@ export default async function LoginPage({
           }}
         >
           <Button type="submit" className="w-full" variant="default">
-            Войти через Google
+            {t('googleButton')}
           </Button>
         </form>
 
@@ -43,7 +45,7 @@ export default async function LoginPage({
                 <span className="w-full border-t border-border" />
               </div>
               <div className="relative flex justify-center text-xs uppercase">
-                <span className="bg-background px-2 text-muted-foreground">или</span>
+                <span className="bg-background px-2 text-muted-foreground">{t('or')}</span>
               </div>
             </div>
 
@@ -51,12 +53,12 @@ export default async function LoginPage({
               <Input
                 name="email"
                 type="email"
-                placeholder="you@giper.fm"
+                placeholder={t('emailPlaceholder')}
                 autoComplete="email"
                 required
               />
               <Button type="submit" variant="outline" className="w-full">
-                Получить ссылку на email
+                {t('emailButton')}
               </Button>
             </form>
           </>
