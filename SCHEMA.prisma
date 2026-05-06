@@ -17,25 +17,31 @@ datasource db {
 // ============================================================================
 
 model User {
-  id           String    @id @default(cuid())
-  email        String    @unique
-  name         String
-  avatarUrl    String?
-  role         UserRole  @default(MEMBER)
-  hourlyRate   Decimal?  @db.Decimal(10, 2)
-  timezone     String    @default("Europe/Moscow")
-  locale       String    @default("ru")
-  isActive     Boolean   @default(true)
-  
-  // Telegram pairing
-  tgChatId     String?   @unique
-  tgUsername   String?
-  
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-  deletedAt    DateTime?
+  id            String    @id @default(cuid())
+  email         String    @unique
+  emailVerified DateTime?
+  name          String
+  avatarUrl     String?
+  image         String?   // mirrors avatarUrl, populated by Auth.js providers
+  role          UserRole  @default(MEMBER)
+  hourlyRate    Decimal?  @db.Decimal(10, 2)
+  timezone      String    @default("Europe/Moscow")
+  locale        String    @default("ru")
+  isActive      Boolean   @default(true)
 
-  // Relations
+  // Telegram pairing
+  tgChatId      String?   @unique
+  tgUsername    String?
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  deletedAt     DateTime?
+
+  // Auth.js relations
+  accounts          Account[]
+  sessions          Session[]
+
+  // Domain relations
   consents          UserConsent[]
   agentDevices      AgentDevice[]
   ownedProjects     Project[]            @relation("ProjectOwner")
@@ -50,6 +56,45 @@ model User {
   notifications     Notification[]
 
   @@index([role, isActive])
+}
+
+// ----- Auth.js (NextAuth v5) adapter models -------------------------------
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expires      DateTime
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
 }
 
 enum UserRole {
