@@ -27,41 +27,23 @@ describe('enums', () => {
     expect(taskStatusSchema.options).toHaveLength(7);
   });
 
-  it('taskPrioritySchema has 4 priorities', () => {
+  it('priority/type enums + page size', () => {
     expect(taskPrioritySchema.options).toEqual(['LOW', 'MEDIUM', 'HIGH', 'URGENT']);
-  });
-
-  it('taskTypeSchema has 5 types', () => {
     expect(taskTypeSchema.options).toEqual(['TASK', 'BUG', 'FEATURE', 'EPIC', 'CHORE']);
-  });
-
-  it('TASKS_PAGE_SIZE is 50', () => {
     expect(TASKS_PAGE_SIZE).toBe(50);
   });
 });
 
 describe('tagsSchema', () => {
-  it('defaults to empty array when undefined', () => {
+  it('defaults to empty array when undefined; accepts array; splits CSV', () => {
     expect(tagsSchema.parse(undefined)).toEqual([]);
-  });
-
-  it('accepts an array of tags', () => {
     expect(tagsSchema.parse(['a', 'b'])).toEqual(['a', 'b']);
-  });
-
-  it('splits comma-separated string', () => {
     expect(tagsSchema.parse('foo, bar,baz')).toEqual(['foo', 'bar', 'baz']);
-  });
-
-  it('drops empty entries from string', () => {
     expect(tagsSchema.parse('foo,,bar,')).toEqual(['foo', 'bar']);
   });
 
-  it('rejects array entries longer than 32', () => {
+  it('rejects too-long entry and empty entry in array', () => {
     expect(tagsSchema.safeParse(['x'.repeat(33)]).success).toBe(false);
-  });
-
-  it('rejects empty string entry in array', () => {
     expect(tagsSchema.safeParse(['']).success).toBe(false);
   });
 });
@@ -79,89 +61,67 @@ describe('createTaskSchema', () => {
     }
   });
 
-  it('rejects bad projectKey', () => {
+  it('rejects bad projectKey (path: projectKey)', () => {
     const r = createTaskSchema.safeParse({ ...valid, projectKey: 'A' });
     expect(r.success).toBe(false);
     if (!r.success) expect(r.error.flatten().fieldErrors).toMatchObject({ projectKey: expect.any(Array) });
   });
 
-  it('rejects too-short title', () => {
-    const r = createTaskSchema.safeParse({ ...valid, title: 'A' });
-    expect(r.success).toBe(false);
-    if (!r.success) expect(r.error.flatten().fieldErrors).toMatchObject({ title: expect.any(Array) });
-  });
-
-  it('rejects title longer than 200', () => {
-    const r = createTaskSchema.safeParse({ ...valid, title: 'a'.repeat(201) });
-    expect(r.success).toBe(false);
+  it('rejects too-short / too-long title (path: title)', () => {
+    const tooShort = createTaskSchema.safeParse({ ...valid, title: 'A' });
+    expect(tooShort.success).toBe(false);
+    if (!tooShort.success) {
+      expect(tooShort.error.flatten().fieldErrors).toMatchObject({ title: expect.any(Array) });
+    }
+    expect(createTaskSchema.safeParse({ ...valid, title: 'a'.repeat(201) }).success).toBe(false);
   });
 
   it('trims title', () => {
-    const r = createTaskSchema.parse({ ...valid, title: '  Hello  ' });
-    expect(r.title).toBe('Hello');
+    expect(createTaskSchema.parse({ ...valid, title: '  Hello  ' }).title).toBe('Hello');
   });
 
-  // KNOWN BUG: `optionalText` uses `.optional().or(z.literal('').transform(...))` —
-  // `.optional()` matches '' first (empty string passes the string-with-max).
-  // The empty-to-undefined transform never fires. Locking in current behavior.
-  it('currently keeps empty-string description as ""', () => {
-    const r = createTaskSchema.parse({ ...valid, description: '' });
-    expect(r.description).toBe('');
+  it('coerces empty-string description to undefined', () => {
+    expect(createTaskSchema.parse({ ...valid, description: '' }).description).toBeUndefined();
   });
 
-  it('omits description entirely when not provided', () => {
-    const r = createTaskSchema.parse(valid);
-    expect(r.description).toBeUndefined();
+  it('coerces whitespace-only description to undefined', () => {
+    expect(createTaskSchema.parse({ ...valid, description: '   ' }).description).toBeUndefined();
+  });
+
+  it('trims description', () => {
+    expect(createTaskSchema.parse({ ...valid, description: '  body  ' }).description).toBe('body');
+  });
+
+  it('omits description when not provided', () => {
+    expect(createTaskSchema.parse(valid).description).toBeUndefined();
   });
 
   it('transforms empty assigneeId to undefined', () => {
-    const r = createTaskSchema.parse({ ...valid, assigneeId: '' });
-    expect(r.assigneeId).toBeUndefined();
+    expect(createTaskSchema.parse({ ...valid, assigneeId: '' }).assigneeId).toBeUndefined();
   });
 
-  it('rejects bad priority', () => {
-    const r = createTaskSchema.safeParse({ ...valid, priority: 'INSANE' });
-    expect(r.success).toBe(false);
+  it('rejects bad priority/type', () => {
+    expect(createTaskSchema.safeParse({ ...valid, priority: 'INSANE' }).success).toBe(false);
+    expect(createTaskSchema.safeParse({ ...valid, type: 'STORY' }).success).toBe(false);
   });
 
-  it('rejects bad type', () => {
-    const r = createTaskSchema.safeParse({ ...valid, type: 'STORY' });
-    expect(r.success).toBe(false);
+  it('coerces estimateHours, rejects negative', () => {
+    expect(createTaskSchema.parse({ ...valid, estimateHours: '5.5' }).estimateHours).toBe(5.5);
+    expect(createTaskSchema.safeParse({ ...valid, estimateHours: -1 }).success).toBe(false);
   });
 
-  it('coerces estimateHours from string', () => {
-    const r = createTaskSchema.parse({ ...valid, estimateHours: '5.5' });
-    expect(r.estimateHours).toBe(5.5);
+  it('accepts dueDate in YYYY-MM-DD or ISO datetime', () => {
+    expect(createTaskSchema.parse({ ...valid, dueDate: '2026-05-01' }).dueDate).toBeInstanceOf(Date);
+    expect(createTaskSchema.parse({ ...valid, dueDate: '2026-05-01T12:00:00Z' }).dueDate).toBeInstanceOf(Date);
   });
 
-  it('rejects negative estimateHours', () => {
-    const r = createTaskSchema.safeParse({ ...valid, estimateHours: -1 });
-    expect(r.success).toBe(false);
-  });
-
-  it('accepts dueDate as YYYY-MM-DD', () => {
-    const r = createTaskSchema.parse({ ...valid, dueDate: '2026-05-01' });
-    expect(r.dueDate).toBeInstanceOf(Date);
-  });
-
-  it('accepts dueDate as ISO datetime', () => {
-    const r = createTaskSchema.parse({ ...valid, dueDate: '2026-05-01T12:00:00Z' });
-    expect(r.dueDate).toBeInstanceOf(Date);
-  });
-
-  it('treats empty dueDate string as undefined', () => {
-    const r = createTaskSchema.parse({ ...valid, dueDate: '' });
-    expect(r.dueDate).toBeUndefined();
-  });
-
-  it('rejects invalid dueDate format', () => {
-    const r = createTaskSchema.safeParse({ ...valid, dueDate: '01/05/2026' });
-    expect(r.success).toBe(false);
+  it('treats empty dueDate as undefined; rejects bad format', () => {
+    expect(createTaskSchema.parse({ ...valid, dueDate: '' }).dueDate).toBeUndefined();
+    expect(createTaskSchema.safeParse({ ...valid, dueDate: '01/05/2026' }).success).toBe(false);
   });
 
   it('parses tags as comma-separated string', () => {
-    const r = createTaskSchema.parse({ ...valid, tags: 'urgent, frontend' });
-    expect(r.tags).toEqual(['urgent', 'frontend']);
+    expect(createTaskSchema.parse({ ...valid, tags: 'urgent, frontend' }).tags).toEqual(['urgent', 'frontend']);
   });
 });
 
@@ -174,10 +134,12 @@ describe('updateTaskSchema', () => {
     expect(updateTaskSchema.safeParse({ title: 'A' }).success).toBe(false);
   });
 
-  // Same KNOWN BUG as createTaskSchema: empty-string description stays ''.
-  it('currently keeps empty-string description as ""', () => {
-    const r = updateTaskSchema.parse({ description: '' });
-    expect(r.description).toBe('');
+  it('coerces empty-string description to undefined', () => {
+    expect(updateTaskSchema.parse({ description: '' }).description).toBeUndefined();
+  });
+
+  it('trims description on update', () => {
+    expect(updateTaskSchema.parse({ description: '  body  ' }).description).toBe('body');
   });
 });
 
@@ -186,7 +148,7 @@ describe('changeStatusSchema', () => {
     expect(changeStatusSchema.safeParse({ status: 'DONE' }).success).toBe(true);
   });
 
-  it('rejects unknown status', () => {
+  it('rejects unknown status (path: status)', () => {
     const r = changeStatusSchema.safeParse({ status: 'WIP' });
     expect(r.success).toBe(false);
     if (!r.success) expect(r.error.flatten().fieldErrors).toMatchObject({ status: expect.any(Array) });
@@ -194,43 +156,25 @@ describe('changeStatusSchema', () => {
 });
 
 describe('assignTaskSchema', () => {
-  it('accepts a userId', () => {
+  it('accepts userId, null, and transforms empty string to null', () => {
     expect(assignTaskSchema.safeParse({ assigneeId: 'u1' }).success).toBe(true);
-  });
-
-  it('accepts null', () => {
     expect(assignTaskSchema.safeParse({ assigneeId: null }).success).toBe(true);
-  });
-
-  it('transforms empty string to null', () => {
-    const r = assignTaskSchema.parse({ assigneeId: '' });
-    expect(r.assigneeId).toBeNull();
+    expect(assignTaskSchema.parse({ assigneeId: '' }).assigneeId).toBeNull();
   });
 });
 
 describe('addCommentSchema', () => {
-  it('accepts non-empty body', () => {
+  it('accepts non-empty body, trims', () => {
     expect(addCommentSchema.safeParse({ body: 'hi' }).success).toBe(true);
+    expect(addCommentSchema.parse({ body: '  hi  ' }).body).toBe('hi');
   });
 
-  it('rejects empty body', () => {
+  it('rejects empty / whitespace-only / too long body (path: body)', () => {
     const r = addCommentSchema.safeParse({ body: '' });
     expect(r.success).toBe(false);
     if (!r.success) expect(r.error.flatten().fieldErrors).toMatchObject({ body: expect.any(Array) });
-  });
-
-  it('rejects whitespace-only body (after trim)', () => {
-    const r = addCommentSchema.safeParse({ body: '   ' });
-    expect(r.success).toBe(false);
-  });
-
-  it('rejects body longer than 10000', () => {
+    expect(addCommentSchema.safeParse({ body: '   ' }).success).toBe(false);
     expect(addCommentSchema.safeParse({ body: 'x'.repeat(10_001) }).success).toBe(false);
-  });
-
-  it('trims body', () => {
-    const r = addCommentSchema.parse({ body: '  hi  ' });
-    expect(r.body).toBe('hi');
   });
 });
 
@@ -242,29 +186,18 @@ describe('taskListFilterSchema', () => {
     expect(r.dir).toBe('desc');
   });
 
-  it('coerces page from string', () => {
-    const r = taskListFilterSchema.parse({ page: '3' });
-    expect(r.page).toBe(3);
-  });
-
-  it('rejects page < 1', () => {
+  it('coerces page from string; rejects <1, non-integer', () => {
+    expect(taskListFilterSchema.parse({ page: '3' }).page).toBe(3);
     expect(taskListFilterSchema.safeParse({ page: 0 }).success).toBe(false);
-  });
-
-  it('rejects non-integer page', () => {
     expect(taskListFilterSchema.safeParse({ page: 1.5 }).success).toBe(false);
   });
 
-  it('rejects unknown sort field', () => {
+  it('rejects unknown sort/dir', () => {
     expect(taskListFilterSchema.safeParse({ sort: 'random' }).success).toBe(false);
-  });
-
-  it('rejects unknown dir', () => {
     expect(taskListFilterSchema.safeParse({ dir: 'sideways' }).success).toBe(false);
   });
 
   it('trims search query', () => {
-    const r = taskListFilterSchema.parse({ q: '  foo  ' });
-    expect(r.q).toBe('foo');
+    expect(taskListFilterSchema.parse({ q: '  foo  ' }).q).toBe('foo');
   });
 });

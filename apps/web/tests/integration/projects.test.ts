@@ -52,50 +52,30 @@ describe('createProject', () => {
     expect(p.ownerId).toBe(pm.id);
   });
 
-  it('MEMBER → INSUFFICIENT_PERMISSIONS', async () => {
-    const m = await makeUser({ role: 'MEMBER' });
-    await expectDomain(
-      createProject({ ...baseInput, key: 'CC', name: 'C' }, sessionUser(m)),
-      'INSUFFICIENT_PERMISSIONS',
-    );
-  });
-
-  it('VIEWER → INSUFFICIENT_PERMISSIONS', async () => {
-    const v = await makeUser({ role: 'VIEWER' });
-    await expectDomain(
-      createProject({ ...baseInput, key: 'DD', name: 'D' }, sessionUser(v)),
-      'INSUFFICIENT_PERMISSIONS',
-    );
-  });
-
-  it('duplicate key → CONFLICT', async () => {
-    const admin = await makeUser({ role: 'ADMIN' });
-    await createProject({ ...baseInput, key: 'EE', name: 'E1' }, sessionUser(admin));
-    await expectDomain(
-      createProject({ ...baseInput, key: 'EE', name: 'E2' }, sessionUser(admin)),
-      'CONFLICT',
-    );
-  });
-
-  it('error has status=403 for permission denied', async () => {
-    const m = await makeUser({ role: 'MEMBER' });
+  it.each([
+    ['MEMBER', 'CC'],
+    ['VIEWER', 'DD'],
+  ] as const)('%s → INSUFFICIENT_PERMISSIONS (status=403)', async (role, key) => {
+    const u = await makeUser({ role });
     try {
-      await createProject({ ...baseInput, key: 'XX', name: 'X' }, sessionUser(m));
+      await createProject({ ...baseInput, key, name: 'X' }, sessionUser(u));
       throw new Error('expected to throw');
     } catch (e) {
       expect(e).toBeInstanceOf(DomainError);
+      expect((e as DomainError).code).toBe('INSUFFICIENT_PERMISSIONS');
       expect((e as DomainError).status).toBe(403);
     }
   });
 
-  it('error has status=409 for duplicate key', async () => {
-    const a = await makeUser({ role: 'ADMIN' });
-    await createProject({ ...baseInput, key: 'YY', name: 'Y1' }, sessionUser(a));
+  it('duplicate key → CONFLICT (status=409)', async () => {
+    const admin = await makeUser({ role: 'ADMIN' });
+    await createProject({ ...baseInput, key: 'EE', name: 'E1' }, sessionUser(admin));
     try {
-      await createProject({ ...baseInput, key: 'YY', name: 'Y2' }, sessionUser(a));
+      await createProject({ ...baseInput, key: 'EE', name: 'E2' }, sessionUser(admin));
       throw new Error('expected to throw');
     } catch (e) {
       expect(e).toBeInstanceOf(DomainError);
+      expect((e as DomainError).code).toBe('CONFLICT');
       expect((e as DomainError).status).toBe(409);
     }
   });
@@ -170,7 +150,7 @@ describe('updateProject', () => {
 });
 
 describe('archiveProject', () => {
-  it('owner can archive', async () => {
+  it('owner can archive — sets status=ARCHIVED + archivedAt', async () => {
     const owner = await makeUser({ role: 'MEMBER' });
     const p = await makeProject({ ownerId: owner.id });
     const archived = await archiveProject(p.id, sessionUser(owner));
@@ -182,25 +162,18 @@ describe('archiveProject', () => {
     const owner = await makeUser({ role: 'MEMBER' });
     const admin = await makeUser({ role: 'ADMIN' });
     const p = await makeProject({ ownerId: owner.id });
-    const archived = await archiveProject(p.id, sessionUser(admin));
-    expect(archived.status).toBe('ARCHIVED');
+    expect((await archiveProject(p.id, sessionUser(admin))).status).toBe('ARCHIVED');
   });
 
-  it('LEAD member can archive', async () => {
+  it('LEAD can archive; CONTRIBUTOR cannot', async () => {
     const owner = await makeUser();
     const lead = await makeUser();
-    const p = await makeProject({ ownerId: owner.id });
-    await addMember(p.id, lead.id, 'LEAD');
-    const archived = await archiveProject(p.id, sessionUser(lead));
-    expect(archived.status).toBe('ARCHIVED');
-  });
-
-  it('CONTRIBUTOR cannot archive', async () => {
-    const owner = await makeUser();
     const c = await makeUser();
     const p = await makeProject({ ownerId: owner.id });
+    await addMember(p.id, lead.id, 'LEAD');
     await addMember(p.id, c.id, 'CONTRIBUTOR');
     await expectDomain(archiveProject(p.id, sessionUser(c)), 'INSUFFICIENT_PERMISSIONS');
+    expect((await archiveProject(p.id, sessionUser(lead))).status).toBe('ARCHIVED');
   });
 
   it('non-existent → NOT_FOUND', async () => {
@@ -285,20 +258,15 @@ describe('listProjectsForUser', () => {
 });
 
 describe('getProject', () => {
-  it('member can view by key', async () => {
+  it('member, owner, and PM can all view', async () => {
     const owner = await makeUser();
     const m = await makeUser();
+    const pm = await makeUser({ role: 'PM' });
     const p = await makeProject({ ownerId: owner.id, key: 'GP' });
     await addMember(p.id, m.id, 'CONTRIBUTOR');
-    const got = await getProject(p.key, sessionUser(m));
-    expect(got.id).toBe(p.id);
-  });
-
-  it('owner can view', async () => {
-    const owner = await makeUser();
-    const p = await makeProject({ ownerId: owner.id, key: 'GQ' });
-    const got = await getProject(p.key, sessionUser(owner));
-    expect(got.id).toBe(p.id);
+    expect((await getProject(p.key, sessionUser(owner))).id).toBe(p.id);
+    expect((await getProject(p.key, sessionUser(m))).id).toBe(p.id);
+    expect((await getProject(p.key, sessionUser(pm))).id).toBe(p.id);
   });
 
   it('non-member MEMBER → INSUFFICIENT_PERMISSIONS', async () => {
@@ -306,14 +274,6 @@ describe('getProject', () => {
     const stranger = await makeUser({ role: 'MEMBER' });
     const p = await makeProject({ ownerId: owner.id, key: 'GR' });
     await expectDomain(getProject(p.key, sessionUser(stranger)), 'INSUFFICIENT_PERMISSIONS');
-  });
-
-  it('PM (any) can view', async () => {
-    const owner = await makeUser();
-    const pm = await makeUser({ role: 'PM' });
-    const p = await makeProject({ ownerId: owner.id, key: 'GS' });
-    const got = await getProject(p.key, sessionUser(pm));
-    expect(got.id).toBe(p.id);
   });
 
   it('non-existent → NOT_FOUND', async () => {

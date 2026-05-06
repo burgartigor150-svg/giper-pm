@@ -9,7 +9,7 @@
     "lint": "next lint",
     "test": "vitest run -c vitest.unit.config.mts",
     "test:watch": "vitest -c vitest.unit.config.mts",
-    "test:integration": "vitest run -c vitest.integration.config.mts",
+    "test:integration": "vitest run -c vitest.integration.config.mts --pool=forks --poolOptions.forks.singleFork",
     "test:e2e": "playwright test",
     "clean": "rm -rf .next .turbo"
   },

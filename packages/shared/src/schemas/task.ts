@@ -20,10 +20,13 @@ export type TaskTypeInput = z.infer<typeof taskTypeSchema>;
 const optionalText = (max: number) =>
   z
     .string()
-    .trim()
     .max(max)
     .optional()
-    .or(z.literal('').transform(() => undefined));
+    .transform((v) => {
+      if (v === undefined) return undefined;
+      const t = v.trim();
+      return t === '' ? undefined : t;
+    });
 
 const optionalDate = z
   .union([z.string().datetime(), z.string().length(0), z.string().regex(/^\d{4}-\d{2}-\d{2}$/), z.date()])

@@ -1,0 +1,97 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @giper/shared test
+      - run: pnpm --filter @giper/web test
+
+  integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: giper_pm_test
+          POSTGRES_USER: giper
+          POSTGRES_PASSWORD: giper
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U giper -d giper_pm_test"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Push schema to test DB
+        env:
+          DATABASE_URL: postgresql://giper:giper@localhost:5433/giper_pm_test
+        run: pnpm --filter @giper/db exec prisma db push --skip-generate --accept-data-loss
+      - run: pnpm --filter @giper/web test:integration
+
+  e2e:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: giper_pm_test
+          POSTGRES_USER: giper
+          POSTGRES_PASSWORD: giper
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U giper -d giper_pm_test"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Push schema to test DB
+        env:
+          DATABASE_URL: postgresql://giper:giper@localhost:5433/giper_pm_test
+        run: pnpm --filter @giper/db exec prisma db push --skip-generate --accept-data-loss
+      - name: Install Playwright browsers
+        run: pnpm --filter @giper/web exec playwright install --with-deps chromium
+      - name: Run e2e
+        env:
+          CI: '1'
+        run: pnpm --filter @giper/web test:e2e
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: apps/web/test-results
+          retention-days: 7

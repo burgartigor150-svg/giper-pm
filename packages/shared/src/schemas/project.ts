@@ -14,10 +14,22 @@ export type MemberRoleInput = z.infer<typeof memberRoleSchema>;
 export const projectStatusSchema = z.enum(['ACTIVE', 'ON_HOLD', 'COMPLETED', 'ARCHIVED']);
 export type ProjectStatusInput = z.infer<typeof projectStatusSchema>;
 
+/** Trim, then collapse '' → undefined so callers don't have to. */
+const trimmedOptional = (max: number) =>
+  z
+    .string()
+    .max(max)
+    .optional()
+    .transform((v) => {
+      if (v === undefined) return undefined;
+      const t = v.trim();
+      return t === '' ? undefined : t;
+    });
+
 const baseProjectFields = {
   name: z.string().trim().min(2, 'Имя минимум 2 символа').max(80),
-  description: z.string().trim().max(2000).optional().or(z.literal('').transform(() => undefined)),
-  client: z.string().trim().max(120).optional().or(z.literal('').transform(() => undefined)),
+  description: trimmedOptional(2000),
+  client: trimmedOptional(120),
   deadline: z
     .union([z.string().datetime(), z.string().length(0), z.date()])
     .optional()
@@ -37,10 +49,14 @@ export const createProjectSchema = z.object({
 });
 export type CreateProjectInput = z.infer<typeof createProjectSchema>;
 
-export const updateProjectSchema = z.object({
-  ...baseProjectFields,
-  status: projectStatusSchema.optional(),
-});
+/**
+ * Update is a partial of base fields plus optional status.
+ * Every field is optional — callers can change just one at a time.
+ */
+export const updateProjectSchema = z
+  .object(baseProjectFields)
+  .partial()
+  .extend({ status: projectStatusSchema.optional() });
 export type UpdateProjectInput = z.infer<typeof updateProjectSchema>;
 
 export const addMemberSchema = z.object({

@@ -106,11 +106,14 @@ describe('logTimeSchema', () => {
     expect(r.taskId).toBeUndefined();
   });
 
-  // KNOWN BUG: same `.optional().or(z.literal('').transform(...))` pattern.
-  // Empty string stays '' rather than becoming undefined.
-  it('currently keeps empty-string note as ""', () => {
+  it('coerces empty-string note to undefined', () => {
     const r = logTimeSchema.parse({ startedAt, endedAt, note: '' });
-    expect(r.note).toBe('');
+    expect(r.note).toBeUndefined();
+  });
+
+  it('coerces whitespace-only note to undefined', () => {
+    const r = logTimeSchema.parse({ startedAt, endedAt, note: '   ' });
+    expect(r.note).toBeUndefined();
   });
 
   it('omits note entirely when not provided', () => {

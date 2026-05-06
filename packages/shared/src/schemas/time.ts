@@ -24,12 +24,39 @@ const dateTimeLike = z
   .transform((v) => (v instanceof Date ? v : new Date(v)))
   .refine((d) => !Number.isNaN(d.getTime()), { message: 'Некорректная дата' });
 
+const optionalNote = z
+  .string()
+  .max(2000)
+  .optional()
+  .transform((v) => {
+    if (v === undefined) return undefined;
+    const t = v.trim();
+    return t === '' ? undefined : t;
+  });
+
+const optionalTaskId = z
+  .string()
+  .optional()
+  .transform((v) => {
+    if (v === undefined || v === '') return undefined;
+    return v;
+  });
+
+const nullableTaskId = z
+  .string()
+  .nullable()
+  .optional()
+  .transform((v) => {
+    if (v === undefined || v === '' || v === null) return null;
+    return v;
+  });
+
 export const logTimeSchema = z
   .object({
-    taskId: z.string().min(1).optional().or(z.literal('').transform(() => undefined)),
+    taskId: optionalTaskId,
     startedAt: dateTimeLike,
     endedAt: dateTimeLike,
-    note: z.string().trim().max(2000).optional().or(z.literal('').transform(() => undefined)),
+    note: optionalNote,
   })
   .refine((d) => d.endedAt.getTime() > d.startedAt.getTime(), {
     message: 'Окончание должно быть позже начала',
@@ -39,10 +66,10 @@ export type LogTimeInput = z.infer<typeof logTimeSchema>;
 
 export const editTimeEntrySchema = z
   .object({
-    taskId: z.string().min(1).optional().nullable().or(z.literal('').transform(() => null)),
+    taskId: nullableTaskId,
     startedAt: dateTimeLike,
     endedAt: dateTimeLike,
-    note: z.string().trim().max(2000).optional().or(z.literal('').transform(() => undefined)),
+    note: optionalNote,
   })
   .refine((d) => d.endedAt.getTime() > d.startedAt.getTime(), {
     message: 'Окончание должно быть позже начала',

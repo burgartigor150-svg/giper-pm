@@ -1,12 +1,18 @@
 import type { PrismaClient } from '@giper/db';
 
 /**
- * Truncate every table that the suite writes to. Order matters because of
- * FK relations; use CASCADE for safety against accidental ordering bugs.
+ * Wipe every table that the suite writes to, in FK-safe order.
  *
- * Per CONVENTIONS.md: TRUNCATE is faster than drop/recreate between cases.
+ * Earlier we used `TRUNCATE ... CASCADE`, but that takes
+ * `AccessExclusiveLock` on every named table at once and can deadlock
+ * with concurrent in-flight Prisma queries from prior test fixtures
+ * (`40P01`). DELETE only takes row-level locks per table and we walk
+ * the dependency graph in a deterministic, leaves-first order.
+ *
+ * Sequence resetting isn't needed — every model uses cuid().
  */
-const TABLES = [
+const TABLES_IN_DELETE_ORDER = [
+  // Leaves first (no incoming FKs that matter).
   'AuditLog',
   'Notification',
   'Comment',
@@ -21,17 +27,20 @@ const TABLES = [
   'IntegrationSyncLog',
   'ProjectIntegration',
   'Integration',
+  // Task references Project + User.
   'Task',
   'ProjectMember',
   'Project',
+  // Auth tables reference User.
   'Session',
   'Account',
   'VerificationToken',
+  // User last.
   'User',
 ];
 
 export async function resetDb(prisma: PrismaClient): Promise<void> {
-  // One TRUNCATE statement is faster than many — CASCADE handles FKs.
-  const list = TABLES.map((t) => `"public"."${t}"`).join(', ');
-  await prisma.$executeRawUnsafe(`TRUNCATE TABLE ${list} RESTART IDENTITY CASCADE;`);
+  for (const table of TABLES_IN_DELETE_ORDER) {
+    await prisma.$executeRawUnsafe(`DELETE FROM "public"."${table}";`);
+  }
 }
