@@ -105,16 +105,32 @@ export class Bitrix24Client {
 
   /**
    * Iterate over a paginated method using `start=N` cursor.
-   * Yields one page at a time so the caller can persist incrementally.
+   *
+   * Two response shapes happen in the wild:
+   *   - Legacy methods: `result: T[]` directly (e.g. `user.get`,
+   *     `sonet_group.get`).
+   *   - Newer methods: `result: { tasks: T[] }` (e.g. `tasks.task.list`)
+   *     where `tasks` is the actual collection key.
+   *
+   * Caller passes the collection key for new-style methods via
+   * `collectionKey`. Default treats `result` itself as the array.
    */
   async *paginate<T>(
     method: string,
     params: Record<string, unknown> = {},
+    collectionKey?: string,
   ): AsyncGenerator<T[], void, void> {
     let start = 0;
     while (true) {
-      const page = await this.call<T[]>(method, { ...params, start });
-      const items = Array.isArray(page.result) ? page.result : [];
+      const page = await this.call<unknown>(method, { ...params, start });
+      const raw = page.result as unknown;
+      let items: T[];
+      if (collectionKey && raw && typeof raw === 'object') {
+        const v = (raw as Record<string, unknown>)[collectionKey];
+        items = Array.isArray(v) ? (v as T[]) : [];
+      } else {
+        items = Array.isArray(raw) ? (raw as T[]) : [];
+      }
       yield items;
       if (typeof page.next !== 'number') return;
       start = page.next;
@@ -122,9 +138,13 @@ export class Bitrix24Client {
   }
 
   /** Pulls all pages into a single array. Use only when you know the size is sane. */
-  async all<T>(method: string, params: Record<string, unknown> = {}): Promise<T[]> {
+  async all<T>(
+    method: string,
+    params: Record<string, unknown> = {},
+    collectionKey?: string,
+  ): Promise<T[]> {
     const out: T[] = [];
-    for await (const page of this.paginate<T>(method, params)) {
+    for await (const page of this.paginate<T>(method, params, collectionKey)) {
       out.push(...page);
     }
     return out;

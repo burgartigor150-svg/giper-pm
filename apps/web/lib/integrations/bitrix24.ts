@@ -41,21 +41,48 @@ export async function runBitrix24SyncNow(
     ? null
     : last ?? new Date(Date.now() - 30 * 24 * 3600_000);
 
-  // Resolve "me" = first admin's bitrixUserId. If they aren't yet linked
-  // to a Bitrix24 user (sync hasn't run yet, or emails don't match), fall
-  // back to the global mirror so we still pull data on the very first pass
-  // — syncUsers runs first and will fix the link before tasks are fetched.
-  let forBitrixUserId: string | null = null;
+  // Resolve "me" = first admin's bitrixUserId. The personal mirror
+  // requires this link to know what to scope to. On the very first run
+  // it isn't there yet — syncUsers (run first inside runBitrix24Sync)
+  // will populate it by matching emails. To keep the first pass scoped
+  // and not accidentally pull the entire portal, we run sync twice when
+  // the link isn't yet established: first to match users, then a second
+  // scoped sync. Both calls are cheap because empty.
   if (opts.mineOnly !== false) {
-    const me = await prisma.user.findFirst({
-      where: { role: 'ADMIN', isActive: true, bitrixUserId: { not: null } },
-      orderBy: { createdAt: 'asc' },
-      select: { bitrixUserId: true },
+    let me = await findLinkedAdmin();
+    if (!me?.bitrixUserId) {
+      // Run a "users-only" pass: temporarily scope to a non-existent id
+      // so projects+tasks return nothing, then re-resolve.
+      await runBitrix24Sync(prisma, client, {
+        since,
+        forBitrixUserId: '__bootstrap__', // any non-empty string nobody owns
+      });
+      me = await findLinkedAdmin();
+    }
+    if (me?.bitrixUserId) {
+      return runBitrix24Sync(prisma, client, {
+        since,
+        forBitrixUserId: me.bitrixUserId,
+      });
+    }
+    // Still not linked — emails don't match. Surface a no-op so the UI
+    // can show a clear "set up user mapping" message instead of silently
+    // dumping the whole portal.
+    return runBitrix24Sync(prisma, client, {
+      since,
+      forBitrixUserId: '__bootstrap__',
     });
-    forBitrixUserId = me?.bitrixUserId ?? null;
   }
 
-  return runBitrix24Sync(prisma, client, { since, forBitrixUserId });
+  return runBitrix24Sync(prisma, client, { since });
+}
+
+async function findLinkedAdmin() {
+  return prisma.user.findFirst({
+    where: { role: 'ADMIN', isActive: true, bitrixUserId: { not: null } },
+    orderBy: { createdAt: 'asc' },
+    select: { bitrixUserId: true },
+  });
 }
 
 export async function getBitrix24SyncStatus() {

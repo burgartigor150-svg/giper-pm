@@ -60,20 +60,15 @@ export async function syncTasks(
 
   const fallbackCreator = await firstAdminId(prisma);
 
-  // Build the list of (filter) calls we'll make. Each call paginates
-  // independently; we dedupe across calls by task id so a task that
-  // matches both filters is processed once.
+  // tasks.task.list supports a special `MEMBER` filter that matches any
+  // role on a task — RESPONSIBLE_ID, CREATED_BY, ACCOMPLICES, or AUDITORS —
+  // in a single call. That's "all my tasks including collabs": personal
+  // todos plus tasks I'm watching or co-working on. One pass, no dedupe.
   const baseFilter: Record<string, unknown> = {};
   if (opts.since) baseFilter['>=CHANGED_DATE'] = opts.since.toISOString();
+  if (opts.forBitrixUserId) baseFilter.MEMBER = opts.forBitrixUserId;
 
-  const filters: Record<string, unknown>[] = [];
-  if (opts.forBitrixUserId) {
-    filters.push({ ...baseFilter, RESPONSIBLE_ID: opts.forBitrixUserId });
-    filters.push({ ...baseFilter, CREATED_BY: opts.forBitrixUserId });
-  } else {
-    filters.push(baseFilter);
-  }
-
+  const filters: Record<string, unknown>[] = [baseFilter];
   const seenIds = new Set<string>();
 
   for (const filter of filters) {

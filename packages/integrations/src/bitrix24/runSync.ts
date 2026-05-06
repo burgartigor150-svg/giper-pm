@@ -71,13 +71,31 @@ export async function runBitrix24Sync(
 
   try {
     users = await syncUsers(prisma, client);
-    projects = await syncProjects(prisma, client, {
-      forBitrixUserId: opts.forBitrixUserId ?? null,
-    });
-    tasks = await syncTasks(prisma, client, {
-      since: opts.since ?? null,
-      forBitrixUserId: opts.forBitrixUserId ?? null,
-    });
+
+    if (opts.forBitrixUserId) {
+      // Personal-mirror path. The user can be a member of N groups but
+      // also an accomplice/auditor on tasks in OTHER groups they're not
+      // a member of (the "collab" case). Membership-only project sync
+      // would silently drop those tasks. Instead, collect every distinct
+      // GROUP_ID this user appears in across their MEMBER-tasks, and
+      // sync exactly those workgroups.
+      const groupIds = await collectMyGroupIds(
+        client,
+        opts.forBitrixUserId,
+        opts.since ?? null,
+      );
+      projects = await syncProjects(prisma, client, {
+        forBitrixUserId: opts.forBitrixUserId,
+        extraGroupIds: groupIds,
+      });
+      tasks = await syncTasks(prisma, client, {
+        since: opts.since ?? null,
+        forBitrixUserId: opts.forBitrixUserId,
+      });
+    } else {
+      projects = await syncProjects(prisma, client);
+      tasks = await syncTasks(prisma, client, { since: opts.since ?? null });
+    }
   } catch (e) {
     ok = false;
     error = e instanceof Error ? e.message : String(e);
@@ -118,6 +136,35 @@ async function ensureIntegrationRow(prisma: PrismaClient) {
     data: { kind: 'BITRIX24', name: NAME, config: {} },
     select: { id: true },
   });
+}
+
+/**
+ * Walk every task this user appears on (any role: responsible / creator /
+ * accomplice / auditor) and return the set of distinct workgroup IDs.
+ * Used to seed project sync so personal-mirror runs include groups where
+ * the user only watches but doesn't have membership.
+ *
+ * We pull just the GROUP_ID column so this stays cheap on large portals.
+ */
+async function collectMyGroupIds(
+  client: Bitrix24Client,
+  bitrixUserId: string,
+  since: Date | null,
+): Promise<string[]> {
+  const filter: Record<string, unknown> = { MEMBER: bitrixUserId };
+  if (since) filter['>=CHANGED_DATE'] = since.toISOString();
+
+  const ids = new Set<string>();
+  for await (const page of client.paginate<{ id: string; groupId?: string | null }>(
+    'tasks.task.list',
+    { filter, select: ['ID', 'GROUP_ID'], order: { ID: 'asc' } },
+    'tasks',
+  )) {
+    for (const t of page) {
+      if (t.groupId && t.groupId !== '0') ids.add(t.groupId);
+    }
+  }
+  return [...ids];
 }
 
 /** Watermark for incremental sync — the latest successful run's startedAt. */

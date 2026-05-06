@@ -17,6 +17,13 @@ export type SyncProjectsOptions = {
    * full data for each via `sonet_group.get` with `FILTER.ID = [...]`.
    */
   forBitrixUserId?: string | null;
+  /**
+   * Additional workgroup IDs to include even if the user isn't a member —
+   * for example, groups containing tasks where they're an accomplice or
+   * auditor (the "collab" case). Caller is expected to discover these via
+   * `tasks.task.list` with MEMBER filter and pass the deduped set here.
+   */
+  extraGroupIds?: string[];
 };
 
 /**
@@ -39,18 +46,25 @@ export async function syncProjects(
   let groups: BxWorkgroup[];
 
   if (opts.forBitrixUserId) {
-    // Step 1: get just the IDs of groups this user is in.
+    // Step 1: get IDs of groups this user is a member of.
     type Membership = { GROUP_ID: string; GROUP_NAME: string; ROLE: string };
     const memberships = await client.all<Membership>('sonet_group.user.groups', {
       USER_ID: opts.forBitrixUserId,
     });
-    if (memberships.length === 0) {
+    const ids = new Set<string>(memberships.map((m) => m.GROUP_ID));
+    // Step 2: union with any extra group ids the caller asked for (e.g.
+    // groups discovered through accomplice/auditor task membership).
+    for (const id of opts.extraGroupIds ?? []) ids.add(id);
+
+    if (ids.size === 0) {
       return { totalSeen: 0, created: 0, updated: 0, skipped: 0 };
     }
-    // Step 2: fetch full group records by ID list.
-    const ids = memberships.map((m) => m.GROUP_ID);
+    // Step 3: fetch full group records. Note: we DON'T filter ACTIVE/CLOSED
+    // here because a user might still have open tasks in a closed group;
+    // dropping such tasks silently would leak history. We surface the
+    // group's archived state into Project.status instead.
     groups = await client.all<BxWorkgroup>('sonet_group.get', {
-      FILTER: { ID: ids, ACTIVE: 'Y', CLOSED: 'N' },
+      FILTER: { ID: [...ids] },
     });
   } else {
     groups = await client.all<BxWorkgroup>('sonet_group.get', {
