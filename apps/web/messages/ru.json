@@ -54,7 +54,88 @@
   },
   "projects": {
     "title": "Проекты",
-    "stub": "Список проектов появится здесь."
+    "stub": "Список проектов появится здесь.",
+    "create": "Создать проект",
+    "empty": "Проектов пока нет.",
+    "scope": {
+      "label": "Видимость",
+      "mine": "Мои",
+      "all": "Все"
+    },
+    "filter": {
+      "status": "Статус",
+      "any": "Все",
+      "showArchived": "Показать архивные"
+    },
+    "table": {
+      "key": "Ключ",
+      "name": "Название",
+      "status": "Статус",
+      "client": "Клиент",
+      "owner": "Владелец",
+      "members": "Участников",
+      "tasks": "Задач",
+      "deadline": "Дедлайн",
+      "updated": "Обновлено"
+    },
+    "status": {
+      "ACTIVE": "Активный",
+      "ON_HOLD": "На паузе",
+      "COMPLETED": "Завершён",
+      "ARCHIVED": "В архиве"
+    },
+    "form": {
+      "title": "Новый проект",
+      "name": "Название",
+      "namePlaceholder": "Например, giper.fm",
+      "key": "Ключ",
+      "keyHint": "2–5 заглавных латинских букв. Будет префиксом задач: GFM-1, GFM-2…",
+      "description": "Описание",
+      "descriptionPlaceholder": "Чем занимается проект",
+      "client": "Клиент",
+      "deadline": "Дедлайн",
+      "submit": "Создать",
+      "cancel": "Отмена"
+    },
+    "detail": {
+      "overview": "Обзор",
+      "settings": "Настройки",
+      "members": "Участники",
+      "recentTasks": "Недавние задачи",
+      "noTasks": "Задач пока нет.",
+      "client": "Клиент",
+      "deadline": "Дедлайн",
+      "owner": "Владелец",
+      "createdAt": "Создан",
+      "noDeadline": "не задан",
+      "noClient": "—",
+      "archive": "Архивировать",
+      "archiveConfirm": "Архивировать проект?",
+      "saved": "Сохранено"
+    },
+    "settings": {
+      "title": "Настройки проекта",
+      "addMember": "Добавить участника",
+      "search": "Найти по имени или email",
+      "searchHint": "Введите минимум 2 символа",
+      "noResults": "Ничего не найдено",
+      "role": "Роль",
+      "remove": "Удалить",
+      "owner": "владелец",
+      "save": "Сохранить",
+      "cannotRemoveOwner": "Нельзя удалить владельца"
+    },
+    "memberRole": {
+      "LEAD": "LEAD",
+      "CONTRIBUTOR": "Участник",
+      "REVIEWER": "Ревьюер",
+      "OBSERVER": "Наблюдатель"
+    },
+    "errors": {
+      "INSUFFICIENT_PERMISSIONS": "Недостаточно прав",
+      "CONFLICT": "Конфликт. Возможно, такой ключ уже занят",
+      "VALIDATION": "Проверьте поля"
+    }
   },
   "time": {
     "title": "Время",
