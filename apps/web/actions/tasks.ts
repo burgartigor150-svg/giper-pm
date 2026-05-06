@@ -7,7 +7,6 @@ import {
   assignTaskSchema,
   changeStatusSchema,
   createTaskSchema,
-  taskStatusSchema,
   updateTaskSchema,
   type CreateTaskInput,
   type UpdateTaskInput,
@@ -204,9 +203,6 @@ export async function deleteTaskAction(
   revalidatePath(`/projects/${projectKey}/list`);
   redirect(`/projects/${projectKey}/list`);
 }
-
-// Re-export status enum for client typing convenience
-export const ALL_TASK_STATUSES = taskStatusSchema.options;
 
 // ----- Search (used by header timer widget) -----------------------------
 

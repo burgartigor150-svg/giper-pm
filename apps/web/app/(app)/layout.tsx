@@ -12,6 +12,9 @@ function buildNav(user: SessionUser): NavItem[] {
     { key: 'projects', href: '/projects' },
     { key: 'time', href: '/time' },
   ];
+  if (user.role === 'ADMIN' || user.role === 'PM') {
+    items.push({ key: 'team', href: '/team' });
+  }
   if (canSeeReports(user)) items.push({ key: 'reports', href: '/reports' });
   if (canSeeSettings(user)) items.push({ key: 'settings', href: '/settings' });
   return items;
