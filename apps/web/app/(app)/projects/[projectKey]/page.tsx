@@ -5,10 +5,12 @@ import { Button } from '@giper/ui/components/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '@giper/ui/components/Card';
 import { requireAuth } from '@/lib/auth';
 import { getProject } from '@/lib/projects';
-import { canEditProject } from '@/lib/permissions';
+import { canEditProject, canCreateTask } from '@/lib/permissions';
 import { DomainError } from '@/lib/errors';
 import { getT } from '@/lib/i18n';
 import { StatusBadge } from '@/components/domain/StatusBadge';
+import { TaskStatusBadge } from '@/components/domain/TaskStatusBadge';
+import { listRecentTasksForProject } from '@/lib/tasks';
 
 export default async function ProjectOverviewPage({
   params,
@@ -34,6 +36,12 @@ export default async function ProjectOverviewPage({
     { id: user.id, role: user.role },
     { ownerId: project.ownerId, members: project.members },
   );
+  const canCreate = canCreateTask(
+    { id: user.id, role: user.role },
+    { ownerId: project.ownerId, members: project.members },
+  );
+
+  const recent = await listRecentTasksForProject(project.id, 5);
 
   return (
     <div className="mx-auto max-w-5xl space-y-4">
@@ -43,13 +51,23 @@ export default async function ProjectOverviewPage({
           <h1 className="text-xl font-semibold">{project.name}</h1>
           <StatusBadge status={project.status} />
         </div>
-        {canEdit ? (
-          <Link href={`/projects/${project.key}/settings`}>
-            <Button variant="outline" size="sm">
-              {t('settings')}
-            </Button>
+        <div className="flex items-center gap-2">
+          <Link href={`/projects/${project.key}/list`}>
+            <Button variant="outline" size="sm">Задачи</Button>
           </Link>
-        ) : null}
+          {canCreate ? (
+            <Link href={`/projects/${project.key}/tasks/new`}>
+              <Button size="sm">+ Задача</Button>
+            </Link>
+          ) : null}
+          {canEdit ? (
+            <Link href={`/projects/${project.key}/settings`}>
+              <Button variant="outline" size="sm">
+                {t('settings')}
+              </Button>
+            </Link>
+          ) : null}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
@@ -119,7 +137,37 @@ export default async function ProjectOverviewPage({
         <CardHeader>
           <CardTitle>{t('recentTasks')}</CardTitle>
         </CardHeader>
-        <CardContent className="text-sm text-muted-foreground">{t('noTasks')}</CardContent>
+        <CardContent>
+          {recent.length === 0 ? (
+            <p className="text-sm text-muted-foreground">{t('noTasks')}</p>
+          ) : (
+            <ul className="flex flex-col">
+              {recent.map((task) => (
+                <li
+                  key={task.id}
+                  className="flex items-center gap-3 border-b border-border py-2 last:border-b-0"
+                >
+                  <Link
+                    href={`/projects/${project.key}/tasks/${task.number}`}
+                    className="font-mono text-xs text-muted-foreground hover:underline"
+                  >
+                    {project.key}-{task.number}
+                  </Link>
+                  <Link
+                    href={`/projects/${project.key}/tasks/${task.number}`}
+                    className="flex-1 text-sm hover:underline"
+                  >
+                    {task.title}
+                  </Link>
+                  <TaskStatusBadge status={task.status} />
+                  {task.assignee ? (
+                    <Avatar src={task.assignee.image} alt={task.assignee.name} className="h-6 w-6" />
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
       </Card>
     </div>
   );

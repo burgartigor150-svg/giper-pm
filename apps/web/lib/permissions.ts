@@ -46,6 +46,12 @@ export function canViewProject(user: SessionUser, project: ProjectForPerm): bool
 
 // ---- Task ---------------------------------------------------------------
 
+/** Create task: any project viewer, plus ADMIN/PM globally. VIEWER role excluded. */
+export function canCreateTask(user: SessionUser, project: ProjectForPerm): boolean {
+  if (user.role === 'VIEWER') return false;
+  return canViewProject(user, project);
+}
+
 /** Edit task: ADMIN, project owner, project LEAD, task creator, or assignee. */
 export function canEditTask(user: SessionUser, task: TaskForPerm): boolean {
   if (user.role === 'ADMIN') return true;
@@ -58,6 +64,14 @@ export function canEditTask(user: SessionUser, task: TaskForPerm): boolean {
 /** View task: same as viewing the parent project. */
 export function canViewTask(user: SessionUser, task: TaskForPerm): boolean {
   return canViewProject(user, task.project);
+}
+
+/** Delete task (hard delete): ADMIN, project owner, or project LEAD. PM at global level too. */
+export function canDeleteTask(user: SessionUser, task: TaskForPerm): boolean {
+  if (user.role === 'ADMIN') return true;
+  if (task.project.ownerId === user.id) return true;
+  if (user.role === 'PM') return true;
+  return !!task.project.members?.some((m) => m.userId === user.id && m.role === 'LEAD');
 }
 
 // ---- Time ---------------------------------------------------------------

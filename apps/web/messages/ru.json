@@ -198,6 +198,112 @@
       "VALIDATION": "Проверьте поля"
     }
   },
+  "tasks": {
+    "list": {
+      "title": "Задачи",
+      "create": "Новая задача",
+      "empty": "Задач пока нет.",
+      "search": "Поиск по названию",
+      "all": "Все",
+      "page": "Страница {page} из {pageCount}",
+      "prev": "Назад",
+      "next": "Вперёд",
+      "filters": {
+        "status": "Статус",
+        "priority": "Приоритет",
+        "assignee": "Исполнитель",
+        "anyAssignee": "Любой",
+        "unassigned": "Не назначен"
+      },
+      "table": {
+        "number": "№",
+        "title": "Название",
+        "status": "Статус",
+        "assignee": "Исполнитель",
+        "estimate": "Оценка",
+        "due": "Срок",
+        "priority": "Приоритет"
+      }
+    },
+    "status": {
+      "BACKLOG": "Бэклог",
+      "TODO": "К работе",
+      "IN_PROGRESS": "В работе",
+      "REVIEW": "На ревью",
+      "BLOCKED": "Заблокирована",
+      "DONE": "Готово",
+      "CANCELED": "Отменена"
+    },
+    "priority": {
+      "LOW": "Низкий",
+      "MEDIUM": "Средний",
+      "HIGH": "Высокий",
+      "URGENT": "Срочный"
+    },
+    "type": {
+      "TASK": "Задача",
+      "BUG": "Баг",
+      "FEATURE": "Фича",
+      "EPIC": "Эпик",
+      "CHORE": "Рутина"
+    },
+    "form": {
+      "title": "Название",
+      "titlePlaceholder": "Что нужно сделать",
+      "description": "Описание",
+      "descriptionPlaceholder": "Подробности задачи (опционально)",
+      "priority": "Приоритет",
+      "type": "Тип",
+      "assignee": "Исполнитель",
+      "estimate": "Оценка, ч",
+      "due": "Срок",
+      "tags": "Теги",
+      "tagsPlaceholder": "через запятую",
+      "submit": "Создать",
+      "cancel": "Отмена",
+      "save": "Сохранить"
+    },
+    "detail": {
+      "back": "← К списку задач",
+      "editTitle": "Редактировать заголовок",
+      "saveTitle": "Сохранить",
+      "cancelTitle": "Отмена",
+      "description": "Описание",
+      "descriptionEmpty": "Описание не задано.",
+      "editDescription": "Редактировать",
+      "timeline": "Лента",
+      "noTimeline": "Активности пока нет.",
+      "commentPlaceholder": "Добавить комментарий…",
+      "addComment": "Отправить",
+      "startTimer": "Запустить таймер",
+      "delete": "Удалить задачу",
+      "deleteConfirm": "Удалить задачу безвозвратно? История комментариев пропадёт.",
+      "sidebar": {
+        "status": "Статус",
+        "assignee": "Исполнитель",
+        "priority": "Приоритет",
+        "type": "Тип",
+        "estimate": "Оценка, ч",
+        "due": "Срок",
+        "tags": "Теги",
+        "creator": "Создал",
+        "started": "Начата",
+        "completed": "Завершена",
+        "unassigned": "Не назначен",
+        "noEstimate": "—",
+        "noDue": "—",
+        "noTags": "—"
+      },
+      "statusChange": "{actor} изменил(а) статус: {from} → {to}",
+      "statusChangeInitial": "{actor} установил(а) статус: {to}"
+    },
+    "errors": {
+      "INSUFFICIENT_PERMISSIONS": "Недостаточно прав",
+      "CONFLICT": "Конфликт",
+      "VALIDATION": "Проверьте поля",
+      "NOT_FOUND": "Задача не найдена"
+    }
+  },
   "time": {
     "title": "Время",
     "stub": "Лог времени появится здесь."
