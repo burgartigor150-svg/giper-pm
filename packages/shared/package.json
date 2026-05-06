@@ -11,13 +11,15 @@
   },
   "scripts": {
     "lint": "echo 'no lint configured for shared'",
-    "test": "echo 'no tests yet'",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "clean": "rm -rf node_modules .turbo"
   },
   "dependencies": {
     "zod": "^3.23.8"
   },
   "devDependencies": {
-    "typescript": "^5.6.3"
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8"
   }
 }

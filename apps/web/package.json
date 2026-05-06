@@ -7,8 +7,9 @@
     "build": "next build",
     "start": "next start --port 3000",
     "lint": "next lint",
-    "test": "vitest run",
-    "test:watch": "vitest",
+    "test": "vitest run -c vitest.unit.config.mts",
+    "test:watch": "vitest -c vitest.unit.config.mts",
+    "test:integration": "vitest run -c vitest.integration.config.mts",
     "test:e2e": "playwright test",
     "clean": "rm -rf .next .turbo"
   },
@@ -32,6 +33,7 @@
   "devDependencies": {
     "@playwright/test": "^1.59.1",
     "@types/bcryptjs": "^2.4.6",
+    "@vitejs/plugin-react": "^4.3.4",
     "@types/node": "^22.9.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
@@ -41,6 +43,8 @@
     "playwright": "^1.59.1",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.14",
-    "typescript": "^5.6.3"
+    "typescript": "^5.6.3",
+    "vite-tsconfig-paths": "^5.1.4",
+    "vitest": "^2.1.8"
   }
 }
