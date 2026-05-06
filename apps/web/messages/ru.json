@@ -6,15 +6,11 @@
   "auth": {
     "login": {
       "title": "Вход в giper-pm",
-      "subtitle": "Войдите через Google или по email",
-      "googleButton": "Войти через Google",
-      "or": "или",
-      "emailPlaceholder": "you@giper.fm",
-      "emailButton": "Получить ссылку на email"
-    },
-    "verifyRequest": {
-      "title": "Проверьте почту",
-      "body": "Мы отправили ссылку для входа на ваш email. Откройте её в этом же браузере."
+      "subtitle": "Введите email и пароль",
+      "password": "Пароль",
+      "signInButton": "Войти",
+      "invalidCredentials": "Неверный email или пароль",
+      "genericError": "Не удалось войти. Попробуйте ещё раз."
     },
     "error": {
       "notAllowed": {
@@ -32,6 +28,70 @@
       "back": "Вернуться ко входу"
     }
   },
+  "security": {
+    "title": "Безопасность",
+    "mustChange": "Перед началом работы смените временный пароль.",
+    "currentPassword": "Текущий пароль",
+    "newPassword": "Новый пароль",
+    "confirmPassword": "Повторите новый пароль",
+    "submit": "Сменить пароль",
+    "changed": "Пароль изменён. Войдите снова с новым паролем.",
+    "lastChanged": "Пароль последний раз менялся: {date}",
+    "neverChanged": "Пароль ни разу не менялся."
+  },
+  "users": {
+    "title": "Пользователи",
+    "create": "Добавить пользователя",
+    "newTitle": "Новый пользователь",
+    "table": {
+      "name": "Имя",
+      "email": "Email",
+      "role": "Роль",
+      "status": "Статус",
+      "created": "Создан"
+    },
+    "status": {
+      "active": "Активен",
+      "inactive": "Деактивирован",
+      "mustChange": "Требует смены пароля"
+    },
+    "form": {
+      "name": "Имя",
+      "email": "Email",
+      "role": "Роль",
+      "submit": "Создать",
+      "cancel": "Отмена",
+      "save": "Сохранить"
+    },
+    "role": {
+      "ADMIN": "Администратор",
+      "PM": "Project Manager",
+      "MEMBER": "Участник",
+      "VIEWER": "Наблюдатель"
+    },
+    "actions": {
+      "edit": "Редактировать",
+      "deactivate": "Деактивировать",
+      "activate": "Активировать",
+      "resetPassword": "Сбросить пароль",
+      "deactivateConfirm": "Деактивировать пользователя?",
+      "activateConfirm": "Активировать пользователя?",
+      "resetConfirm": "Сбросить пароль и выдать временный?"
+    },
+    "tempPassword": {
+      "title": "Временный пароль создан",
+      "subtitle": "Скопируйте и передайте пользователю. Пароль показывается только один раз.",
+      "copy": "Скопировать",
+      "copied": "Скопировано",
+      "close": "Готово"
+    },
+    "errors": {
+      "INSUFFICIENT_PERMISSIONS": "Недостаточно прав",
+      "CONFLICT": "Пользователь с таким email уже существует",
+      "VALIDATION": "Проверьте поля",
+      "NOT_FOUND": "Пользователь не найден"
+    }
+  },
   "nav": {
     "dashboard": "Дашборд",
     "projects": "Проекты",
@@ -45,6 +105,7 @@
     "openMenu": "Открыть меню",
     "closeMenu": "Закрыть меню",
     "userMenu": {
+      "security": "Безопасность",
       "signOut": "Выйти"
     }
   },

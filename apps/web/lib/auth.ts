@@ -1,7 +1,6 @@
 import NextAuth, { type DefaultSession, type NextAuthConfig } from 'next-auth';
-import Google from 'next-auth/providers/google';
-import Resend from 'next-auth/providers/resend';
-import { PrismaAdapter } from '@auth/prisma-adapter';
+import Credentials from 'next-auth/providers/credentials';
+import bcrypt from 'bcryptjs';
 import { prisma, type UserRole } from '@giper/db';
 import { DomainError } from './errors';
 
@@ -10,63 +9,104 @@ declare module 'next-auth' {
     user: DefaultSession['user'] & {
       id: string;
       role: UserRole;
+      mustChangePassword: boolean;
     };
+  }
+  interface User {
+    role?: UserRole;
+    mustChangePassword?: boolean;
   }
 }
 
-const providers: NextAuthConfig['providers'] = [
-  Google({
-    clientId: process.env.GOOGLE_CLIENT_ID,
-    clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-    allowDangerousEmailAccountLinking: true,
-  }),
-];
-
-if (process.env.RESEND_API_KEY) {
-  providers.push(
-    Resend({
-      apiKey: process.env.RESEND_API_KEY,
-      from: process.env.RESEND_FROM ?? 'no-reply@giper.fm',
-    }),
-  );
+declare module 'next-auth/jwt' {
+  interface JWT {
+    id?: string;
+    role?: UserRole;
+    mustChangePassword?: boolean;
+  }
 }
 
-export const { handlers, auth, signIn, signOut } = NextAuth({
-  adapter: PrismaAdapter(prisma),
-  session: { strategy: 'database' },
+export const authConfig: NextAuthConfig = {
+  // Credentials provider requires JWT sessions (database sessions are not supported).
+  session: { strategy: 'jwt' },
   pages: {
     signIn: '/login',
     error: '/login/error',
-    verifyRequest: '/login/verify-request',
   },
-  providers,
+  providers: [
+    Credentials({
+      name: 'Credentials',
+      credentials: {
+        email: { label: 'Email', type: 'email' },
+        password: { label: 'Password', type: 'password' },
+      },
+      async authorize(creds) {
+        const email = String(creds?.email ?? '').trim().toLowerCase();
+        const password = String(creds?.password ?? '');
+        if (!email || !password) return null;
+
+        const user = await prisma.user.findUnique({
+          where: { email },
+          select: {
+            id: true, email: true, name: true, image: true,
+            role: true, isActive: true,
+            passwordHash: true, mustChangePassword: true,
+          },
+        });
+        if (!user || !user.isActive || !user.passwordHash) return null;
+
+        const ok = await bcrypt.compare(password, user.passwordHash);
+        if (!ok) return null;
+
+        return {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          image: user.image,
+          role: user.role,
+          mustChangePassword: user.mustChangePassword,
+        };
+      },
+    }),
+  ],
   callbacks: {
-    // allowSignUp: false — пускаем только тех, кто уже есть в БД.
-    async signIn({ user }) {
-      if (!user.email) return false;
-      const existing = await prisma.user.findUnique({
-        where: { email: user.email },
-        select: { id: true, isActive: true },
-      });
-      if (!existing) return '/login/error?reason=not_allowed';
-      if (!existing.isActive) return '/login/error?reason=disabled';
-      return true;
+    async jwt({ token, user, trigger }) {
+      // First sign-in: persist domain claims into the token.
+      if (user) {
+        token.id = user.id as string;
+        token.role = (user as { role?: UserRole }).role ?? token.role;
+        token.mustChangePassword = (user as { mustChangePassword?: boolean }).mustChangePassword ?? false;
+      }
+      // Refresh role/flag on explicit update() or every revalidation;
+      // cheap because indexed PK lookup.
+      if (trigger === 'update' && token.id) {
+        const fresh = await prisma.user.findUnique({
+          where: { id: token.id },
+          select: { role: true, isActive: true, mustChangePassword: true },
+        });
+        if (!fresh || !fresh.isActive) {
+          // Force sign-out by returning empty token.
+          return {};
+        }
+        token.role = fresh.role;
+        token.mustChangePassword = fresh.mustChangePassword;
+      }
+      return token;
     },
-    async session({ session, user }) {
-      const dbUser = await prisma.user.findUnique({
-        where: { id: user.id },
-        select: { role: true },
-      });
-      session.user.id = user.id;
-      session.user.role = dbUser?.role ?? ('MEMBER' as UserRole);
+    async session({ session, token }) {
+      if (token.id) session.user.id = token.id;
+      if (token.role) session.user.role = token.role;
+      session.user.mustChangePassword = !!token.mustChangePassword;
       return session;
     },
   },
-});
+};
+
+export const { handlers, auth, signIn, signOut } = NextAuth(authConfig);
 
 /**
  * Throws DomainError('UNAUTHENTICATED') when there is no active session.
- * Use in Server Actions and Server Components. Returns the typed user.
+ * Use in Server Actions and Server Components.
  */
 export async function requireAuth() {
   const session = await auth();

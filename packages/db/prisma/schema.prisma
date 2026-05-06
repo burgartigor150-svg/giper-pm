@@ -29,6 +29,11 @@ model User {
   locale        String    @default("ru")
   isActive      Boolean   @default(true)
 
+  // Credentials auth
+  passwordHash           String?
+  mustChangePassword     Boolean   @default(false)
+  lastPasswordChangeAt   DateTime?
+
   // Telegram pairing
   tgChatId      String?   @unique
   tgUsername    String?

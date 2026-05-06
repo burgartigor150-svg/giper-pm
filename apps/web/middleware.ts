@@ -1,27 +1,26 @@
-import { NextResponse, type NextRequest } from 'next/server';
+import NextAuth from 'next-auth';
+import { NextResponse } from 'next/server';
+import { authEdgeConfig } from '@/lib/auth.edge';
 
-// In Auth.js v5 with `session.strategy: 'database'`, the middleware (edge runtime)
-// can't verify the session against Prisma. So we do a coarse check here —
-// "is there ANY auth.js session cookie?" — and rely on requireAuth() in Server
-// Components for the strict check. This means a stale/invalid cookie will reach
-// the Server Component, which will throw and redirect; that's intentional.
+const { auth } = NextAuth(authEdgeConfig);
 
-const SESSION_COOKIE_NAMES = ['authjs.session-token', '__Secure-authjs.session-token'];
-
-export function middleware(req: NextRequest) {
+export default auth((req) => {
   const { pathname } = req.nextUrl;
 
   const isPublic =
     pathname.startsWith('/login') || pathname.startsWith('/api/auth') || pathname === '/';
-  if (isPublic) return NextResponse.next();
 
-  const hasSession = SESSION_COOKIE_NAMES.some((name) => req.cookies.has(name));
-  if (hasSession) return NextResponse.next();
+  if (!isPublic && !req.auth) {
+    const loginUrl = new URL('/login', req.nextUrl);
+    loginUrl.searchParams.set('callbackUrl', pathname);
+    return Response.redirect(loginUrl);
+  }
 
-  const loginUrl = new URL('/login', req.nextUrl);
-  loginUrl.searchParams.set('callbackUrl', pathname);
-  return NextResponse.redirect(loginUrl);
-}
+  // Forward the current pathname so server layouts can read it via headers().
+  const res = NextResponse.next();
+  res.headers.set('x-pathname', pathname);
+  return res;
+});
 
 export const config = {
   matcher: ['/((?!_next/static|_next/image|favicon\\.ico|.*\\.(?:png|jpg|jpeg|svg|gif|webp)).*)'],

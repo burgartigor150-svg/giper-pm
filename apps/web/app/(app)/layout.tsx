@@ -1,3 +1,5 @@
+import { headers } from 'next/headers';
+import { redirect } from 'next/navigation';
 import { requireAuth } from '@/lib/auth';
 import { canSeeReports, canSeeSettings, type SessionUser } from '@/lib/permissions';
 import { AppShell } from '@/components/domain/AppShell';
@@ -16,6 +18,13 @@ function buildNav(user: SessionUser): NavItem[] {
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const sessionUser = await requireAuth();
+
+  // Force users with a fresh/temporary password to rotate it before they can do anything.
+  if (sessionUser.mustChangePassword) {
+    const path = (await headers()).get('x-pathname') ?? '';
+    if (!path.startsWith('/me/security')) redirect('/me/security');
+  }
+
   const navItems = buildNav({ id: sessionUser.id, role: sessionUser.role });
 
   return (

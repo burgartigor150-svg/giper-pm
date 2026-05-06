@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { LogOut, ChevronDown } from 'lucide-react';
+import Link from 'next/link';
+import { LogOut, ChevronDown, KeyRound } from 'lucide-react';
 import { Avatar } from '@giper/ui/components/Avatar';
 import { cn } from '@giper/ui/cn';
 import { useT } from '@/lib/useT';
@@ -61,11 +62,20 @@ export function UserMenu({ name, email, image }: Props) {
               <div className="truncate text-xs text-muted-foreground">{email}</div>
             ) : null}
           </div>
+          <Link
+            href="/me/security"
+            role="menuitem"
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+            onClick={() => setOpen(false)}
+          >
+            <KeyRound className="h-4 w-4" />
+            {t('security')}
+          </Link>
           <form action={signOutAction}>
             <button
               type="submit"
               role="menuitem"
-              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+              className="flex w-full items-center gap-2 border-t border-border px-3 py-2 text-left text-sm hover:bg-accent hover:text-accent-foreground"
             >
               <LogOut className="h-4 w-4" />
               {t('signOut')}
