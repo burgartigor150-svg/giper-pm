@@ -1,6 +1,7 @@
-import { prisma, Prisma } from '@giper/db';
+import { prisma } from '@giper/db';
 import type { CreateTaskInput } from '@giper/shared';
 import { DomainError } from '../errors';
+import { isUniqueConstraintError } from '../prisma-errors';
 import { canCreateTask, type SessionUser } from '../permissions';
 import { auditTask } from '../audit';
 
@@ -78,7 +79,7 @@ export async function createTask(input: CreateTaskInput, user: SessionUser) {
 
       return created;
     } catch (e) {
-      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+      if (isUniqueConstraintError(e)) {
         lastErr = e;
         // Jittered backoff: 0..50ms × attempt, prevents thundering herd of retries.
         await new Promise((r) => setTimeout(r, Math.floor(Math.random() * 50) * (attempt + 1)));

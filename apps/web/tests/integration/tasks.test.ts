@@ -1,24 +1,15 @@
 import { describe, it, expect } from 'vitest';
 import { prisma, type UserRole, type MemberRole } from '@giper/db';
 import {
-  addComment,
-  assignTask,
-  changeTaskStatus,
-  createTask,
-  deleteTask,
-  getTask,
-  listRecentTasksForProject,
-  listTasksForBoard,
-  listTasksForProject,
-  updateTask,
+  addComment, assignTask, changeTaskStatus, createTask, deleteTask, getTask,
+  listRecentTasksForProject, listTasksForBoard, listTasksForProject, updateTask,
 } from '@/lib/tasks';
 import { DomainError } from '@/lib/errors';
 import { TASKS_PAGE_SIZE, type TaskListFilter } from '@giper/shared';
 import { addMember, makeProject, makeTask, makeUser, sessionUser } from './helpers/factories';
 
-const F = (over: Partial<TaskListFilter> = {}): TaskListFilter => ({
-  page: 1, sort: 'number', dir: 'desc', ...over,
-});
+const F = (over: Partial<TaskListFilter> = {}): TaskListFilter =>
+  ({ page: 1, sort: 'number', dir: 'desc', ...over });
 
 /** Project + owner + optional extra members in one shot. */
 async function scaffold(
@@ -27,13 +18,11 @@ async function scaffold(
 ) {
   const owner = await makeUser({ role: ownerRole });
   const project = await makeProject({ ownerId: owner.id });
-  const extras = await Promise.all(
-    members.map(async (m) => {
-      const u = await makeUser({ role: m.role ?? 'MEMBER' });
-      await addMember(project.id, u.id, m.member ?? 'CONTRIBUTOR');
-      return u;
-    }),
-  );
+  const extras = await Promise.all(members.map(async (m) => {
+    const u = await makeUser({ role: m.role ?? 'MEMBER' });
+    await addMember(project.id, u.id, m.member ?? 'CONTRIBUTOR');
+    return u;
+  }));
   return { owner, project, extras };
 }
 const auditCount = (entityId: string, action: string) =>
@@ -62,10 +51,7 @@ describe('createTask', () => {
   it('first task gets number 1; ADMIN creates outside membership', async () => {
     const { project } = await scaffold();
     const admin = await makeUser({ role: 'ADMIN' });
-    const t = await createTask(
-      { projectKey: project.key, title: 'first', tags: [] },
-      sessionUser(admin),
-    );
+    const t = await createTask({ projectKey: project.key, title: 'first', tags: [] }, sessionUser(admin));
     expect(t.number).toBe(1);
   });
 
@@ -73,17 +59,15 @@ describe('createTask', () => {
     const { project } = await scaffold();
     const viewer = await makeUser({ role: 'VIEWER' });
     await addMember(project.id, viewer.id, 'OBSERVER');
-    await expect(
-      createTask({ projectKey: project.key, title: 'x', tags: [] }, sessionUser(viewer)),
-    ).rejects.toMatchObject({ code: 'INSUFFICIENT_PERMISSIONS', status: 403 });
+    await expect(createTask({ projectKey: project.key, title: 'x', tags: [] }, sessionUser(viewer)))
+      .rejects.toMatchObject({ code: 'INSUFFICIENT_PERMISSIONS', status: 403 });
   });
 
   it('non-member MEMBER → 403', async () => {
     const { project } = await scaffold();
     const stranger = await makeUser({ role: 'MEMBER' });
-    await expect(
-      createTask({ projectKey: project.key, title: 'x', tags: [] }, sessionUser(stranger)),
-    ).rejects.toMatchObject({ code: 'INSUFFICIENT_PERMISSIONS' });
+    await expect(createTask({ projectKey: project.key, title: 'x', tags: [] }, sessionUser(stranger)))
+      .rejects.toMatchObject({ code: 'INSUFFICIENT_PERMISSIONS' });
   });
 
   it('assignee not in project → VALIDATION 400', async () => {
@@ -109,20 +93,16 @@ describe('createTask', () => {
 
   it('10 parallel calls all succeed with unique sequential numbers', async () => {
     const { owner, project } = await scaffold();
-    const results = await Promise.all(
-      Array.from({ length: 10 }, (_, i) =>
-        createTask({ projectKey: project.key, title: `p-${i}`, tags: [] }, sessionUser(owner)),
-      ),
-    );
+    const results = await Promise.all(Array.from({ length: 10 }, (_, i) =>
+      createTask({ projectKey: project.key, title: `p-${i}`, tags: [] }, sessionUser(owner))));
     expect(results.map((r) => r.number).sort((a, b) => a - b)).toEqual([1,2,3,4,5,6,7,8,9,10]);
     expect(await prisma.task.count({ where: { projectId: project.id } })).toBe(10);
   });
 
   it('project not found → NOT_FOUND', async () => {
     const owner = await makeUser({ role: 'ADMIN' });
-    await expect(
-      createTask({ projectKey: 'XX', title: 'x', tags: [] }, sessionUser(owner)),
-    ).rejects.toMatchObject({ code: 'NOT_FOUND', status: 404 });
+    await expect(createTask({ projectKey: 'XX', title: 'x', tags: [] }, sessionUser(owner)))
+      .rejects.toMatchObject({ code: 'NOT_FOUND', status: 404 });
   });
 });
 
@@ -140,52 +120,33 @@ describe('updateTask', () => {
     await addMember(project.id, lead.id, 'LEAD');
     await addMember(project.id, assignee.id, 'CONTRIBUTOR');
     await addMember(project.id, creator.id, 'CONTRIBUTOR');
-
     const tCreator = await makeTask({ projectId: project.id, creatorId: creator.id });
-    const tAssignee = await makeTask({
-      projectId: project.id, creatorId: owner.id, assigneeId: assignee.id,
-    });
+    const tAssignee = await makeTask({ projectId: project.id, creatorId: owner.id, assigneeId: assignee.id });
     const tLead = await makeTask({ projectId: project.id, creatorId: owner.id });
     const tOwner = await makeTask({ projectId: project.id, creatorId: lead.id });
     const tAdmin = await makeTask({ projectId: project.id, creatorId: owner.id });
-
-    for (const [t, actor] of [
-      [tCreator, creator],
-      [tAssignee, assignee],
-      [tLead, lead],
-      [tOwner, owner],
-      [tAdmin, admin],
-    ] as const) {
-      await expect(
-        updateTask(t.id, { title: 'new', tags: [] }, sessionUser(actor)),
-      ).resolves.toBeTruthy();
+    for (const [t, actor] of [[tCreator, creator], [tAssignee, assignee], [tLead, lead], [tOwner, owner], [tAdmin, admin]] as const) {
+      await expect(updateTask(t.id, { title: 'new', tags: [] }, sessionUser(actor))).resolves.toBeTruthy();
     }
   });
 
   it('random MEMBER cannot edit', async () => {
     const { owner, project, extras } = await scaffold('MEMBER', [{}]);
     const task = await makeTask({ projectId: project.id, creatorId: owner.id });
-    await expect(
-      updateTask(task.id, { title: 'x', tags: [] }, sessionUser(extras[0]!)),
-    ).rejects.toMatchObject({ code: 'INSUFFICIENT_PERMISSIONS' });
+    await expect(updateTask(task.id, { title: 'x', tags: [] }, sessionUser(extras[0]!)))
+      .rejects.toMatchObject({ code: 'INSUFFICIENT_PERMISSIONS' });
   });
 
   it('audit lists only changed keys; description body becomes <changed>', async () => {
     const { owner, project } = await scaffold();
-    const task = await makeTask({
-      projectId: project.id, creatorId: owner.id, title: 'old',
-    });
-    await prisma.task.update({
-      where: { id: task.id }, data: { description: 'old desc' },
-    });
+    const task = await makeTask({ projectId: project.id, creatorId: owner.id, title: 'old' });
+    await prisma.task.update({ where: { id: task.id }, data: { description: 'old desc' } });
     await updateTask(
       task.id,
       { title: 'new title', description: 'secret', priority: 'HIGH', tags: [] },
       sessionUser(owner),
     );
-    const audit = await prisma.auditLog.findFirst({
-      where: { entityId: task.id, action: 'task.update' },
-    });
+    const audit = await prisma.auditLog.findFirst({ where: { entityId: task.id, action: 'task.update' } });
     const diff = audit!.diff as Record<string, { from: unknown; to: unknown }>;
     expect(diff.title).toEqual({ from: 'old', to: 'new title' });
     expect(diff.priority).toEqual({ from: 'MEDIUM', to: 'HIGH' });
@@ -196,18 +157,14 @@ describe('updateTask', () => {
 
   it('empty diff → audit NOT written', async () => {
     const { owner, project } = await scaffold();
-    const task = await makeTask({
-      projectId: project.id, creatorId: owner.id, title: 'same',
-    });
+    const task = await makeTask({ projectId: project.id, creatorId: owner.id, title: 'same' });
     await updateTask(task.id, { title: 'same', tags: [] }, sessionUser(owner));
     expect(await auditCount(task.id, 'task.update')).toBe(0);
   });
 
   it('task not found → NOT_FOUND', async () => {
     const u = await makeUser({ role: 'ADMIN' });
-    await expect(
-      updateTask('bogus-id', { tags: [] }, sessionUser(u)),
-    ).rejects.toBeInstanceOf(DomainError);
+    await expect(updateTask('bogus-id', { tags: [] }, sessionUser(u))).rejects.toBeInstanceOf(DomainError);
   });
 });
 
@@ -217,9 +174,7 @@ describe('updateTask', () => {
 describe('changeTaskStatus', () => {
   it('BACKLOG → IN_PROGRESS sets startedAt; audit + status row written', async () => {
     const { owner, project } = await scaffold();
-    const task = await makeTask({
-      projectId: project.id, creatorId: owner.id, status: 'BACKLOG',
-    });
+    const task = await makeTask({ projectId: project.id, creatorId: owner.id, status: 'BACKLOG' });
     const out = await changeTaskStatus(task.id, 'IN_PROGRESS', sessionUser(owner));
     expect(out.status).toBe('IN_PROGRESS');
     expect(out.startedAt).not.toBeNull();
@@ -233,12 +188,8 @@ describe('changeTaskStatus', () => {
 
   it('IN_PROGRESS → DONE sets completedAt; DONE → IN_PROGRESS clears it', async () => {
     const { owner, project } = await scaffold();
-    const task = await makeTask({
-      projectId: project.id, creatorId: owner.id, status: 'IN_PROGRESS',
-    });
-    await prisma.task.update({
-      where: { id: task.id }, data: { startedAt: new Date(Date.now() - 10_000) },
-    });
+    const task = await makeTask({ projectId: project.id, creatorId: owner.id, status: 'IN_PROGRESS' });
+    await prisma.task.update({ where: { id: task.id }, data: { startedAt: new Date(Date.now() - 10_000) } });
     const done = await changeTaskStatus(task.id, 'DONE', sessionUser(owner));
     expect(done.completedAt).not.toBeNull();
     expect(done.startedAt).not.toBeNull();
@@ -248,9 +199,7 @@ describe('changeTaskStatus', () => {
 
   it('same-status no-op: no TaskStatusChange or audit', async () => {
     const { owner, project } = await scaffold();
-    const task = await makeTask({
-      projectId: project.id, creatorId: owner.id, status: 'TODO',
-    });
+    const task = await makeTask({ projectId: project.id, creatorId: owner.id, status: 'TODO' });
     await changeTaskStatus(task.id, 'TODO', sessionUser(owner));
     expect(await prisma.taskStatusChange.count({ where: { taskId: task.id } })).toBe(0);
     expect(await auditCount(task.id, 'task.status_change')).toBe(0);
@@ -259,16 +208,13 @@ describe('changeTaskStatus', () => {
   it('non-editor → 403', async () => {
     const { owner, project, extras } = await scaffold('MEMBER', [{}]);
     const task = await makeTask({ projectId: project.id, creatorId: owner.id });
-    await expect(
-      changeTaskStatus(task.id, 'IN_PROGRESS', sessionUser(extras[0]!)),
-    ).rejects.toMatchObject({ code: 'INSUFFICIENT_PERMISSIONS' });
+    await expect(changeTaskStatus(task.id, 'IN_PROGRESS', sessionUser(extras[0]!)))
+      .rejects.toMatchObject({ code: 'INSUFFICIENT_PERMISSIONS' });
   });
 
   it('preserves existing startedAt when re-entering IN_PROGRESS', async () => {
     const { owner, project } = await scaffold();
-    const task = await makeTask({
-      projectId: project.id, creatorId: owner.id, status: 'BLOCKED',
-    });
+    const task = await makeTask({ projectId: project.id, creatorId: owner.id, status: 'BLOCKED' });
     const orig = new Date('2024-01-01T10:00:00Z');
     await prisma.task.update({ where: { id: task.id }, data: { startedAt: orig } });
     const out = await changeTaskStatus(task.id, 'IN_PROGRESS', sessionUser(owner));
@@ -284,17 +230,14 @@ describe('assignTask', () => {
     const { owner, project } = await scaffold();
     const stranger = await makeUser();
     const task = await makeTask({ projectId: project.id, creatorId: owner.id });
-    await expect(
-      assignTask(task.id, stranger.id, sessionUser(owner)),
-    ).rejects.toMatchObject({ code: 'VALIDATION', status: 400 });
+    await expect(assignTask(task.id, stranger.id, sessionUser(owner)))
+      .rejects.toMatchObject({ code: 'VALIDATION', status: 400 });
   });
 
   it('same assignee → no-op (no audit)', async () => {
     const { owner, project, extras } = await scaffold('MEMBER', [{}]);
     const member = extras[0]!;
-    const task = await makeTask({
-      projectId: project.id, creatorId: owner.id, assigneeId: member.id,
-    });
+    const task = await makeTask({ projectId: project.id, creatorId: owner.id, assigneeId: member.id });
     await assignTask(task.id, member.id, sessionUser(owner));
     expect(await auditCount(task.id, 'task.assign')).toBe(0);
   });
@@ -302,14 +245,10 @@ describe('assignTask', () => {
   it('null assignee unassigns; audit has after.assigneeId=null', async () => {
     const { owner, project, extras } = await scaffold('MEMBER', [{}]);
     const member = extras[0]!;
-    const task = await makeTask({
-      projectId: project.id, creatorId: owner.id, assigneeId: member.id,
-    });
+    const task = await makeTask({ projectId: project.id, creatorId: owner.id, assigneeId: member.id });
     const out = await assignTask(task.id, null, sessionUser(owner));
     expect(out.assigneeId).toBeNull();
-    const audit = await prisma.auditLog.findFirst({
-      where: { entityId: task.id, action: 'task.assign' },
-    });
+    const audit = await prisma.auditLog.findFirst({ where: { entityId: task.id, action: 'task.assign' } });
     const diff = audit!.diff as { after: { assigneeId: string | null } };
     expect(diff.after.assigneeId).toBeNull();
   });
@@ -325,9 +264,8 @@ describe('assignTask', () => {
   it('non-editor cannot assign → 403', async () => {
     const { owner, project, extras } = await scaffold('MEMBER', [{}]);
     const task = await makeTask({ projectId: project.id, creatorId: owner.id });
-    await expect(
-      assignTask(task.id, owner.id, sessionUser(extras[0]!)),
-    ).rejects.toMatchObject({ code: 'INSUFFICIENT_PERMISSIONS' });
+    await expect(assignTask(task.id, owner.id, sessionUser(extras[0]!)))
+      .rejects.toMatchObject({ code: 'INSUFFICIENT_PERMISSIONS' });
   });
 });
 
@@ -347,28 +285,18 @@ describe('addComment', () => {
     expect(row?.source).toBe('WEB');
   });
 
-  it('non-member → 403', async () => {
+  it('non-member → 403; passes through custom source; task not found → NOT_FOUND', async () => {
     const { owner, project } = await scaffold();
     const stranger = await makeUser({ role: 'MEMBER' });
+    const admin = await makeUser({ role: 'ADMIN' });
     const task = await makeTask({ projectId: project.id, creatorId: owner.id });
-    await expect(
-      addComment(task.id, 'no', sessionUser(stranger)),
-    ).rejects.toMatchObject({ code: 'INSUFFICIENT_PERMISSIONS' });
-  });
-
-  it('passes through custom source', async () => {
-    const { owner, project } = await scaffold();
-    const task = await makeTask({ projectId: project.id, creatorId: owner.id });
+    await expect(addComment(task.id, 'no', sessionUser(stranger)))
+      .rejects.toMatchObject({ code: 'INSUFFICIENT_PERMISSIONS' });
     const out = await addComment(task.id, 'tg', sessionUser(owner), 'TELEGRAM');
     const row = await prisma.comment.findUnique({ where: { id: out.id } });
     expect(row?.source).toBe('TELEGRAM');
-  });
-
-  it('task not found → NOT_FOUND', async () => {
-    const u = await makeUser({ role: 'ADMIN' });
-    await expect(
-      addComment('nope', 'x', sessionUser(u)),
-    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(addComment('nope', 'x', sessionUser(admin)))
+      .rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
 });
 
@@ -385,16 +313,14 @@ describe('deleteTask', () => {
     const project = await makeProject({ ownerId: owner.id });
     await addMember(project.id, lead.id, 'LEAD');
     await addMember(project.id, member.id, 'CONTRIBUTOR');
-
     for (const actor of [admin, owner, pm, lead]) {
       const t = await makeTask({ projectId: project.id, creatorId: owner.id });
       await deleteTask(t.id, sessionUser(actor));
       expect(await prisma.task.findUnique({ where: { id: t.id } })).toBeNull();
     }
     const t = await makeTask({ projectId: project.id, creatorId: owner.id });
-    await expect(
-      deleteTask(t.id, sessionUser(member)),
-    ).rejects.toMatchObject({ code: 'INSUFFICIENT_PERMISSIONS' });
+    await expect(deleteTask(t.id, sessionUser(member)))
+      .rejects.toMatchObject({ code: 'INSUFFICIENT_PERMISSIONS' });
   });
 
   it('cannot delete with subtasks → VALIDATION 400', async () => {
@@ -402,20 +328,11 @@ describe('deleteTask', () => {
     const parent = await makeTask({ projectId: project.id, creatorId: owner.id });
     const sub = await makeTask({ projectId: project.id, creatorId: owner.id });
     await prisma.task.update({ where: { id: sub.id }, data: { parentId: parent.id } });
-    await expect(
-      deleteTask(parent.id, sessionUser(owner)),
-    ).rejects.toMatchObject({ code: 'VALIDATION', status: 400 });
+    await expect(deleteTask(parent.id, sessionUser(owner)))
+      .rejects.toMatchObject({ code: 'VALIDATION', status: 400 });
   });
 
-  it('audit row exists AFTER task is deleted', async () => {
-    const { owner, project } = await scaffold();
-    const task = await makeTask({ projectId: project.id, creatorId: owner.id });
-    await deleteTask(task.id, sessionUser(owner));
-    expect(await prisma.task.findUnique({ where: { id: task.id } })).toBeNull();
-    expect(await auditCount(task.id, 'task.delete')).toBe(1);
-  });
-
-  it('comments cascade-delete; TimeEntry.taskId becomes null but row survives', async () => {
+  it('audit row exists AFTER deletion; comments cascade; TimeEntry.taskId nulled', async () => {
     const { owner, project } = await scaffold();
     const task = await makeTask({ projectId: project.id, creatorId: owner.id });
     await addComment(task.id, 'x', sessionUser(owner));
@@ -427,6 +344,8 @@ describe('deleteTask', () => {
       },
     });
     await deleteTask(task.id, sessionUser(owner));
+    expect(await prisma.task.findUnique({ where: { id: task.id } })).toBeNull();
+    expect(await auditCount(task.id, 'task.delete')).toBe(1);
     expect(await prisma.comment.count({ where: { taskId: task.id } })).toBe(0);
     const teAfter = await prisma.timeEntry.findUnique({ where: { id: te.id } });
     expect(teAfter).not.toBeNull();
@@ -435,9 +354,8 @@ describe('deleteTask', () => {
 
   it('non-existent task → NOT_FOUND', async () => {
     const admin = await makeUser({ role: 'ADMIN' });
-    await expect(
-      deleteTask('bogus', sessionUser(admin)),
-    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(deleteTask('bogus', sessionUser(admin)))
+      .rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
 });
 
@@ -527,15 +445,14 @@ describe('listTasksForProject', () => {
     expect(byAssignee.items[1]?.assignee?.name).toBe('ZZZ');
   });
 
-  it('VIEWER on project they don’t belong to → 403; project not found; empty pageCount=1', async () => {
+  it('VIEWER on project they don’t belong → 403; project not found; empty pageCount=1', async () => {
     const { owner, project } = await scaffold();
     const viewer = await makeUser({ role: 'VIEWER' });
-    await expect(
-      listTasksForProject(project.key, F(), sessionUser(viewer)),
-    ).rejects.toMatchObject({ code: 'INSUFFICIENT_PERMISSIONS' });
-    await expect(
-      listTasksForProject('XX', F(), sessionUser(await makeUser({ role: 'ADMIN' }))),
-    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const admin = await makeUser({ role: 'ADMIN' });
+    await expect(listTasksForProject(project.key, F(), sessionUser(viewer)))
+      .rejects.toMatchObject({ code: 'INSUFFICIENT_PERMISSIONS' });
+    await expect(listTasksForProject('XX', F(), sessionUser(admin)))
+      .rejects.toMatchObject({ code: 'NOT_FOUND' });
     const out = await listTasksForProject(project.key, F(), sessionUser(owner));
     expect(out.total).toBe(0);
     expect(out.pageCount).toBe(1);
@@ -546,8 +463,9 @@ describe('listTasksForProject', () => {
 // listTasksForBoard
 // ============================================================================
 describe('listTasksForBoard', () => {
-  it('returns only non-CANCELED; embeds project info', async () => {
+  it('returns only non-CANCELED; embeds project info; non-viewer → 403', async () => {
     const { owner, project } = await scaffold();
+    const stranger = await makeUser({ role: 'MEMBER' });
     await makeTask({ projectId: project.id, creatorId: owner.id, status: 'TODO' });
     await makeTask({ projectId: project.id, creatorId: owner.id, status: 'DONE' });
     await makeTask({ projectId: project.id, creatorId: owner.id, status: 'CANCELED' });
@@ -555,6 +473,8 @@ describe('listTasksForBoard', () => {
     expect(out.tasks).toHaveLength(2);
     expect(out.tasks.every((t) => t.status !== 'CANCELED')).toBe(true);
     expect(out.project.key).toBe(project.key);
+    await expect(listTasksForBoard(project.key, {}, sessionUser(stranger)))
+      .rejects.toMatchObject({ code: 'INSUFFICIENT_PERMISSIONS' });
   });
 
   it('onlyMine overrides assigneeId filter', async () => {
@@ -566,37 +486,21 @@ describe('listTasksForBoard', () => {
     await addMember(project.id, other.id, 'CONTRIBUTOR');
     await makeTask({ projectId: project.id, creatorId: owner.id, assigneeId: me.id });
     await makeTask({ projectId: project.id, creatorId: owner.id, assigneeId: other.id });
-    const out = await listTasksForBoard(
-      project.key, { onlyMine: true, assigneeId: other.id }, sessionUser(me),
-    );
+    const out = await listTasksForBoard(project.key, { onlyMine: true, assigneeId: other.id }, sessionUser(me));
     expect(out.tasks).toHaveLength(1);
     expect(out.tasks[0]?.assignee?.id).toBe(me.id);
   });
 
   it('filters compose: priority + q', async () => {
     const { owner, project } = await scaffold();
-    const t1 = await makeTask({
-      projectId: project.id, creatorId: owner.id, title: 'urgent fix',
-    });
+    const t1 = await makeTask({ projectId: project.id, creatorId: owner.id, title: 'urgent fix' });
     await prisma.task.update({ where: { id: t1.id }, data: { priority: 'URGENT' } });
     await makeTask({ projectId: project.id, creatorId: owner.id, title: 'urgent talk' });
-    const t3 = await makeTask({
-      projectId: project.id, creatorId: owner.id, title: 'normal',
-    });
+    const t3 = await makeTask({ projectId: project.id, creatorId: owner.id, title: 'normal' });
     await prisma.task.update({ where: { id: t3.id }, data: { priority: 'URGENT' } });
-    const out = await listTasksForBoard(
-      project.key, { priority: 'URGENT', q: 'urgent' }, sessionUser(owner),
-    );
+    const out = await listTasksForBoard(project.key, { priority: 'URGENT', q: 'urgent' }, sessionUser(owner));
     expect(out.tasks).toHaveLength(1);
     expect(out.tasks[0]?.title).toBe('urgent fix');
-  });
-
-  it('non-viewer → 403', async () => {
-    const { project } = await scaffold();
-    const stranger = await makeUser({ role: 'MEMBER' });
-    await expect(
-      listTasksForBoard(project.key, {}, sessionUser(stranger)),
-    ).rejects.toMatchObject({ code: 'INSUFFICIENT_PERMISSIONS' });
   });
 });
 
@@ -634,30 +538,26 @@ describe('getTask', () => {
   it('non-existent number → NOT_FOUND; wrong project key → NOT_FOUND', async () => {
     const { owner, project } = await scaffold();
     const admin = await makeUser({ role: 'ADMIN' });
-    await expect(
-      getTask(project.key, 999, sessionUser(owner)),
-    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
-    await expect(
-      getTask('XX', 1, sessionUser(admin)),
-    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(getTask(project.key, 999, sessionUser(owner)))
+      .rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(getTask('XX', 1, sessionUser(admin)))
+      .rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
 
-  it('non-viewer → INSUFFICIENT_PERMISSIONS', async () => {
+  it('non-viewer → INSUFFICIENT_PERMISSIONS; PM can view any project task', async () => {
     const { owner, project } = await scaffold();
     const stranger = await makeUser({ role: 'MEMBER' });
-    const task = await makeTask({
-      projectId: project.id, creatorId: owner.id, number: 1,
-    });
-    await expect(
-      getTask(project.key, task.number, sessionUser(stranger)),
-    ).rejects.toMatchObject({ code: 'INSUFFICIENT_PERMISSIONS' });
+    const pm = await makeUser({ role: 'PM' });
+    const task = await makeTask({ projectId: project.id, creatorId: owner.id, number: 1 });
+    await expect(getTask(project.key, task.number, sessionUser(stranger)))
+      .rejects.toMatchObject({ code: 'INSUFFICIENT_PERMISSIONS' });
+    const detail = await getTask(project.key, 1, sessionUser(pm));
+    expect(detail.number).toBe(1);
   });
 
   it('includes comments + statusChanges sorted ascending', async () => {
     const { owner, project } = await scaffold();
-    const task = await makeTask({
-      projectId: project.id, creatorId: owner.id, number: 1, status: 'BACKLOG',
-    });
+    const task = await makeTask({ projectId: project.id, creatorId: owner.id, number: 1, status: 'BACKLOG' });
     await addComment(task.id, 'first', sessionUser(owner));
     await new Promise((r) => setTimeout(r, 5));
     await addComment(task.id, 'second', sessionUser(owner));
@@ -667,13 +567,5 @@ describe('getTask', () => {
     const detail = await getTask(project.key, 1, sessionUser(owner));
     expect(detail.comments.map((c) => c.body)).toEqual(['first', 'second']);
     expect(detail.statusChanges.map((s) => s.toStatus)).toEqual(['TODO', 'IN_PROGRESS']);
-  });
-
-  it('PM can view any project task', async () => {
-    const { owner, project } = await scaffold();
-    const pm = await makeUser({ role: 'PM' });
-    await makeTask({ projectId: project.id, creatorId: owner.id, number: 1 });
-    const detail = await getTask(project.key, 1, sessionUser(pm));
-    expect(detail.number).toBe(1);
   });
 });

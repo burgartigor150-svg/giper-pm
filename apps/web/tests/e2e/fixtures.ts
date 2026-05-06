@@ -47,6 +47,12 @@ export async function resetDb(): Promise<void> {
 
 export const ADMIN_EMAIL = 'admin@e2e.test';
 export const ADMIN_PASS = 'admin-pass-1';
+/**
+ * Deterministic id for the admin. The JWT cookie persists across truncate +
+ * re-seed, so keeping the id stable means the session remains valid for
+ * already-logged-in admin pages.
+ */
+export const ADMIN_ID = 'admin-e2e-stable-id';
 
 export type SeededUser = {
   id: string;
@@ -61,8 +67,9 @@ export async function seedAdmin(): Promise<SeededUser> {
   const password = ADMIN_PASS;
   const hash = await bcrypt.hash(password, 4);
   const u = await prisma.user.upsert({
-    where: { email: ADMIN_EMAIL },
+    where: { id: ADMIN_ID },
     create: {
+      id: ADMIN_ID,
       email: ADMIN_EMAIL,
       name: 'Admin E2E',
       role: 'ADMIN',
@@ -71,6 +78,7 @@ export async function seedAdmin(): Promise<SeededUser> {
       isActive: true,
     },
     update: {
+      email: ADMIN_EMAIL,
       name: 'Admin E2E',
       role: 'ADMIN',
       passwordHash: hash,

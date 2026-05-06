@@ -43,7 +43,10 @@ test.describe('projects', () => {
 
   test('show-archived filter reveals archived projects', async ({ page }) => {
     await page.goto('/projects?scope=all');
-    await page.getByLabel('Показать архивные').check();
+    // The checkbox has no `htmlFor`/`id` link to its label, so getByLabel can
+    // be flaky. Click the wrapping <label> directly via its text.
+    await page.getByText('Показать архивные').click();
+    await expect(page).toHaveURL(/archived=1/);
     await expect(page.getByText('Archived').first()).toBeVisible();
   });
 
@@ -94,10 +97,11 @@ test.describe('projects', () => {
     page,
   }) => {
     await page.goto('/projects/GFM');
-    await expect(page.getByRole('link', { name: 'Канбан' })).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Задачи' })).toBeVisible();
-    await expect(page.getByRole('link', { name: '+ Задача' })).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Настройки' })).toBeVisible();
+    const main = page.locator('main');
+    await expect(main.getByRole('link', { name: 'Канбан' })).toBeVisible();
+    await expect(main.getByRole('link', { name: 'Задачи' })).toBeVisible();
+    await expect(main.getByRole('link', { name: '+ Задача' })).toBeVisible();
+    await expect(main.getByRole('link', { name: 'Настройки' })).toBeVisible();
   });
 
   test('overview Канбан button navigates to board', async ({ page }) => {
@@ -120,7 +124,7 @@ test.describe('projects', () => {
 
   test('overview Настройки button navigates to settings', async ({ page }) => {
     await page.goto('/projects/GFM');
-    await page.getByRole('link', { name: 'Настройки' }).click();
+    await page.locator('main').getByRole('link', { name: 'Настройки' }).click();
     await expect(page).toHaveURL(/\/projects\/GFM\/settings/);
   });
 

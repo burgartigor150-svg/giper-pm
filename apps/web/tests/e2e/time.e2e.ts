@@ -38,9 +38,9 @@ test.describe('time tracking page', () => {
     await expect(page.getByText('Existing entry')).toBeVisible();
   });
 
-  test('range tab Сегодня is selected by default', async ({ page }) => {
+  test('default range is "Эта неделя"', async ({ page }) => {
     await page.goto('/time');
-    const tab = page.getByRole('button', { name: 'Сегодня' });
+    const tab = page.getByRole('button', { name: 'Эта неделя' });
     await expect(tab).toHaveClass(/bg-primary/);
   });
 

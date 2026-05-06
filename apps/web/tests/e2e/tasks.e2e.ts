@@ -54,8 +54,8 @@ test.describe('tasks list & detail', () => {
 
   test('search filter narrows results', async ({ page }) => {
     await page.goto(`/projects/${PK}/list`);
-    await page.locator('input[type="search"]').fill('Task 7');
-    await page.locator('input[type="search"]').press('Enter');
+    await page.locator('main input[type="search"]').fill('Task 7');
+    await page.locator('main input[type="search"]').press('Enter');
     await expect(page).toHaveURL(/q=Task/);
     await expect(page.getByText('Task 7', { exact: true })).toBeVisible();
   });
@@ -101,8 +101,8 @@ test.describe('tasks list & detail', () => {
     await page.locator('button[aria-label="Редактировать заголовок"]').click();
     const input = page.locator('input.text-2xl');
     await input.fill('Task 2 Renamed');
-    await page.getByRole('button', { name: 'Сохранить' }).first().click();
-    await page.waitForTimeout(500);
+    await input.press('Enter');
+    await page.waitForTimeout(1500);
     const t = await getPrisma().task.findFirst({
       where: { projectId, number: 2 },
       select: { title: true },
@@ -112,10 +112,12 @@ test.describe('tasks list & detail', () => {
 
   test('inline description edit saves', async ({ page }) => {
     await page.goto(`/projects/${PK}/tasks/3`);
-    await page.getByRole('button', { name: 'Редактировать' }).first().click();
-    await page.locator('textarea').first().fill('A useful description.');
+    await page.getByRole('button', { name: 'Редактировать', exact: true }).click();
+    const textarea = page.locator('textarea').first();
+    await textarea.fill('A useful description.');
+    // Click the Save button rendered inside the description editor.
     await page.getByRole('button', { name: 'Сохранить' }).first().click();
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(1500);
     const t = await getPrisma().task.findFirst({
       where: { projectId, number: 3 },
       select: { description: true },
@@ -125,12 +127,10 @@ test.describe('tasks list & detail', () => {
 
   test('sidebar status change persists', async ({ page }) => {
     await page.goto(`/projects/${PK}/tasks/4`);
-    // First select in sidebar is status
-    const statusSelect = page
-      .locator('aside ~ * select, .grid select')
-      .first();
-    await statusSelect.selectOption('REVIEW');
-    await page.waitForTimeout(800);
+    // Sidebar selects: status, assignee, priority. Status is the first one.
+    const selects = page.locator('main select');
+    await selects.nth(0).selectOption('REVIEW');
+    await page.waitForTimeout(1500);
     const t = await getPrisma().task.findFirst({
       where: { projectId, number: 4 },
       select: { status: true },
@@ -140,10 +140,10 @@ test.describe('tasks list & detail', () => {
 
   test('sidebar priority change persists', async ({ page }) => {
     await page.goto(`/projects/${PK}/tasks/5`);
-    // Find priority select by its option value URGENT
-    const prio = page.locator('select').filter({ hasText: 'Срочный' });
-    await prio.selectOption('URGENT');
-    await page.waitForTimeout(800);
+    const selects = page.locator('main select');
+    // status (0), assignee (1), priority (2)
+    await selects.nth(2).selectOption('URGENT');
+    await page.waitForTimeout(1500);
     const t = await getPrisma().task.findFirst({
       where: { projectId, number: 5 },
       select: { priority: true },

@@ -24,9 +24,16 @@ test.describe('timers', () => {
     });
   });
 
+  /** TaskTimerButton lives inside <main>, the TimerWidget lives inside <header>.
+   *  Two visible "Старт" buttons → scope every selector explicitly. */
+  const mainStart = (page: import('@playwright/test').Page) =>
+    page.locator('main').getByRole('button', { name: /Старт/ });
+  const mainStop = (page: import('@playwright/test').Page) =>
+    page.locator('main').getByRole('button', { name: /Стоп/ });
+
   test('TaskTimerButton starts a timer on the task', async ({ page }) => {
     await page.goto(`/projects/${PK}/tasks/1`);
-    await page.getByRole('button', { name: /Старт/ }).click();
+    await mainStart(page).click();
     await page.waitForTimeout(800);
     const t = await getPrisma().timeEntry.findFirst({
       where: { userId: adminId, endedAt: null },
@@ -38,21 +45,20 @@ test.describe('timers', () => {
 
   test('header widget shows live counter once timer is running', async ({ page }) => {
     await page.goto(`/projects/${PK}/tasks/1`);
-    await page.getByRole('button', { name: /Старт/ }).click();
+    await mainStart(page).click();
     await page.waitForTimeout(1500);
-    // Now header widget should show a Pause button.
-    await expect(page.locator('header').getByRole('button').filter({
-      has: page.locator('svg'),
-    }).first()).toBeVisible();
-    // The TaskTimerButton in header switches to "Стоп"
-    await expect(page.getByRole('button', { name: /Стоп/ }).first()).toBeVisible();
+    // Header widget shows a MM:SS counter (font-mono span). Just look for the digits.
+    const headerText = await page.locator('header').innerText();
+    expect(headerText).toMatch(/\d{1,2}:\d{2}/);
+    // Both task button and header widget show "Стоп" or its icon.
+    await expect(mainStop(page)).toBeVisible();
   });
 
   test('Stop button on task ends timer in DB', async ({ page }) => {
     await page.goto(`/projects/${PK}/tasks/1`);
-    await page.getByRole('button', { name: /Старт/ }).click();
+    await mainStart(page).click();
     await page.waitForTimeout(800);
-    await page.getByRole('button', { name: /Стоп/ }).first().click();
+    await mainStop(page).click();
     await page.waitForTimeout(800);
     const active = await getPrisma().timeEntry.findFirst({
       where: { userId: adminId, endedAt: null },
@@ -62,14 +68,15 @@ test.describe('timers', () => {
 
   test('switch task with confirm dialog accepted', async ({ page }) => {
     // Start on Alpha
+    page.on('dialog', (d) => d.accept());
     await page.goto(`/projects/${PK}/tasks/1`);
-    await page.getByRole('button', { name: /Старт/ }).click();
+    await mainStart(page).click();
     await page.waitForTimeout(800);
 
-    // Switch to Beta. There may be a confirm in TaskTimerButton.
-    page.on('dialog', (d) => d.accept());
+    // Open Beta — TaskTimerButton on Beta will detect "running on another task"
+    // and show confirm() before starting.
     await page.goto(`/projects/${PK}/tasks/2`);
-    await page.getByRole('button', { name: /Старт/ }).click();
+    await mainStart(page).click();
     await page.waitForTimeout(1500);
     const t = await getPrisma().timeEntry.findFirst({
       where: { userId: adminId, endedAt: null },
@@ -80,12 +87,11 @@ test.describe('timers', () => {
 
   test('TimerWidget Start picker opens with debounced search', async ({ page }) => {
     await page.goto('/dashboard');
-    // Header start button
+    // Header start button (only one inside header when no active timer).
     await page.locator('header').getByRole('button', { name: /Старт/ }).click();
     const input = page.getByPlaceholder('Введите название задачи');
     await expect(input).toBeVisible();
     await input.fill('Ti');
-    // Debounce fires at 250ms; result Timer Alpha should appear.
     await expect(
       page.getByText('Timer Alpha', { exact: false }).first(),
     ).toBeVisible({ timeout: 5000 });
@@ -99,15 +105,10 @@ test.describe('timers', () => {
 
   test('Stop via header widget ends timer', async ({ page }) => {
     await page.goto(`/projects/${PK}/tasks/1`);
-    await page.getByRole('button', { name: /Старт/ }).click();
+    await mainStart(page).click();
     await page.waitForTimeout(1500);
-    // Find header widget pause button (variant=destructive icon with no label "Стоп" on header)
-    const headerStop = page.locator('header').getByRole('button').filter({
-      has: page.locator('svg'),
-    });
-    // Click whichever has Pause icon (last destructive in header).
-    // Simpler: navigate to dashboard so only widget is rendered.
-    await page.goto('/dashboard');
+
+    // Click the header widget's pause button. It has aria-label="Стоп".
     await page.locator('header [aria-label="Стоп"]').click();
     await page.waitForTimeout(800);
     const active = await getPrisma().timeEntry.findFirst({

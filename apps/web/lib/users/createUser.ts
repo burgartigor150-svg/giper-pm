@@ -1,7 +1,8 @@
 import bcrypt from 'bcryptjs';
-import { prisma, Prisma } from '@giper/db';
+import { prisma } from '@giper/db';
 import { generateTemporaryPassword, type CreateUserInput } from '@giper/shared';
 import { DomainError } from '../errors';
+import { isUniqueConstraintError } from '../prisma-errors';
 import type { SessionUser } from '../permissions';
 
 /**
@@ -30,7 +31,7 @@ export async function createUser(input: CreateUserInput, actor: SessionUser) {
     });
     return { user, tempPassword };
   } catch (e) {
-    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+    if (isUniqueConstraintError(e)) {
       throw new DomainError('CONFLICT', 409, 'Пользователь с таким email уже существует');
     }
     throw e;

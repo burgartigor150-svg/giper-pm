@@ -1,6 +1,7 @@
-import { prisma, Prisma } from '@giper/db';
+import { prisma } from '@giper/db';
 import type { AddMemberInput } from '@giper/shared';
 import { DomainError } from '../errors';
+import { isUniqueConstraintError } from '../prisma-errors';
 import { canEditProject, type SessionUser } from '../permissions';
 
 export async function addProjectMember(
@@ -38,7 +39,7 @@ export async function addProjectMember(
       },
     });
   } catch (e) {
-    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+    if (isUniqueConstraintError(e)) {
       throw new DomainError('CONFLICT', 409, 'Пользователь уже в проекте');
     }
     throw e;

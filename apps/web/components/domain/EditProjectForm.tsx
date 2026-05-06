@@ -6,7 +6,8 @@ import { Input } from '@giper/ui/components/Input';
 import { updateProjectAction, archiveProjectAction, type ActionResult } from '@/actions/projects';
 import { useT } from '@/lib/useT';
 
-const initialState: ActionResult = { ok: true };
+/** null = nothing-yet; everything else is a real action result. */
+const initialState: ActionResult | null = null;
 
 const STATUSES = ['ACTIVE', 'ON_HOLD', 'COMPLETED', 'ARCHIVED'] as const;
 

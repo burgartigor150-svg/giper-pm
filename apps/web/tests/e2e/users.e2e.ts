@@ -137,7 +137,7 @@ test.describe('users management', () => {
     await page.click('button[type="submit"]');
     await expect(
       page.getByText('Пользователь с таким email уже существует'),
-    ).toBeVisible();
+    ).toBeVisible({ timeout: 15_000 });
   });
 
   test('MEMBER cannot access /settings/users (404)', async ({

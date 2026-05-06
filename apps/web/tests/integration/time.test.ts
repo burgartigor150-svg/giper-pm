@@ -12,21 +12,13 @@ import {
   startTimer,
   stopTimer,
 } from '@/lib/time';
-import {
-  addMember,
-  makeProject,
-  makeTask,
-  makeUser,
-  sessionUser,
-} from './helpers/factories';
+import { addMember, makeProject, makeTask, makeUser, sessionUser } from './helpers/factories';
 
 const D = (s: string) => new Date(s);
 const t = (mins: number) => new Date(Date.UTC(2025, 0, 1, 10, mins, 0));
 
 const closed = (
-  userId: string,
-  startedAt: Date,
-  endedAt: Date,
+  userId: string, startedAt: Date, endedAt: Date,
   extra: { taskId?: string; flag?: 'OVERLAPPING' } = {},
 ) =>
   prisma.timeEntry.create({
@@ -35,24 +27,25 @@ const closed = (
       taskId: extra.taskId ?? null,
       startedAt,
       endedAt,
-      durationMin: Math.max(
-        1,
-        Math.round((endedAt.getTime() - startedAt.getTime()) / 60_000),
-      ),
+      durationMin: Math.max(1, Math.round((endedAt.getTime() - startedAt.getTime()) / 60_000)),
       source: 'MANUAL_FORM',
       flag: extra.flag ?? null,
     },
   });
 
-// =============================================================================
-// startTimer
-// =============================================================================
+async function ownerWithTask() {
+  const owner = await makeUser();
+  const project = await makeProject({ ownerId: owner.id });
+  const task = await makeTask({ projectId: project.id, creatorId: owner.id });
+  return { owner, project, task };
+}
 
+// ============================================================================
+// startTimer
+// ============================================================================
 describe('startTimer', () => {
   it('first start: creates MANUAL_TIMER with endedAt=null', async () => {
-    const owner = await makeUser();
-    const project = await makeProject({ ownerId: owner.id });
-    const task = await makeTask({ projectId: project.id, creatorId: owner.id });
+    const { owner, task } = await ownerWithTask();
     const timer = await startTimer(task.id, sessionUser(owner));
     expect(timer.taskId).toBe(task.id);
     const row = await prisma.timeEntry.findUnique({ where: { id: timer.id } });
@@ -66,18 +59,14 @@ describe('startTimer', () => {
     const project = await makeProject({ ownerId: owner.id });
     const taskA = await makeTask({ projectId: project.id, creatorId: owner.id });
     const taskB = await makeTask({ projectId: project.id, creatorId: owner.id });
-
     const tA = await startTimer(taskA.id, sessionUser(owner));
     await prisma.timeEntry.update({
-      where: { id: tA.id },
-      data: { startedAt: new Date(Date.now() - 5 * 60_000) },
+      where: { id: tA.id }, data: { startedAt: new Date(Date.now() - 5 * 60_000) },
     });
     await startTimer(taskB.id, sessionUser(owner));
-
     const aAfter = await prisma.timeEntry.findUnique({ where: { id: tA.id } });
     expect(aAfter?.endedAt).not.toBeNull();
     expect(aAfter?.durationMin).toBeGreaterThanOrEqual(4);
-
     const active = await prisma.timeEntry.findMany({
       where: { userId: owner.id, endedAt: null },
     });
@@ -86,45 +75,37 @@ describe('startTimer', () => {
   });
 
   it('non-viewer → 403', async () => {
-    const owner = await makeUser();
+    const { task } = await ownerWithTask();
     const stranger = await makeUser({ role: 'MEMBER' });
-    const project = await makeProject({ ownerId: owner.id });
-    const task = await makeTask({ projectId: project.id, creatorId: owner.id });
     await expect(
       startTimer(task.id, sessionUser(stranger)),
     ).rejects.toMatchObject({ code: 'INSUFFICIENT_PERMISSIONS' });
   });
 
   it('non-existent task → NOT_FOUND', async () => {
-    const owner = await makeUser({ role: 'ADMIN' });
+    const u = await makeUser({ role: 'ADMIN' });
     await expect(
-      startTimer('nope', sessionUser(owner)),
+      startTimer('nope', sessionUser(u)),
     ).rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
 
-  it('strips empty note to null', async () => {
-    const owner = await makeUser();
-    const project = await makeProject({ ownerId: owner.id });
-    const task = await makeTask({ projectId: project.id, creatorId: owner.id });
+  it('strips empty/whitespace note to null', async () => {
+    const { owner, task } = await ownerWithTask();
     const timer = await startTimer(task.id, sessionUser(owner), '   ');
     const row = await prisma.timeEntry.findUnique({ where: { id: timer.id } });
     expect(row?.note).toBeNull();
   });
 });
 
-// =============================================================================
+// ============================================================================
 // stopTimer
-// =============================================================================
-
+// ============================================================================
 describe('stopTimer', () => {
-  it('closes active timer with rounded durationMin', async () => {
-    const owner = await makeUser();
-    const project = await makeProject({ ownerId: owner.id });
-    const task = await makeTask({ projectId: project.id, creatorId: owner.id });
+  it('closes active timer; durationMin = max(1, round(elapsed/60s))', async () => {
+    const { owner, task } = await ownerWithTask();
     const timer = await startTimer(task.id, sessionUser(owner));
     await prisma.timeEntry.update({
-      where: { id: timer.id },
-      data: { startedAt: new Date(Date.now() - 7 * 60_000) },
+      where: { id: timer.id }, data: { startedAt: new Date(Date.now() - 7 * 60_000) },
     });
     const stopped = await stopTimer(owner.id);
     expect(stopped!.endedAt).not.toBeNull();
@@ -132,24 +113,20 @@ describe('stopTimer', () => {
     expect(stopped!.durationMin).toBeLessThanOrEqual(8);
   });
 
-  it('no active → returns null', async () => {
-    const owner = await makeUser();
-    expect(await stopTimer(owner.id)).toBeNull();
+  it('no active → returns null (noop)', async () => {
+    const u = await makeUser();
+    expect(await stopTimer(u.id)).toBeNull();
   });
 
-  it('sub-second ticker → durationMin = 1', async () => {
-    const owner = await makeUser();
-    const project = await makeProject({ ownerId: owner.id });
-    const task = await makeTask({ projectId: project.id, creatorId: owner.id });
+  it('sub-second ticker → durationMin = 1 (not 0)', async () => {
+    const { owner, task } = await ownerWithTask();
     await startTimer(task.id, sessionUser(owner));
     const stopped = await stopTimer(owner.id);
     expect(stopped!.durationMin).toBe(1);
   });
 
   it('appends note to existing one when both present', async () => {
-    const owner = await makeUser();
-    const project = await makeProject({ ownerId: owner.id });
-    const task = await makeTask({ projectId: project.id, creatorId: owner.id });
+    const { owner, task } = await ownerWithTask();
     await startTimer(task.id, sessionUser(owner), 'first');
     await stopTimer(owner.id, 'second');
     const row = await prisma.timeEntry.findFirst({ where: { userId: owner.id } });
@@ -160,9 +137,7 @@ describe('stopTimer', () => {
     const owner = await makeUser();
     const auto = await prisma.timeEntry.create({
       data: {
-        userId: owner.id,
-        startedAt: new Date(Date.now() - 60_000),
-        source: 'AUTO_AGENT',
+        userId: owner.id, startedAt: new Date(Date.now() - 60_000), source: 'AUTO_AGENT',
       },
     });
     expect(await stopTimer(owner.id)).toBeNull();
@@ -171,24 +146,20 @@ describe('stopTimer', () => {
   });
 });
 
-// =============================================================================
+// ============================================================================
 // getActiveTimer
-// =============================================================================
-
+// ============================================================================
 describe('getActiveTimer', () => {
   it('null when nothing running', async () => {
-    const owner = await makeUser();
-    expect(await getActiveTimer(owner.id)).toBeNull();
+    const u = await makeUser();
+    expect(await getActiveTimer(u.id)).toBeNull();
   });
 
   it('returns the open MANUAL_TIMER one with task projection', async () => {
     const owner = await makeUser();
     const project = await makeProject({ ownerId: owner.id, key: 'GFM' });
     const task = await makeTask({
-      projectId: project.id,
-      creatorId: owner.id,
-      number: 42,
-      title: 'fix it',
+      projectId: project.id, creatorId: owner.id, number: 42, title: 'fix it',
     });
     await startTimer(task.id, sessionUser(owner));
     const active = await getActiveTimer(owner.id);
@@ -198,86 +169,69 @@ describe('getActiveTimer', () => {
     expect(active?.task?.project.key).toBe('GFM');
   });
 
-  it('does not return stopped timers', async () => {
-    const owner = await makeUser();
-    const project = await makeProject({ ownerId: owner.id });
-    const task = await makeTask({ projectId: project.id, creatorId: owner.id });
+  it('does not return stopped timers or another user’s timers', async () => {
+    const { owner, project, task } = await ownerWithTask();
+    const other = await makeUser();
+    await addMember(project.id, other.id, 'CONTRIBUTOR');
     await startTimer(task.id, sessionUser(owner));
     await stopTimer(owner.id);
     expect(await getActiveTimer(owner.id)).toBeNull();
-  });
-
-  it('does not return another user’s timer', async () => {
-    const owner = await makeUser();
-    const other = await makeUser();
-    const project = await makeProject({ ownerId: owner.id });
-    await addMember(project.id, other.id, 'CONTRIBUTOR');
-    const task = await makeTask({ projectId: project.id, creatorId: owner.id });
     await startTimer(task.id, sessionUser(other));
     expect(await getActiveTimer(owner.id)).toBeNull();
   });
 });
 
-// =============================================================================
+// ============================================================================
 // hasOverlappingEntry
-// =============================================================================
-
+// ============================================================================
 describe('hasOverlappingEntry', () => {
   it('returns true for fully-inside, partial-left, partial-right intervals', async () => {
-    const u = await makeUser();
-    await closed(u.id, t(0), t(60));
-    expect(await hasOverlappingEntry(u.id, t(20), t(40))).toBe(true);
+    const u1 = await makeUser();
+    await closed(u1.id, t(0), t(60));
+    expect(await hasOverlappingEntry(u1.id, t(20), t(40))).toBe(true);
+
     const u2 = await makeUser();
     await closed(u2.id, t(20), t(40));
     expect(await hasOverlappingEntry(u2.id, t(0), t(30))).toBe(true);
+
     const u3 = await makeUser();
     await closed(u3.id, t(20), t(40));
     expect(await hasOverlappingEntry(u3.id, t(30), t(60))).toBe(true);
   });
 
   it('returns true when an open-ended timer is in the range', async () => {
-    const u = await makeUser();
-    const project = await makeProject({ ownerId: u.id });
-    const task = await makeTask({ projectId: project.id, creatorId: u.id });
-    const timer = await startTimer(task.id, sessionUser(u));
+    const { owner, task } = await ownerWithTask();
+    const timer = await startTimer(task.id, sessionUser(owner));
     await prisma.timeEntry.update({
-      where: { id: timer.id },
-      data: { startedAt: t(10) },
+      where: { id: timer.id }, data: { startedAt: t(10) },
     });
-    expect(await hasOverlappingEntry(u.id, t(20), t(30))).toBe(true);
+    expect(await hasOverlappingEntry(owner.id, t(20), t(30))).toBe(true);
   });
 
-  it('returns false for completely-disjoint and adjacent intervals', async () => {
+  it('returns false for disjoint and adjacent intervals', async () => {
     const u = await makeUser();
     await closed(u.id, t(0), t(30));
     expect(await hasOverlappingEntry(u.id, t(40), t(60))).toBe(false);
-    expect(await hasOverlappingEntry(u.id, t(30), t(60))).toBe(false); // adjacent (boundary exclusive)
+    expect(await hasOverlappingEntry(u.id, t(30), t(60))).toBe(false);
   });
 
-  it('excludeEntryId works', async () => {
+  it('excludeEntryId works; does not match other user’s entries', async () => {
     const u = await makeUser();
     const e = await closed(u.id, t(0), t(60));
     expect(await hasOverlappingEntry(u.id, t(20), t(40))).toBe(true);
     expect(await hasOverlappingEntry(u.id, t(20), t(40), e.id)).toBe(false);
-  });
-
-  it('does not match other user’s entries', async () => {
-    const u = await makeUser();
     const other = await makeUser();
     await closed(other.id, t(0), t(60));
-    expect(await hasOverlappingEntry(u.id, t(20), t(40))).toBe(false);
+    expect(await hasOverlappingEntry(u.id, t(0), t(60), e.id)).toBe(false);
   });
 });
 
-// =============================================================================
+// ============================================================================
 // logTimeManually
-// =============================================================================
-
+// ============================================================================
 describe('logTimeManually', () => {
   it('computes durationMin and flag=null when no overlap', async () => {
-    const owner = await makeUser();
-    const project = await makeProject({ ownerId: owner.id });
-    const task = await makeTask({ projectId: project.id, creatorId: owner.id });
+    const { owner, task } = await ownerWithTask();
     const out = await logTimeManually(
       {
         taskId: task.id,
@@ -291,13 +245,9 @@ describe('logTimeManually', () => {
   });
 
   it('flag=OVERLAPPING when overlap; partner row not modified', async () => {
-    const owner = await makeUser();
-    const project = await makeProject({ ownerId: owner.id });
-    const task = await makeTask({ projectId: project.id, creatorId: owner.id });
+    const { owner, task } = await ownerWithTask();
     const partner = await closed(
-      owner.id,
-      D('2025-02-10T09:00:00Z'),
-      D('2025-02-10T10:00:00Z'),
+      owner.id, D('2025-02-10T09:00:00Z'), D('2025-02-10T10:00:00Z'),
       { taskId: task.id },
     );
     const out = await logTimeManually(
@@ -309,17 +259,13 @@ describe('logTimeManually', () => {
       sessionUser(owner),
     );
     expect(out.flag).toBe('OVERLAPPING');
-    const partnerAfter = await prisma.timeEntry.findUnique({
-      where: { id: partner.id },
-    });
+    const partnerAfter = await prisma.timeEntry.findUnique({ where: { id: partner.id } });
     expect(partnerAfter?.flag).toBeNull();
   });
 
   it('non-viewer to a task → 403', async () => {
-    const owner = await makeUser();
+    const { task } = await ownerWithTask();
     const stranger = await makeUser({ role: 'MEMBER' });
-    const project = await makeProject({ ownerId: owner.id });
-    const task = await makeTask({ projectId: project.id, creatorId: owner.id });
     await expect(
       logTimeManually(
         {
@@ -348,7 +294,7 @@ describe('logTimeManually', () => {
     expect(row?.source).toBe('MANUAL_FORM');
   });
 
-  it('non-existent task → NOT_FOUND', async () => {
+  it('non-existent task → NOT_FOUND; < 1 min → durationMin = 1', async () => {
     const u = await makeUser({ role: 'ADMIN' });
     await expect(
       logTimeManually(
@@ -360,10 +306,6 @@ describe('logTimeManually', () => {
         sessionUser(u),
       ),
     ).rejects.toMatchObject({ code: 'NOT_FOUND' });
-  });
-
-  it('< 1 min → durationMin = 1', async () => {
-    const u = await makeUser();
     const out = await logTimeManually(
       {
         startedAt: D('2025-02-10T09:00:00Z'),
@@ -375,15 +317,12 @@ describe('logTimeManually', () => {
   });
 });
 
-// =============================================================================
+// ============================================================================
 // editTimeEntry
-// =============================================================================
-
+// ============================================================================
 describe('editTimeEntry', () => {
   it('refuses if entry has endedAt=null (active timer)', async () => {
-    const owner = await makeUser();
-    const project = await makeProject({ ownerId: owner.id });
-    const task = await makeTask({ projectId: project.id, creatorId: owner.id });
+    const { owner, task } = await ownerWithTask();
     const timer = await startTimer(task.id, sessionUser(owner));
     await expect(
       editTimeEntry(
@@ -394,25 +333,20 @@ describe('editTimeEntry', () => {
     ).rejects.toMatchObject({ code: 'VALIDATION', status: 400 });
   });
 
-  it('refuses if user can’t edit (other user’s entry)', async () => {
+  it('refuses if user can’t edit; PM/ADMIN can edit other user’s entries', async () => {
     const owner = await makeUser();
-    const other = await makeUser({ role: 'MEMBER' });
-    const entry = await closed(owner.id, D('2025-02-10T09:00:00Z'), D('2025-02-10T10:00:00Z'));
+    const stranger = await makeUser({ role: 'MEMBER' });
+    const pm = await makeUser({ role: 'PM' });
+    const e = await closed(owner.id, D('2025-02-10T09:00:00Z'), D('2025-02-10T10:00:00Z'));
     await expect(
       editTimeEntry(
-        entry.id,
+        e.id,
         { startedAt: D('2025-02-10T09:30:00Z'), endedAt: D('2025-02-10T10:30:00Z') },
-        sessionUser(other),
+        sessionUser(stranger),
       ),
     ).rejects.toMatchObject({ code: 'INSUFFICIENT_PERMISSIONS' });
-  });
-
-  it('PM/ADMIN can edit other user’s entry', async () => {
-    const owner = await makeUser();
-    const pm = await makeUser({ role: 'PM' });
-    const entry = await closed(owner.id, D('2025-02-10T09:00:00Z'), D('2025-02-10T10:00:00Z'));
     const out = await editTimeEntry(
-      entry.id,
+      e.id,
       { startedAt: D('2025-02-10T09:00:00Z'), endedAt: D('2025-02-10T11:00:00Z') },
       sessionUser(pm),
     );
@@ -422,14 +356,12 @@ describe('editTimeEntry', () => {
   it('clears OVERLAPPING when moved to free slot', async () => {
     const owner = await makeUser();
     await closed(owner.id, D('2025-02-10T09:00:00Z'), D('2025-02-10T10:00:00Z'));
-    const entry = await closed(
-      owner.id,
-      D('2025-02-10T09:30:00Z'),
-      D('2025-02-10T10:30:00Z'),
+    const e = await closed(
+      owner.id, D('2025-02-10T09:30:00Z'), D('2025-02-10T10:30:00Z'),
       { flag: 'OVERLAPPING' },
     );
     const out = await editTimeEntry(
-      entry.id,
+      e.id,
       { startedAt: D('2025-02-10T11:00:00Z'), endedAt: D('2025-02-10T12:00:00Z') },
       sessionUser(owner),
     );
@@ -439,13 +371,9 @@ describe('editTimeEntry', () => {
   it('sets OVERLAPPING when moved into busy slot', async () => {
     const owner = await makeUser();
     await closed(owner.id, D('2025-02-10T09:00:00Z'), D('2025-02-10T10:00:00Z'));
-    const entry = await closed(
-      owner.id,
-      D('2025-02-10T11:00:00Z'),
-      D('2025-02-10T12:00:00Z'),
-    );
+    const e = await closed(owner.id, D('2025-02-10T11:00:00Z'), D('2025-02-10T12:00:00Z'));
     const out = await editTimeEntry(
-      entry.id,
+      e.id,
       { startedAt: D('2025-02-10T09:30:00Z'), endedAt: D('2025-02-10T10:30:00Z') },
       sessionUser(owner),
     );
@@ -454,13 +382,9 @@ describe('editTimeEntry', () => {
 
   it('excludeEntryId in overlap check excludes the entry itself', async () => {
     const owner = await makeUser();
-    const entry = await closed(
-      owner.id,
-      D('2025-02-10T09:00:00Z'),
-      D('2025-02-10T10:00:00Z'),
-    );
+    const e = await closed(owner.id, D('2025-02-10T09:00:00Z'), D('2025-02-10T10:00:00Z'));
     const out = await editTimeEntry(
-      entry.id,
+      e.id,
       { startedAt: D('2025-02-10T09:00:00Z'), endedAt: D('2025-02-10T10:30:00Z') },
       sessionUser(owner),
     );
@@ -471,18 +395,11 @@ describe('editTimeEntry', () => {
     const owner = await makeUser({ role: 'MEMBER' });
     const otherOwner = await makeUser();
     const otherProject = await makeProject({ ownerId: otherOwner.id, key: 'OOO' });
-    const otherTask = await makeTask({
-      projectId: otherProject.id,
-      creatorId: otherOwner.id,
-    });
-    const entry = await closed(
-      owner.id,
-      D('2025-02-10T09:00:00Z'),
-      D('2025-02-10T10:00:00Z'),
-    );
+    const otherTask = await makeTask({ projectId: otherProject.id, creatorId: otherOwner.id });
+    const e = await closed(owner.id, D('2025-02-10T09:00:00Z'), D('2025-02-10T10:00:00Z'));
     await expect(
       editTimeEntry(
-        entry.id,
+        e.id,
         {
           taskId: otherTask.id,
           startedAt: D('2025-02-10T11:00:00Z'),
@@ -505,23 +422,20 @@ describe('editTimeEntry', () => {
   });
 });
 
-// =============================================================================
+// ============================================================================
 // deleteTimeEntry
-// =============================================================================
-
+// ============================================================================
 describe('deleteTimeEntry', () => {
   it('owner/ADMIN/PM can delete; others 403', async () => {
     const owner = await makeUser();
     const stranger = await makeUser({ role: 'MEMBER' });
     const admin = await makeUser({ role: 'ADMIN' });
     const pm = await makeUser({ role: 'PM' });
-
     for (const actor of [owner, admin, pm]) {
       const e = await closed(owner.id, new Date(Date.now() - 60_000), new Date());
       await deleteTimeEntry(e.id, sessionUser(actor));
       expect(await prisma.timeEntry.findUnique({ where: { id: e.id } })).toBeNull();
     }
-
     const e = await closed(owner.id, new Date(Date.now() - 60_000), new Date());
     await expect(
       deleteTimeEntry(e.id, sessionUser(stranger)),
@@ -536,40 +450,35 @@ describe('deleteTimeEntry', () => {
   });
 });
 
-// =============================================================================
+// ============================================================================
 // getTimeEntry
-// =============================================================================
-
+// ============================================================================
 describe('getTimeEntry', () => {
   it('returns own entry with task projection', async () => {
     const owner = await makeUser();
     const project = await makeProject({ ownerId: owner.id, key: 'XYZ' });
     const task = await makeTask({
-      projectId: project.id,
-      creatorId: owner.id,
-      number: 7,
-      title: 'task title',
+      projectId: project.id, creatorId: owner.id, number: 7, title: 'task title',
     });
-    const entry = await closed(
-      owner.id,
-      new Date(Date.now() - 60_000),
-      new Date(),
-      { taskId: task.id },
+    const e = await closed(
+      owner.id, new Date(Date.now() - 60_000), new Date(), { taskId: task.id },
     );
-    const out = await getTimeEntry(entry.id, sessionUser(owner));
-    expect(out.id).toBe(entry.id);
+    const out = await getTimeEntry(e.id, sessionUser(owner));
+    expect(out.id).toBe(e.id);
     expect(out.task?.number).toBe(7);
     expect(out.task?.title).toBe('task title');
     expect(out.task?.project.key).toBe('XYZ');
   });
 
-  it('cannot access other user’s entry', async () => {
+  it('cannot access other user’s entry; null task when no taskId', async () => {
     const owner = await makeUser();
     const other = await makeUser({ role: 'MEMBER' });
-    const entry = await closed(owner.id, new Date(Date.now() - 60_000), new Date());
+    const e = await closed(owner.id, new Date(Date.now() - 60_000), new Date());
     await expect(
-      getTimeEntry(entry.id, sessionUser(other)),
+      getTimeEntry(e.id, sessionUser(other)),
     ).rejects.toMatchObject({ code: 'INSUFFICIENT_PERMISSIONS' });
+    const out = await getTimeEntry(e.id, sessionUser(owner));
+    expect(out.task).toBeNull();
   });
 
   it('not-found → NOT_FOUND', async () => {
@@ -578,19 +487,11 @@ describe('getTimeEntry', () => {
       getTimeEntry('bogus', sessionUser(u)),
     ).rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
-
-  it('returns null task when entry has no taskId', async () => {
-    const owner = await makeUser();
-    const entry = await closed(owner.id, new Date(Date.now() - 60_000), new Date());
-    const out = await getTimeEntry(entry.id, sessionUser(owner));
-    expect(out.task).toBeNull();
-  });
 });
 
-// =============================================================================
+// ============================================================================
 // listTimeEntries
-// =============================================================================
-
+// ============================================================================
 describe('listTimeEntries', () => {
   it('filters by from/to range, ordered desc by startedAt', async () => {
     const owner = await makeUser();
@@ -613,29 +514,18 @@ describe('listTimeEntries', () => {
     expect(out[2]?.startedAt.toISOString()).toBe('2025-02-10T08:00:00.000Z');
   });
 
-  it('does not return another user’s entries', async () => {
+  it('does not return another user’s entries; includes task+project projection', async () => {
     const a = await makeUser();
     const b = await makeUser();
-    await closed(b.id, D('2025-02-10T10:00:00Z'), D('2025-02-10T11:00:00Z'));
-    const out = await listTimeEntries(a.id, {
-      from: D('2025-02-10T00:00:00Z'),
-      to: D('2025-02-11T00:00:00Z'),
-    });
-    expect(out).toHaveLength(0);
-  });
-
-  it('includes task and project projection', async () => {
-    const owner = await makeUser();
-    const project = await makeProject({ ownerId: owner.id, key: 'AAA' });
+    const project = await makeProject({ ownerId: a.id, key: 'AAA' });
     const task = await makeTask({
-      projectId: project.id,
-      creatorId: owner.id,
-      title: 'titled',
+      projectId: project.id, creatorId: a.id, title: 'titled',
     });
-    await closed(owner.id, D('2025-02-10T10:00:00Z'), D('2025-02-10T11:00:00Z'), {
+    await closed(b.id, D('2025-02-10T10:00:00Z'), D('2025-02-10T11:00:00Z'));
+    await closed(a.id, D('2025-02-10T10:00:00Z'), D('2025-02-10T11:00:00Z'), {
       taskId: task.id,
     });
-    const out = await listTimeEntries(owner.id, {
+    const out = await listTimeEntries(a.id, {
       from: D('2025-02-10T00:00:00Z'),
       to: D('2025-02-11T00:00:00Z'),
     });
@@ -645,10 +535,9 @@ describe('listTimeEntries', () => {
   });
 });
 
-// =============================================================================
+// ============================================================================
 // resolveRange
-// =============================================================================
-
+// ============================================================================
 describe('resolveRange', () => {
   it('today → 00:00 today to 00:00 tomorrow', () => {
     const { from, to } = resolveRange('today');
@@ -661,8 +550,7 @@ describe('resolveRange', () => {
   it('week → Monday-start to next Monday', () => {
     const { from, to } = resolveRange('week');
     expect(from.getHours()).toBe(0);
-    // (day + 6) % 7 — Monday is 0 after the shift.
-    expect((from.getDay() + 6) % 7).toBe(0);
+    expect((from.getDay() + 6) % 7).toBe(0); // Monday after the shift
     expect(to.getTime() - from.getTime()).toBe(7 * 24 * 3600 * 1000);
   });
 
@@ -680,7 +568,7 @@ describe('resolveRange', () => {
     expect(from.getMonth()).toBe(1);
     expect(from.getDate()).toBe(10);
     expect(from.getHours()).toBe(0);
-    // `to` is exclusive: 2025-02-12 string → 2025-02-13 00:00
+    // `to` is exclusive: 2025-02-12 → 2025-02-13 00:00.
     expect(to.getDate()).toBe(13);
     expect(to.getMonth()).toBe(1);
   });
@@ -699,9 +587,9 @@ describe('resolveRange', () => {
     const { from, to } = resolveRange('custom', '2025-02-10');
     expect(from.getDate()).toBe(10);
     expect(from.getMonth()).toBe(1);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    today.setDate(today.getDate() + 1);
-    expect(to.getDate()).toBe(today.getDate());
+    const tomorrow = new Date();
+    tomorrow.setHours(0, 0, 0, 0);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    expect(to.getDate()).toBe(tomorrow.getDate());
   });
 });

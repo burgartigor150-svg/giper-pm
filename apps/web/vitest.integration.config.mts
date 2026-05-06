@@ -24,6 +24,8 @@ export default defineConfig({
     maxConcurrency: 1,
     sequence: {
       concurrent: false,
+      shuffle: false,
+      hooks: 'list',
     },
     testTimeout: 30_000,
     hookTimeout: 30_000,

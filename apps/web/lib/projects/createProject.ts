@@ -1,6 +1,7 @@
-import { prisma, Prisma } from '@giper/db';
+import { prisma } from '@giper/db';
 import type { CreateProjectInput } from '@giper/shared';
 import { DomainError } from '../errors';
+import { isUniqueConstraintError } from '../prisma-errors';
 import { canCreateProject, type SessionUser } from '../permissions';
 
 export async function createProject(input: CreateProjectInput, user: SessionUser) {
@@ -25,7 +26,7 @@ export async function createProject(input: CreateProjectInput, user: SessionUser
       },
     });
   } catch (e) {
-    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+    if (isUniqueConstraintError(e)) {
       throw new DomainError('CONFLICT', 409, 'Проект с таким ключом уже существует');
     }
     throw e;

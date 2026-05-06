@@ -52,8 +52,6 @@ beforeEach(() => {
   mockMe.role = 'ADMIN';
 });
 
-// ----- createTaskAction -----------------------------------------------------
-
 describe('createTaskAction', () => {
   it('creates a task and redirects', async () => {
     const u = await makeUser({ role: 'ADMIN' });
@@ -133,8 +131,6 @@ describe('createTaskAction', () => {
   });
 });
 
-// ----- updateTaskAction -----------------------------------------------------
-
 describe('updateTaskAction', () => {
   it('updates a task (happy path)', async () => {
     const u = await makeUser({ role: 'ADMIN' });
@@ -190,8 +186,6 @@ describe('updateTaskAction', () => {
   });
 });
 
-// ----- changeStatusAction --------------------------------------------------
-
 describe('changeStatusAction', () => {
   it('changes status (happy path)', async () => {
     const u = await makeUser({ role: 'ADMIN' });
@@ -235,8 +229,6 @@ describe('changeStatusAction', () => {
   });
 });
 
-// ----- assignTaskAction ----------------------------------------------------
-
 describe('assignTaskAction', () => {
   it('assigns a task (happy path)', async () => {
     const owner = await makeUser({ role: 'ADMIN' });
@@ -278,8 +270,6 @@ describe('assignTaskAction', () => {
     if (!res.ok) expect(res.error.code).toBe('VALIDATION');
   });
 });
-
-// ----- addCommentAction ---------------------------------------------------
 
 describe('addCommentAction', () => {
   it('adds a comment (happy path)', async () => {
@@ -329,8 +319,6 @@ describe('addCommentAction', () => {
   });
 });
 
-// ----- deleteTaskAction ---------------------------------------------------
-
 describe('deleteTaskAction', () => {
   it('deletes a task and redirects', async () => {
     const u = await makeUser({ role: 'ADMIN' });
@@ -369,8 +357,6 @@ describe('deleteTaskAction', () => {
     if (res && !res.ok) expect(res.error.code).toBe('INSUFFICIENT_PERMISSIONS');
   });
 });
-
-// ----- searchTasks (utility) ----------------------------------------------
 
 describe('searchTasks', () => {
   it('returns [] for queries shorter than 2 chars', async () => {

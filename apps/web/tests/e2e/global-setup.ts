@@ -42,6 +42,7 @@ export default async function globalSetup(config: FullConfig) {
   const hash = await bcrypt.hash('admin-pass-1', 4);
   await prisma.user.create({
     data: {
+      id: 'admin-e2e-stable-id',
       email: 'admin@e2e.test',
       name: 'Admin E2E',
       role: 'ADMIN',

@@ -51,7 +51,17 @@ beforeEach(() => {
   mockMe.role = 'ADMIN';
 });
 
-// ----- startTimerAction ---------------------------------------------------
+async function makeClosedEntry(userId: string) {
+  return prisma.timeEntry.create({
+    data: {
+      userId,
+      startedAt: new Date('2025-03-01T09:00:00'),
+      endedAt: new Date('2025-03-01T10:00:00'),
+      durationMin: 60,
+      source: 'MANUAL_FORM',
+    },
+  });
+}
 
 describe('startTimerAction', () => {
   it('starts a timer (happy path)', async () => {
@@ -115,8 +125,6 @@ describe('startTimerAction', () => {
   });
 });
 
-// ----- stopTimerAction ---------------------------------------------------
-
 describe('stopTimerAction', () => {
   it('stops the active timer', async () => {
     const u = await makeUser({ role: 'ADMIN' });
@@ -142,8 +150,6 @@ describe('stopTimerAction', () => {
   });
 });
 
-// ----- getActiveTimerAction ----------------------------------------------
-
 describe('getActiveTimerAction', () => {
   it('returns null when no active timer', async () => {
     const u = await makeUser({ role: 'ADMIN' });
@@ -165,8 +171,6 @@ describe('getActiveTimerAction', () => {
     expect(result?.task?.title).toBe('Working on this');
   });
 });
-
-// ----- logTimeAction -----------------------------------------------------
 
 describe('logTimeAction', () => {
   it('logs time without task (happy path)', async () => {
@@ -195,16 +199,13 @@ describe('logTimeAction', () => {
     mockMe.id = u.id;
     const p = await makeProject({ ownerId: u.id, key: 'LGT' });
     const t = await makeTask({ projectId: p.id, creatorId: u.id });
-
     const fd = new FormData();
     fd.set('taskId', t.id);
     fd.set('date', '2025-04-01');
     fd.set('startTime', '09:00');
     fd.set('endTime', '10:00');
-
     const res = await logTimeAction(null, fd);
     expect(res.ok).toBe(true);
-
     const entries = await prisma.timeEntry.findMany({ where: { userId: u.id } });
     expect(entries[0]?.taskId).toBe(t.id);
     expect(entries[0]?.durationMin).toBe(60);
@@ -269,22 +270,11 @@ describe('logTimeAction', () => {
   });
 });
 
-// ----- editTimeEntryAction -----------------------------------------------
-
 describe('editTimeEntryAction', () => {
   it('edits an entry and redirects', async () => {
     const u = await makeUser({ role: 'ADMIN' });
     mockMe.id = u.id;
-
-    const entry = await prisma.timeEntry.create({
-      data: {
-        userId: u.id,
-        startedAt: new Date('2025-03-01T09:00:00'),
-        endedAt: new Date('2025-03-01T10:00:00'),
-        durationMin: 60,
-        source: 'MANUAL_FORM',
-      },
-    });
+    const entry = await makeClosedEntry(u.id);
 
     const fd = new FormData();
     fd.set('date', '2025-03-01');
@@ -302,16 +292,7 @@ describe('editTimeEntryAction', () => {
   it('returns VALIDATION when end < start', async () => {
     const u = await makeUser({ role: 'ADMIN' });
     mockMe.id = u.id;
-
-    const entry = await prisma.timeEntry.create({
-      data: {
-        userId: u.id,
-        startedAt: new Date('2025-03-01T09:00:00'),
-        endedAt: new Date('2025-03-01T10:00:00'),
-        durationMin: 60,
-        source: 'MANUAL_FORM',
-      },
-    });
+    const entry = await makeClosedEntry(u.id);
 
     const fd = new FormData();
     fd.set('date', '2025-03-01');
@@ -344,16 +325,7 @@ describe('editTimeEntryAction', () => {
   it('returns INSUFFICIENT_PERMISSIONS when MEMBER edits other’s entry', async () => {
     const owner = await makeUser({ role: 'ADMIN' });
     const other = await makeUser({ role: 'MEMBER' });
-
-    const entry = await prisma.timeEntry.create({
-      data: {
-        userId: owner.id,
-        startedAt: new Date('2025-03-01T09:00:00'),
-        endedAt: new Date('2025-03-01T10:00:00'),
-        durationMin: 60,
-        source: 'MANUAL_FORM',
-      },
-    });
+    const entry = await makeClosedEntry(owner.id);
 
     mockMe.id = other.id;
     mockMe.role = 'MEMBER';
@@ -392,22 +364,11 @@ describe('editTimeEntryAction', () => {
   });
 });
 
-// ----- deleteTimeEntryAction ---------------------------------------------
-
 describe('deleteTimeEntryAction', () => {
   it('deletes own entry', async () => {
     const u = await makeUser({ role: 'ADMIN' });
     mockMe.id = u.id;
-
-    const entry = await prisma.timeEntry.create({
-      data: {
-        userId: u.id,
-        startedAt: new Date('2025-03-01T09:00:00'),
-        endedAt: new Date('2025-03-01T10:00:00'),
-        durationMin: 60,
-        source: 'MANUAL_FORM',
-      },
-    });
+    const entry = await makeClosedEntry(u.id);
 
     const res = await deleteTimeEntryAction(entry.id);
     expect(res).toEqual({ ok: true });
@@ -426,16 +387,7 @@ describe('deleteTimeEntryAction', () => {
   it('returns INSUFFICIENT_PERMISSIONS when MEMBER deletes other’s entry', async () => {
     const owner = await makeUser({ role: 'ADMIN' });
     const other = await makeUser({ role: 'MEMBER' });
-
-    const entry = await prisma.timeEntry.create({
-      data: {
-        userId: owner.id,
-        startedAt: new Date('2025-03-01T09:00:00'),
-        endedAt: new Date('2025-03-01T10:00:00'),
-        durationMin: 60,
-        source: 'MANUAL_FORM',
-      },
-    });
+    const entry = await makeClosedEntry(owner.id);
 
     mockMe.id = other.id;
     mockMe.role = 'MEMBER';
