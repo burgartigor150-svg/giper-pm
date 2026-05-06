@@ -1,5 +1,3 @@
-'use client';
-
 type Slice = { label: string; minutes: number; color: string };
 
 type Props = {
