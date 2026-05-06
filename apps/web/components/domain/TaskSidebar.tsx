@@ -2,7 +2,6 @@
 
 import { useState, useTransition } from 'react';
 import { Avatar } from '@giper/ui/components/Avatar';
-import { Button } from '@giper/ui/components/Button';
 import { Input } from '@giper/ui/components/Input';
 import {
   assignTaskAction,
@@ -181,10 +180,6 @@ export function TaskSidebar(props: Props) {
           <span>{fmtDate(props.completedAt)}</span>
         </div>
       </div>
-
-      <Button type="button" variant="outline" disabled>
-        ▶ Запустить таймер
-      </Button>
     </div>
   );
 }

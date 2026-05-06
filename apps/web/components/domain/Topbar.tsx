@@ -4,7 +4,18 @@ import { Menu, Plus, Search } from 'lucide-react';
 import { Button } from '@giper/ui/components/Button';
 import { Input } from '@giper/ui/components/Input';
 import { useT } from '@/lib/useT';
+import { TimerWidget } from './TimerWidget';
 import { UserMenu } from './UserMenu';
+
+type ActiveTimer = {
+  startedAt: Date | string;
+  task: {
+    id: string;
+    number: number;
+    title: string;
+    project: { key: string };
+  } | null;
+};
 
 type Props = {
   user: {
@@ -13,9 +24,10 @@ type Props = {
     image?: string | null;
   };
   onOpenMenu: () => void;
+  activeTimer: ActiveTimer | null;
 };
 
-export function Topbar({ user, onOpenMenu }: Props) {
+export function Topbar({ user, onOpenMenu, activeTimer }: Props) {
   const t = useT('topbar');
 
   return (
@@ -41,7 +53,8 @@ export function Topbar({ user, onOpenMenu }: Props) {
         />
       </div>
 
-      <div className="ml-auto flex items-center gap-2">
+      <div className="relative ml-auto flex items-center gap-2">
+        <TimerWidget active={activeTimer} />
         <Button variant="default" size="sm" disabled aria-label={t('createTask')}>
           <Plus className="h-4 w-4" />
           <span className="hidden sm:inline">{t('createTask')}</span>

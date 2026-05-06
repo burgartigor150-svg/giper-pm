@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@giper/ui/components/C
 import { prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
 import { getTask } from '@/lib/tasks';
+import { getActiveTimer } from '@/lib/time';
 import { canDeleteTask, canEditTask } from '@/lib/permissions';
 import { DomainError } from '@/lib/errors';
 import { getT } from '@/lib/i18n';
@@ -14,6 +15,7 @@ import { TaskSidebar } from '@/components/domain/TaskSidebar';
 import { CommentForm } from '@/components/domain/CommentForm';
 import { TaskStatusBadge } from '@/components/domain/TaskStatusBadge';
 import { DeleteTaskButton } from '@/components/domain/DeleteTaskButton';
+import { TaskTimerButton } from '@/components/domain/TaskTimerButton';
 
 type Params = Promise<{ projectKey: string; number: string }>;
 
@@ -35,6 +37,8 @@ export default async function TaskDetailPage({ params }: { params: Params }) {
     }
     throw e;
   }
+
+  const activeTimer = await getActiveTimer(me.id);
 
   // Resolve actor names for status changes (only IDs are stored on TaskStatusChange).
   const actorIds = Array.from(new Set(task.statusChanges.map((sc) => sc.changedById)));
@@ -105,7 +109,10 @@ export default async function TaskDetailPage({ params }: { params: Params }) {
         <Link href={`/projects/${task.project.key}/list`} className="text-sm text-muted-foreground hover:underline">
           {t('back')}
         </Link>
-        {canDelete ? <DeleteTaskButton taskId={task.id} projectKey={task.project.key} /> : null}
+        <div className="flex items-center gap-2">
+          <TaskTimerButton taskId={task.id} activeTimer={activeTimer} />
+          {canDelete ? <DeleteTaskButton taskId={task.id} projectKey={task.project.key} /> : null}
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-3">

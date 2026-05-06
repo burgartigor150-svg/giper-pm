@@ -2,6 +2,7 @@ import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { requireAuth } from '@/lib/auth';
 import { canSeeReports, canSeeSettings, type SessionUser } from '@/lib/permissions';
+import { getActiveTimer } from '@/lib/time';
 import { AppShell } from '@/components/domain/AppShell';
 import type { NavItem } from '@/components/domain/Sidebar';
 
@@ -26,6 +27,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   }
 
   const navItems = buildNav({ id: sessionUser.id, role: sessionUser.role });
+  const activeTimer = await getActiveTimer(sessionUser.id);
 
   return (
     <AppShell
@@ -35,6 +37,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         image: sessionUser.image,
       }}
       navItems={navItems}
+      activeTimer={activeTimer}
     >
       {children}
     </AppShell>

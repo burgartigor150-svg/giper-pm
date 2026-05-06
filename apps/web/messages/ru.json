@@ -319,8 +319,77 @@
     }
   },
   "time": {
-    "title": "Время",
-    "stub": "Лог времени появится здесь."
+    "title": "Моё время",
+    "addManual": "Добавить вручную",
+    "totalHours": "Всего часов",
+    "perProject": "По проектам",
+    "noEntries": "Записей пока нет.",
+    "range": {
+      "today": "Сегодня",
+      "week": "Эта неделя",
+      "month": "Месяц",
+      "custom": "Период"
+    },
+    "table": {
+      "when": "Когда",
+      "task": "Задача",
+      "duration": "Длительность",
+      "note": "Заметка",
+      "source": "Источник",
+      "actions": "Действия"
+    },
+    "source": {
+      "MANUAL_TIMER": "Таймер",
+      "MANUAL_FORM": "Вручную",
+      "TELEGRAM": "Telegram",
+      "AUTO_AGENT": "Агент",
+      "AUTO_BROWSER": "Браузер",
+      "DIGITAL_GIT": "Git",
+      "DIGITAL_CALENDAR": "Календарь",
+      "DIGITAL_SLACK": "Slack"
+    },
+    "flag": {
+      "OVERLAPPING": "Пересечение",
+      "REVIEW_NEEDED": "Проверить",
+      "GAP_DETECTED": "Пробел",
+      "EXCESSIVE": "Слишком много",
+      "IDLE_LOGGED": "Idle"
+    },
+    "form": {
+      "title": "Запись времени",
+      "editTitle": "Редактировать запись",
+      "task": "Задача",
+      "taskOptional": "Задача (опционально)",
+      "noTask": "Без задачи",
+      "date": "Дата",
+      "startTime": "Начало",
+      "endTime": "Окончание",
+      "note": "Заметка",
+      "submit": "Сохранить",
+      "cancel": "Отмена",
+      "delete": "Удалить",
+      "deleteConfirm": "Удалить запись времени?",
+      "overlapWarning": "Запись пересекается с другой и помечена флагом «Пересечение»."
+    },
+    "timer": {
+      "start": "Старт",
+      "stop": "Стоп",
+      "running": "Идёт",
+      "noActive": "Нет активного таймера",
+      "switchTitle": "Переключить таймер?",
+      "switchBody": "Сейчас идёт таймер на «{current}». Остановить и запустить на «{next}»?",
+      "switchConfirm": "Переключить",
+      "cancel": "Отмена",
+      "pickTask": "Найти задачу",
+      "searchPlaceholder": "Введите название задачи",
+      "minSearchLength": "Минимум 2 символа",
+      "noResults": "Ничего не найдено"
+    },
+    "errors": {
+      "INSUFFICIENT_PERMISSIONS": "Недостаточно прав",
+      "VALIDATION": "Проверьте поля",
+      "NOT_FOUND": "Запись не найдена"
+    }
   },
   "reports": {
     "title": "Отчёты",

@@ -12,6 +12,7 @@ import {
   type CreateTaskInput,
   type UpdateTaskInput,
 } from '@giper/shared';
+import { prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
 import { DomainError } from '@/lib/errors';
 import {
@@ -206,3 +207,55 @@ export async function deleteTaskAction(
 
 // Re-export status enum for client typing convenience
 export const ALL_TASK_STATUSES = taskStatusSchema.options;
+
+// ----- Search (used by header timer widget) -----------------------------
+
+export type TaskSearchHit = {
+  id: string;
+  number: number;
+  title: string;
+  projectKey: string;
+};
+
+/**
+ * Search tasks by title across all projects the user can view.
+ * Returns up to 10 hits. Min query length 2.
+ */
+export async function searchTasks(query: string): Promise<TaskSearchHit[]> {
+  const me = await requireAuth();
+  const q = query.trim();
+  if (q.length < 2) return [];
+
+  const where =
+    me.role === 'ADMIN' || me.role === 'PM'
+      ? {}
+      : {
+          OR: [
+            { ownerId: me.id },
+            { members: { some: { userId: me.id } } },
+          ],
+        };
+
+  const tasks = await prisma.task.findMany({
+    where: {
+      title: { contains: q, mode: 'insensitive' as const },
+      status: { not: 'CANCELED' },
+      project: where,
+    },
+    orderBy: { updatedAt: 'desc' },
+    take: 10,
+    select: {
+      id: true,
+      number: true,
+      title: true,
+      project: { select: { key: true } },
+    },
+  });
+
+  return tasks.map((t) => ({
+    id: t.id,
+    number: t.number,
+    title: t.title,
+    projectKey: t.project.key,
+  }));
+}
