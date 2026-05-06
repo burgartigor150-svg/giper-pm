@@ -1,0 +1,29 @@
+{
+  "name": "giper-pm",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Internal PM and time-tracking system for giper.fm",
+  "packageManager": "pnpm@9.12.3",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "dev:web": "turbo run dev --filter=@giper/web",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "test:e2e": "turbo run test:e2e",
+    "db:migrate": "turbo run db:migrate --filter=@giper/db",
+    "db:push": "turbo run db:push --filter=@giper/db",
+    "db:studio": "turbo run db:studio --filter=@giper/db",
+    "db:seed": "turbo run db:seed --filter=@giper/db",
+    "clean": "turbo run clean && rm -rf node_modules"
+  },
+  "devDependencies": {
+    "turbo": "^2.3.3",
+    "typescript": "^5.6.3",
+    "prettier": "^3.3.3",
+    "prettier-plugin-tailwindcss": "^0.6.8"
+  }
+}

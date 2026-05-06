@@ -1,0 +1,534 @@
+// ============================================================================
+// SCHEMA.prisma — модель данных giper-pm
+// Источник истины. Любые изменения модели делаются ЗДЕСЬ И СНАЧАЛА.
+// ============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// AUTH & USERS
+// ============================================================================
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  name         String
+  avatarUrl    String?
+  role         UserRole  @default(MEMBER)
+  hourlyRate   Decimal?  @db.Decimal(10, 2)
+  timezone     String    @default("Europe/Moscow")
+  locale       String    @default("ru")
+  isActive     Boolean   @default(true)
+  
+  // Telegram pairing
+  tgChatId     String?   @unique
+  tgUsername   String?
+  
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  deletedAt    DateTime?
+
+  // Relations
+  consents          UserConsent[]
+  agentDevices      AgentDevice[]
+  ownedProjects     Project[]            @relation("ProjectOwner")
+  memberProjects    ProjectMember[]
+  assignedTasks     Task[]               @relation("TaskAssignee")
+  createdTasks      Task[]               @relation("TaskCreator")
+  timeEntries       TimeEntry[]
+  activities        Activity[]
+  comments          Comment[]
+  auditLogs         AuditLog[]
+  integrationLinks  UserIntegrationLink[]
+  notifications     Notification[]
+
+  @@index([role, isActive])
+}
+
+enum UserRole {
+  ADMIN       // полный доступ, биллинг, настройки
+  PM          // создаёт проекты, видит отчёты команды
+  MEMBER      // обычный сотрудник, видит свои данные + общие задачи
+  VIEWER      // read-only, например для клиента
+}
+
+model UserConsent {
+  id          String        @id @default(cuid())
+  userId      String
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type        ConsentType
+  granted     Boolean
+  grantedAt   DateTime?
+  revokedAt   DateTime?
+  ipAddress   String?       // для аудита
+  userAgent   String?
+  
+  @@unique([userId, type])
+  @@index([userId])
+}
+
+enum ConsentType {
+  WINDOW_TRACKING       // active-win, browser tabs
+  IDLE_DETECTION        // node-system-idle-time
+  SCREENSHOTS           // периодические скриншоты
+  GIT_ACTIVITY          // привязка коммитов к задачам автоматически
+  CALENDAR_SYNC         // подтягивать встречи как TimeEntry
+}
+
+// Устройство, на котором стоит десктоп-агент или браузерное расширение.
+model AgentDevice {
+  id            String       @id @default(cuid())
+  userId        String
+  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind          DeviceKind
+  name          String       // "MacBook Pro Игоря" / "Chrome on Windows"
+  os            String?
+  osVersion     String?
+  appVersion    String?
+  authToken     String       @unique  // hashed token для аутентификации агента
+  pairedAt      DateTime     @default(now())
+  lastSeenAt    DateTime?
+  isActive      Boolean      @default(true)
+  
+  activities    Activity[]
+  screenshots   Screenshot[]
+  
+  @@index([userId, isActive])
+}
+
+enum DeviceKind {
+  DESKTOP_AGENT
+  BROWSER_EXTENSION
+}
+
+// ============================================================================
+// PROJECTS & TASKS
+// ============================================================================
+
+model Project {
+  id            String          @id @default(cuid())
+  key           String          @unique  // "GFM", "OPS" — короткий префикс для тасков
+  name          String
+  description   String?
+  client        String?         // имя клиента (для D2C-проектов)
+  status        ProjectStatus   @default(ACTIVE)
+  budgetHours   Decimal?        @db.Decimal(10, 2)
+  hourlyRate    Decimal?        @db.Decimal(10, 2)  // переопределяет user.hourlyRate
+  startDate     DateTime?
+  deadline      DateTime?
+  ownerId       String
+  owner         User            @relation("ProjectOwner", fields: [ownerId], references: [id])
+  
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  archivedAt    DateTime?
+
+  members       ProjectMember[]
+  tasks         Task[]
+  integrations  ProjectIntegration[]
+
+  @@index([status])
+  @@index([ownerId])
+}
+
+enum ProjectStatus {
+  ACTIVE
+  ON_HOLD
+  COMPLETED
+  ARCHIVED
+}
+
+model ProjectMember {
+  id          String      @id @default(cuid())
+  projectId   String
+  project     Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role        MemberRole  @default(CONTRIBUTOR)
+  addedAt     DateTime    @default(now())
+  
+  @@unique([projectId, userId])
+  @@index([userId])
+}
+
+enum MemberRole {
+  LEAD          // PM проекта
+  CONTRIBUTOR   // активный участник
+  REVIEWER      // только ревью
+  OBSERVER      // read-only
+}
+
+model Task {
+  id            String       @id @default(cuid())
+  number        Int          // порядковый в проекте, для key типа "GFM-42"
+  projectId     String
+  project       Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  title         String
+  description   String?      @db.Text
+  status        TaskStatus   @default(BACKLOG)
+  priority      TaskPriority @default(MEDIUM)
+  type          TaskType     @default(TASK)
+  
+  assigneeId    String?
+  assignee      User?        @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  creatorId     String
+  creator       User         @relation("TaskCreator", fields: [creatorId], references: [id])
+  
+  parentId      String?
+  parent        Task?        @relation("TaskSubtasks", fields: [parentId], references: [id])
+  subtasks      Task[]       @relation("TaskSubtasks")
+  
+  estimateHours Decimal?     @db.Decimal(8, 2)
+  dueDate       DateTime?
+  startedAt     DateTime?    // когда впервые ушло в IN_PROGRESS
+  completedAt   DateTime?    // когда ушло в DONE
+  
+  tags          String[]     @default([])
+  
+  // Внешние идентификаторы для синка
+  externalId    String?      // ID в Bitrix24/Jira
+  externalSource String?     // "bitrix24" / "jira" / null
+  
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  timeEntries   TimeEntry[]
+  comments      Comment[]
+  statusChanges TaskStatusChange[]
+  attachments   Attachment[]
+
+  @@unique([projectId, number])
+  @@index([assigneeId, status])
+  @@index([projectId, status])
+  @@index([dueDate])
+}
+
+enum TaskStatus {
+  BACKLOG
+  TODO
+  IN_PROGRESS
+  REVIEW
+  BLOCKED
+  DONE
+  CANCELED
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TaskType {
+  TASK
+  BUG
+  FEATURE
+  EPIC          // контейнер для подзадач
+  CHORE         // рутина, не имеет бизнес-значения
+}
+
+model TaskStatusChange {
+  id          String     @id @default(cuid())
+  taskId      String
+  task        Task       @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  fromStatus  TaskStatus?
+  toStatus    TaskStatus
+  changedById String
+  changedAt   DateTime   @default(now())
+  
+  @@index([taskId, changedAt])
+}
+
+model Comment {
+  id          String    @id @default(cuid())
+  taskId      String
+  task        Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  authorId    String
+  author      User      @relation(fields: [authorId], references: [id])
+  body        String    @db.Text
+  source      CommentSource @default(WEB)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  @@index([taskId, createdAt])
+}
+
+enum CommentSource {
+  WEB
+  TELEGRAM
+  EMAIL
+  GITHUB        // авто-комментарий от коммита/PR
+  SLACK
+}
+
+model Attachment {
+  id          String    @id @default(cuid())
+  taskId      String
+  task        Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  filename    String
+  mimeType    String
+  sizeBytes   Int
+  storageKey  String    // S3 key
+  uploadedById String
+  uploadedAt  DateTime  @default(now())
+  
+  @@index([taskId])
+}
+
+// ============================================================================
+// TIME TRACKING
+// ============================================================================
+
+model TimeEntry {
+  id          String         @id @default(cuid())
+  userId      String
+  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  taskId      String?
+  task        Task?          @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  
+  startedAt   DateTime
+  endedAt     DateTime?      // null = таймер ещё идёт
+  durationMin Int?           // вычисляется при stop, null пока идёт
+  
+  source      TimeSource
+  category    ActivityCategory? // для авто/digital — категория
+  note        String?        @db.Text
+  
+  // Для digital-источников
+  externalRef String?        // commit SHA, PR ID, calendar event ID
+  
+  // Сверка
+  isReconciled Boolean       @default(false)
+  flag         TimeFlag?
+  
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@index([userId, startedAt])
+  @@index([taskId])
+  @@index([source, startedAt])
+}
+
+enum TimeSource {
+  MANUAL_TIMER     // живой live timer
+  MANUAL_FORM      // ручной ввод задним числом
+  TELEGRAM         // через бота
+  AUTO_AGENT       // от desktop-агента
+  AUTO_BROWSER     // от браузерного расширения
+  DIGITAL_GIT      // из коммита/PR
+  DIGITAL_CALENDAR // из календарного события
+  DIGITAL_SLACK    // из активности в Slack
+}
+
+enum TimeFlag {
+  REVIEW_NEEDED        // расхождение manual vs auto > 30%
+  GAP_DETECTED         // дырка в дне сотрудника
+  OVERLAPPING          // два таймера пересекаются
+  EXCESSIVE            // > 12 часов в день
+  IDLE_LOGGED          // юзер залогировал время в период idle
+}
+
+// Сырые данные от агента и расширения. Агрегируются в TimeEntry.
+model Activity {
+  id          String           @id @default(cuid())
+  userId      String
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deviceId    String
+  device      AgentDevice      @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  
+  capturedAt  DateTime
+  durationSec Int              // длительность семпла, обычно 30
+  
+  appName     String?          // "Code", "Chrome", "Slack"
+  windowTitle String?          // тайтл окна (или title вкладки)
+  url         String?          // только для браузерного семпла
+  domain      String?          // host из URL
+  
+  idleSeconds Int              @default(0)  // сколько из durationSec был idle
+  category    ActivityCategory?
+  
+  // Auto-detected ссылка на задачу
+  detectedTaskId String?
+  
+  createdAt   DateTime         @default(now())
+  
+  @@index([userId, capturedAt])
+  @@index([deviceId, capturedAt])
+}
+
+enum ActivityCategory {
+  CODING
+  DESIGN
+  WRITING
+  COMMUNICATION    // Slack, email, TG
+  MEETING          // Zoom, Meet, Teams
+  RESEARCH         // браузер с docs/Stack Overflow
+  BROWSING         // нерелевантный браузинг
+  IDLE
+  PERSONAL         // явно помеченное юзером личное время
+  UNKNOWN
+}
+
+model Screenshot {
+  id          String       @id @default(cuid())
+  deviceId    String
+  device      AgentDevice  @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  capturedAt  DateTime
+  storageKey  String       // S3 key
+  blurred     Boolean      @default(false)
+  thumbKey    String?      // превью
+  
+  // Auto-delete через 30 дней (cron job)
+  expiresAt   DateTime
+  
+  createdAt   DateTime     @default(now())
+  
+  @@index([deviceId, capturedAt])
+  @@index([expiresAt])  // для cron очистки
+}
+
+// ============================================================================
+// INTEGRATIONS
+// ============================================================================
+
+model Integration {
+  id          String         @id @default(cuid())
+  kind        IntegrationKind
+  name        String         // человекочитаемое имя инстанса
+  config      Json           // зависит от kind
+  isActive    Boolean        @default(true)
+  
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  projectLinks ProjectIntegration[]
+  userLinks    UserIntegrationLink[]
+  syncLogs     IntegrationSyncLog[]
+  
+  @@unique([kind, name])
+}
+
+enum IntegrationKind {
+  GITHUB
+  GITLAB
+  BITRIX24
+  JIRA
+  SLACK
+  GOOGLE_CALENDAR
+  FIGMA
+  TELEGRAM
+}
+
+model ProjectIntegration {
+  id            String       @id @default(cuid())
+  projectId     String
+  project       Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  integrationId String
+  integration   Integration  @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  externalId    String       // GitHub repo, Bitrix24 group ID, Jira project key
+  config        Json?        // override-настройки для этой связки
+  
+  @@unique([projectId, integrationId, externalId])
+}
+
+model UserIntegrationLink {
+  id            String       @id @default(cuid())
+  userId        String
+  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  integrationId String
+  integration   Integration  @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  externalId    String       // github username, bitrix user id, slack member id
+  accessToken   String?      // OAuth-токен юзера, шифрованный
+  refreshToken  String?
+  
+  @@unique([userId, integrationId])
+}
+
+model IntegrationSyncLog {
+  id            String       @id @default(cuid())
+  integrationId String
+  integration   Integration  @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  direction     SyncDirection
+  startedAt     DateTime     @default(now())
+  finishedAt    DateTime?
+  status        SyncStatus
+  itemsProcessed Int         @default(0)
+  errors        Json?
+  
+  @@index([integrationId, startedAt])
+}
+
+enum SyncDirection {
+  IN
+  OUT
+  WEBHOOK
+}
+
+enum SyncStatus {
+  RUNNING
+  SUCCESS
+  PARTIAL
+  FAILED
+}
+
+// ============================================================================
+// AUDIT & NOTIFICATIONS
+// ============================================================================
+
+model AuditLog {
+  id          String     @id @default(cuid())
+  userId      String?
+  user        User?      @relation(fields: [userId], references: [id], onDelete: SetNull)
+  entity      String     // "Task", "TimeEntry", "Project"
+  entityId    String
+  action      String     // "create", "update", "delete", "status_change"
+  diff        Json?      // before/after для update
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime   @default(now())
+  
+  @@index([entity, entityId])
+  @@index([userId, createdAt])
+}
+
+model Notification {
+  id          String              @id @default(cuid())
+  userId      String
+  user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind        NotificationKind
+  title       String
+  body        String?             @db.Text
+  link        String?             // относительный путь в приложении
+  payload     Json?               // зависит от kind
+  
+  isRead      Boolean             @default(false)
+  readAt      DateTime?
+  
+  // Каналы доставки
+  sentEmail     Boolean           @default(false)
+  sentTelegram  Boolean           @default(false)
+  
+  createdAt   DateTime            @default(now())
+  
+  @@index([userId, isRead, createdAt])
+}
+
+enum NotificationKind {
+  TASK_ASSIGNED
+  TASK_COMMENTED
+  TASK_STATUS_CHANGED
+  TIME_DISCREPANCY        // PM-у при расхождении
+  TIME_CONFIRMATION       // юзеру в конце дня
+  DEADLINE_APPROACHING
+  DEADLINE_PASSED
+  MENTION
+  SYSTEM
+}
