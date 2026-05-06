@@ -14,10 +14,12 @@
     "lint": "turbo run lint",
     "test": "turbo run test",
     "test:e2e": "turbo run test:e2e",
-    "db:migrate": "turbo run db:migrate --filter=@giper/db",
-    "db:push": "turbo run db:push --filter=@giper/db",
-    "db:studio": "turbo run db:studio --filter=@giper/db",
-    "db:seed": "turbo run db:seed --filter=@giper/db",
+    "db:up": "docker compose -f infra/docker-compose.yml up -d",
+    "db:down": "docker compose -f infra/docker-compose.yml down",
+    "db:migrate": "pnpm --filter @giper/db migrate",
+    "db:push": "pnpm --filter @giper/db push",
+    "db:studio": "pnpm --filter @giper/db studio",
+    "db:seed": "pnpm --filter @giper/db seed",
     "clean": "turbo run clean && rm -rf node_modules"
   },
   "devDependencies": {
