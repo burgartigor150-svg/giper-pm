@@ -11,19 +11,28 @@ export type SyncTasksResult = {
   errors: number;
 };
 
+export type SyncTasksOptions = {
+  /** Only return tasks updated at or after this moment. */
+  since?: Date | null;
+  /**
+   * When set, fetch only tasks where this Bitrix24 user is RESPONSIBLE_ID
+   * or CREATED_BY. We issue two separate `tasks.task.list` calls (one per
+   * field) and dedupe by id — Bitrix's filter LOGIC=OR is per-method and
+   * unreliable across portals; two narrow calls are safer and still fast.
+   */
+  forBitrixUserId?: string | null;
+};
+
 /**
  * Mirror Bitrix24 tasks → our Task table. Only tasks belonging to a
  * synced workgroup (project with externalSource='bitrix24') are imported;
  * standalone Bitrix tasks (groupId=0) are skipped — we don't manufacture
  * a synthetic "personal" project.
- *
- * Incremental: pass `since` to only fetch tasks changed after that timestamp.
- * `tasks.task.list` accepts `>=CHANGED_DATE` in its filter.
  */
 export async function syncTasks(
   prisma: PrismaClient,
   client: Bitrix24Client,
-  opts: { since?: Date | null } = {},
+  opts: SyncTasksOptions = {},
 ): Promise<SyncTasksResult> {
   const stats: SyncTasksResult = {
     totalSeen: 0,
@@ -51,49 +60,72 @@ export async function syncTasks(
 
   const fallbackCreator = await firstAdminId(prisma);
 
-  type Page = { tasks: BxTask[] };
-  const filter: Record<string, unknown> = {};
-  if (opts.since) filter['>=CHANGED_DATE'] = opts.since.toISOString();
+  // Build the list of (filter) calls we'll make. Each call paginates
+  // independently; we dedupe across calls by task id so a task that
+  // matches both filters is processed once.
+  const baseFilter: Record<string, unknown> = {};
+  if (opts.since) baseFilter['>=CHANGED_DATE'] = opts.since.toISOString();
 
-  let start = 0;
-  while (true) {
-    const page = await client.call<Page>('tasks.task.list', {
-      filter,
-      order: { CHANGED_DATE: 'asc' },
-      select: [
-        'ID',
-        'TITLE',
-        'DESCRIPTION',
-        'STATUS',
-        'PRIORITY',
-        'GROUP_ID',
-        'RESPONSIBLE_ID',
-        'CREATED_BY',
-        'CREATED_DATE',
-        'CHANGED_DATE',
-        'CLOSED_DATE',
-        'DEADLINE',
-        'START_DATE_PLAN',
-        'PARENT_ID',
-      ],
-      start,
-    });
-    const items = page.result?.tasks ?? [];
-    if (items.length === 0) break;
-    stats.totalSeen += items.length;
+  const filters: Record<string, unknown>[] = [];
+  if (opts.forBitrixUserId) {
+    filters.push({ ...baseFilter, RESPONSIBLE_ID: opts.forBitrixUserId });
+    filters.push({ ...baseFilter, CREATED_BY: opts.forBitrixUserId });
+  } else {
+    filters.push(baseFilter);
+  }
 
-    for (const raw of items) {
-      try {
-        await upsertOne(prisma, raw, projectByExternalId, userByBitrixId, fallbackCreator, stats);
-      } catch (e) {
-        stats.errors++;
-        // eslint-disable-next-line no-console
-        console.error('bitrix24 syncTasks: failed to upsert task', raw.id, e);
+  const seenIds = new Set<string>();
+
+  for (const filter of filters) {
+    let start = 0;
+    while (true) {
+      const page = await client.call<{ tasks: BxTask[] }>('tasks.task.list', {
+        filter,
+        order: { CHANGED_DATE: 'asc' },
+        select: [
+          'ID',
+          'TITLE',
+          'DESCRIPTION',
+          'STATUS',
+          'PRIORITY',
+          'GROUP_ID',
+          'RESPONSIBLE_ID',
+          'CREATED_BY',
+          'CREATED_DATE',
+          'CHANGED_DATE',
+          'CLOSED_DATE',
+          'DEADLINE',
+          'START_DATE_PLAN',
+          'PARENT_ID',
+        ],
+        start,
+      });
+      const items = page.result?.tasks ?? [];
+      if (items.length === 0) break;
+
+      for (const raw of items) {
+        if (seenIds.has(raw.id)) continue;
+        seenIds.add(raw.id);
+        stats.totalSeen++;
+        try {
+          await upsertOne(
+            prisma,
+            raw,
+            projectByExternalId,
+            userByBitrixId,
+            fallbackCreator,
+            stats,
+          );
+        } catch (e) {
+          stats.errors++;
+          // eslint-disable-next-line no-console
+          console.error('bitrix24 syncTasks: failed to upsert task', raw.id, e);
+        }
       }
-    }
 
-    if (typeof page.next !== 'number') break;
-    start = page.next;
+      if (typeof page.next !== 'number') break;
+      start = page.next;
+    }
   }
 
   return stats;

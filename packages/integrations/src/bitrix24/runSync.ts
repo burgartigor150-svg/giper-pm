@@ -15,6 +15,17 @@ export type RunSyncResult = {
   error?: string;
 };
 
+export type RunSyncOptions = {
+  since?: Date | null;
+  trigger?: 'manual' | 'cron';
+  /**
+   * Restrict the mirror to one Bitrix24 user — only their workgroups and
+   * the tasks where they're either RESPONSIBLE_ID or CREATED_BY. Used for
+   * single-user installs (matches the "personal mirror" use-case).
+   */
+  forBitrixUserId?: string | null;
+};
+
 /**
  * One full read-only sync pass. Order matters:
  *   users    — so we can resolve task assignees by bitrix id
@@ -26,7 +37,7 @@ export type RunSyncResult = {
 export async function runBitrix24Sync(
   prisma: PrismaClient,
   client: Bitrix24Client,
-  opts: { since?: Date | null; trigger?: 'manual' | 'cron' } = {},
+  opts: RunSyncOptions = {},
 ): Promise<RunSyncResult> {
   const startedAt = new Date();
 
@@ -60,8 +71,13 @@ export async function runBitrix24Sync(
 
   try {
     users = await syncUsers(prisma, client);
-    projects = await syncProjects(prisma, client);
-    tasks = await syncTasks(prisma, client, { since: opts.since ?? null });
+    projects = await syncProjects(prisma, client, {
+      forBitrixUserId: opts.forBitrixUserId ?? null,
+    });
+    tasks = await syncTasks(prisma, client, {
+      since: opts.since ?? null,
+      forBitrixUserId: opts.forBitrixUserId ?? null,
+    });
   } catch (e) {
     ok = false;
     error = e instanceof Error ? e.message : String(e);

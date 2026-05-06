@@ -10,13 +10,21 @@ export type SyncProjectsResult = {
   skipped: number;
 };
 
+export type SyncProjectsOptions = {
+  /**
+   * When set, only mirror workgroups this Bitrix24 user is a member of.
+   * We resolve membership through `sonet_group.user.groups` and then load
+   * full data for each via `sonet_group.get` with `FILTER.ID = [...]`.
+   */
+  forBitrixUserId?: string | null;
+};
+
 /**
  * Mirror Bitrix24 workgroups (sonet groups) → our Project table.
  *
  * Matching rule: by (externalSource='bitrix24', externalId=group.ID).
- * Owner: the first ADMIN in our system (the platform owner). The workgroup
- * owner is preserved as bitrixOwnerId for later resolution against
- * synced users, but we don't change ownership of synced projects.
+ * Owner: the first ADMIN in our system (the platform owner). We never
+ * change ownership of an existing synced project on subsequent runs.
  *
  * Project key: auto-generated from name. If the generated key collides with
  * an existing manually-created project, we suffix it with the bitrix id
@@ -26,10 +34,29 @@ export type SyncProjectsResult = {
 export async function syncProjects(
   prisma: PrismaClient,
   client: Bitrix24Client,
+  opts: SyncProjectsOptions = {},
 ): Promise<SyncProjectsResult> {
-  const groups = await client.all<BxWorkgroup>('sonet_group.get', {
-    FILTER: { ACTIVE: 'Y', CLOSED: 'N' },
-  });
+  let groups: BxWorkgroup[];
+
+  if (opts.forBitrixUserId) {
+    // Step 1: get just the IDs of groups this user is in.
+    type Membership = { GROUP_ID: string; GROUP_NAME: string; ROLE: string };
+    const memberships = await client.all<Membership>('sonet_group.user.groups', {
+      USER_ID: opts.forBitrixUserId,
+    });
+    if (memberships.length === 0) {
+      return { totalSeen: 0, created: 0, updated: 0, skipped: 0 };
+    }
+    // Step 2: fetch full group records by ID list.
+    const ids = memberships.map((m) => m.GROUP_ID);
+    groups = await client.all<BxWorkgroup>('sonet_group.get', {
+      FILTER: { ID: ids, ACTIVE: 'Y', CLOSED: 'N' },
+    });
+  } else {
+    groups = await client.all<BxWorkgroup>('sonet_group.get', {
+      FILTER: { ACTIVE: 'Y', CLOSED: 'N' },
+    });
+  }
 
   const stats: SyncProjectsResult = {
     totalSeen: groups.length,

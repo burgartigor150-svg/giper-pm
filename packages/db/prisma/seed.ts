@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs';
 import { prisma, TaskStatus, TaskPriority, TaskType, MemberRole, UserRole } from '../src';
 
-const ADMIN_EMAIL = 'igor@giper.fm';
+const ADMIN_EMAIL = 'zobkov.i@giper.fm';
 const ADMIN_INITIAL_PASSWORD = 'change-me-now';
 
 async function main() {
