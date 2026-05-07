@@ -74,11 +74,15 @@ COPY --from=build /repo/apps/web/.next/standalone ./
 COPY --from=build /repo/apps/web/.next/static ./apps/web/.next/static
 COPY --from=build /repo/apps/web/public ./apps/web/public
 
-# Prisma engines are bundled inside .next/standalone via the tracer,
-# but the schema needs to be reachable for `prisma migrate deploy`
-# at deploy time. Keep the migrations folder in the image so the
-# entrypoint can run migrations against the live DB without the full
-# repo on the server.
+# Prisma generated client + Alpine query engine. The standalone tracer
+# sometimes misses the .prisma/client folder (especially the linux-musl
+# .so.node binary), so we copy it into the path Next will look at first.
+COPY --from=build /repo/node_modules/.prisma ./node_modules/.prisma
+COPY --from=build /repo/node_modules/@prisma ./node_modules/@prisma
+
+# Schema + migrations on board for `prisma migrate deploy` if we ever
+# run it from inside the web container instead of the dedicated migrate
+# image.
 COPY --from=build /repo/packages/db/prisma ./packages/db/prisma
 
 # Healthcheck pings Next's default 200 page, GET /api/health is even
