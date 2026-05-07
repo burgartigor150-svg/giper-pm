@@ -1,15 +1,17 @@
 # Production stack for giper-pm. Lives on the deploy host (myserver).
 #
-# Usage on the server:
-#   cd /opt/giper-pm
-#   docker compose -f docker-compose.prod.yml pull
-#   docker compose -f docker-compose.prod.yml up -d
-#   docker compose -f docker-compose.prod.yml exec web \
-#     node node_modules/prisma/build/index.js migrate deploy \
-#     --schema packages/db/prisma/schema.prisma
+# This server hosts many other projects, so:
+#   - we never bind to 80/443 (host nginx fronts everything)
+#   - postgres/redis/minio are docker-network-only (no host port-bindings)
+#   - web and ws are bound to 127.0.0.1 on offset ports so only the host
+#     nginx (or local curl) can reach them
 #
-# Secrets: every $VAR below is read from /opt/giper-pm/.env on the
-# host. Never check that file in.
+# Host ports used:
+#   127.0.0.1:3110 → web   (Next.js, container :3000)
+#   127.0.0.1:3111 → ws    (uWebSockets, container :3001)
+#
+# Secrets: every $VAR below is read from /opt/giper-pm/.env on the host.
+# Never check that file in.
 
 name: giper-pm
 
@@ -24,8 +26,8 @@ services:
       PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    # Postgres is reachable only via the docker network; never exposed
-    # to the public internet. Override here if you need external psql.
+    # Internal docker network only. The host already runs other postgres
+    # instances on :5432 and various container ports — we stay isolated.
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-giper} -d ${POSTGRES_DB:-giper_pm}"]
       interval: 5s
@@ -55,9 +57,8 @@ services:
       MINIO_ROOT_PASSWORD: ${STORAGE_SECRET_KEY}
     volumes:
       - minio_data:/data
-    # MinIO API is exposed only over the internal network. The Caddy
-    # reverse proxy serves attachment downloads via /api/attachments/*
-    # which proxies through the web container.
+    # Internal-only. Attachment downloads go through the web container
+    # via /api/attachments/*, never directly to MinIO.
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]
       interval: 10s
@@ -81,10 +82,10 @@ services:
     restart: "no"
 
   # One-shot Prisma migrator. Runs once per deploy before web starts;
-  # idempotent because `migrate deploy` skips already-applied
-  # migrations. We use service_completed_successfully on web's depends_on
-  # so a failed migration blocks the new web from coming up — old web
-  # keeps serving traffic until you fix the migration.
+  # idempotent because `migrate deploy` skips already-applied migrations.
+  # web depends on service_completed_successfully so a failed migration
+  # blocks the new web from coming up — old web keeps serving traffic
+  # until you fix the migration.
   migrate:
     image: ghcr.io/${GHCR_OWNER}/giper-migrate:${IMAGE_TAG:-latest}
     depends_on:
@@ -97,6 +98,9 @@ services:
   web:
     image: ghcr.io/${GHCR_OWNER}/giper-web:${IMAGE_TAG:-latest}
     restart: unless-stopped
+    # Loopback-only host binding — host nginx is the public entrypoint.
+    ports:
+      - "127.0.0.1:3110:3000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -142,6 +146,8 @@ services:
   ws:
     image: ghcr.io/${GHCR_OWNER}/giper-ws:${IMAGE_TAG:-latest}
     restart: unless-stopped
+    ports:
+      - "127.0.0.1:3111:3001"
     environment:
       NODE_ENV: production
       WS_PORT: 3001
@@ -149,27 +155,7 @@ services:
       WS_AUTH_SECRET: ${WS_AUTH_SECRET}
       WS_PUBLISH_SECRET: ${WS_PUBLISH_SECRET}
 
-  caddy:
-    image: caddy:2-alpine
-    restart: unless-stopped
-    depends_on:
-      - web
-      - ws
-    ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    environment:
-      PUBLIC_HOST: ${PUBLIC_HOST}
-      ACME_EMAIL: ${ACME_EMAIL:-igor@giper.fm}
-
 volumes:
   postgres_data:
   redis_data:
   minio_data:
-  caddy_data:
-  caddy_config:

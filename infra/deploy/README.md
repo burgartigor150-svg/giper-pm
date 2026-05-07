@@ -1,82 +1,50 @@
 # Deployment runbook — giper-pm на myserver
 
-Прод крутится на `myserver` (81.29.141.119, user `igun2`). CI/CD через GitHub Actions:
-push в `main` → собираем три образа (web/ws/migrate) и пушим в GHCR → SSH на сервер,
-pull + `docker compose up -d` + `prisma migrate deploy`.
+Прод крутится на `myserver` (81.29.141.119, user `igun2`, hostname `parser`).
 
-Все артефакты (Dockerfile.web, Dockerfile.ws, Dockerfile.migrate, infra/docker-compose.prod.yml,
-infra/Caddyfile, .github/workflows/deploy.yml) уже в репо. Этот файл — про *сервер*
-и про *секреты*, которые в репо не лежат.
+**Важно:** хост общий — на нём уже крутятся `n8n`, `saleor`, `omnisight`, `gparser`,
+`pars-giper-ui`, `infrastructure-msgr-*`, `pim*` и другие проекты. Поэтому giper-pm
+встаёт *рядом* и **ничего чужого не трогает**:
+
+- Caddy не используем — фронтит хостовой `nginx` (как у соседей)
+- Никаких публичных портов в compose — postgres/redis/minio только внутри docker-сети
+- `web` и `ws` биндятся на **127.0.0.1:3110 / 127.0.0.1:3111** — наружу торчит только nginx
+- Свой Postgres внутри docker-network giper-pm (изолирован от системного `:5432`)
+
+CI/CD: push в `main` → CI собирает три образа (web/ws/migrate) и пушит в GHCR →
+SSH на сервер, pull + `docker compose up -d` + `prisma migrate deploy`.
 
 ---
 
 ## 0. Что должно быть готово до первого деплоя
 
-- [ ] Приватный GitHub-репо создан и запушен
-- [ ] DNS A-запись `pm.giper.fm` (или другой `PUBLIC_HOST`) → `81.29.141.119` *(или используем nip.io: `81-29-141-119.nip.io`)*
-- [ ] Доступ по SSH `ssh myserver` работает с твоей машины
-- [ ] На сервере свободно ≥10 GB и открыты порты 80/443
+- [ ] Приватный/публичный GitHub-репо `burgartigor150-svg/giper-pm` (готов)
+- [ ] DNS A-запись `pm.since-b24-ru.ru` → `81.29.141.119`
+- [ ] Доступ по SSH `ssh myserver` без пароля (готов)
+- [ ] На сервере уже есть Docker, nginx, certbot, sudo (проверено)
 
 ---
 
-## 1. Bootstrap сервера (один раз)
+## 1. Подготовка серверной папки и .env (один раз)
 
 ```bash
 ssh myserver
-sudo -i   # пароль: см. ~/.ssh/config или 1password
-
-# 1.1. Docker + compose plugin
-apt-get update
-apt-get install -y ca-certificates curl gnupg lsb-release ufw
-install -m 0755 -d /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
-  | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
-  https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" \
-  > /etc/apt/sources.list.d/docker.list
-apt-get update
-apt-get install -y docker-ce docker-ce-cli containerd.io \
-  docker-buildx-plugin docker-compose-plugin
-usermod -aG docker igun2
-
-# 1.2. Firewall — оставляем только 22/80/443
-ufw default deny incoming
-ufw default allow outgoing
-ufw allow 22
-ufw allow 80
-ufw allow 443
-ufw --force enable
-
-# 1.3. Папка стека
-mkdir -p /opt/giper-pm
-chown -R igun2:igun2 /opt/giper-pm
-```
-
-Релогинись в `igun2`, чтобы membership в группе `docker` подхватился (`exit`, `ssh myserver`).
-
----
-
-## 2. Секреты на сервере
-
-Создаём `.env` в `/opt/giper-pm/` — единственное место, где живут секреты прода.
-
-```bash
-ssh myserver
+sudo mkdir -p /opt/giper-pm
+sudo chown igun2:igun2 /opt/giper-pm
 cd /opt/giper-pm
 
-# Сгенерим всё, что генерится:
+# .env с секретами. ЕДИНСТВЕННОЕ место где лежат секреты прода.
 gen() { openssl rand -base64 32 | tr -d '=+/' | head -c 48; }
 
 cat > .env <<EOF
 # === Public ===
-PUBLIC_HOST=pm.giper.fm
-PUBLIC_BASE_URL=https://pm.giper.fm
-PUBLIC_WS_URL=wss://pm.giper.fm/ws
-ACME_EMAIL=igor@giper.fm
+PUBLIC_HOST=pm.since-b24-ru.ru
+PUBLIC_BASE_URL=https://pm.since-b24-ru.ru
+PUBLIC_WS_URL=wss://pm.since-b24-ru.ru/ws
 
 # === GHCR ===
 # Перепишется в момент деплоя GitHub Actions, но без значения compose ругается
-GHCR_OWNER=<твой-github-username-or-org>
+GHCR_OWNER=burgartigor150-svg
 IMAGE_TAG=latest
 
 # === Postgres ===
@@ -95,7 +63,7 @@ BITRIX24_INBOUND_SECRET=$(gen)
 WS_AUTH_SECRET=$(gen)
 WS_PUBLISH_SECRET=$(gen)
 
-# === GitHub webhook (для commit→task linking) ===
+# === GitHub webhook ===
 GITHUB_WEBHOOK_SECRET=$(gen)
 
 # === Storage (MinIO) ===
@@ -110,20 +78,20 @@ EOF
 chmod 600 .env
 ```
 
-**Bitrix24:** `BITRIX24_WEBHOOK_URL` нужно взять из существующего Bitrix-портала
-(админка → разработчикам → Другое → Входящий вебхук). Без него синки и пуши работать не будут.
+`BITRIX24_WEBHOOK_URL` нужно взять из существующего Bitrix-портала
+(админка → разработчикам → Другое → Входящий вебхук). Без него синки/пуши не работают.
 
 ---
 
-## 3. GHCR pull token
+## 2. GHCR pull token
 
-CI пушит в GHCR от имени бота, а сервер должен уметь pull. Делаем fine-grained PAT
-с одним правом `read:packages`:
+CI пушит образы в GHCR от имени бота — серверу нужен fine-grained PAT с одним
+правом `read:packages`:
 
 1. https://github.com/settings/tokens?type=beta → **Generate new token**
-2. Resource owner = твой юзер (или org, если репо в org)
+2. Resource owner: `burgartigor150-svg`
 3. Permissions → Account permissions → **Packages: Read-only**
-4. Скопируй токен (показывается один раз)
+4. Сохрани токен (показывается один раз)
 
 ```bash
 ssh myserver
@@ -131,7 +99,35 @@ echo "ghp_xxxxxxxxxxxxxxxxxxxx" > /opt/giper-pm/.ghcr-token
 chmod 600 /opt/giper-pm/.ghcr-token
 ```
 
-Деплой-скрипт читает этот файл и логинится в `ghcr.io` перед `docker compose pull`.
+---
+
+## 3. Nginx vhost + TLS
+
+Кладём конфиг (шаблон в репо: `infra/nginx/pm.since-b24-ru.ru.conf`):
+
+```bash
+# на твоей машине
+scp infra/nginx/pm.since-b24-ru.ru.conf myserver:/tmp/
+
+# на сервере
+ssh myserver
+sudo mv /tmp/pm.since-b24-ru.ru.conf /etc/nginx/sites-available/
+sudo ln -sf /etc/nginx/sites-available/pm.since-b24-ru.ru.conf \
+            /etc/nginx/sites-enabled/pm.since-b24-ru.ru.conf
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+После того как **DNS прорезался** (`dig +short pm.since-b24-ru.ru` отдаёт
+`81.29.141.119`) — выпускаем сертификат:
+
+```bash
+sudo certbot --nginx -d pm.since-b24-ru.ru \
+  --non-interactive --agree-tos --email igor@giper.fm \
+  --redirect
+```
+
+Certbot сам допишет `listen 443 ssl;` + `ssl_certificate*` + редирект `80→443`
+прямо в наш файл. Renew работает автоматом через системный certbot timer.
 
 ---
 
@@ -139,22 +135,22 @@ chmod 600 /opt/giper-pm/.ghcr-token
 
 В **Settings → Secrets and variables → Actions**:
 
-### Secrets (зашифрованы)
+### Secrets
 | Name | Value |
 |---|---|
 | `SSH_HOST` | `81.29.141.119` |
 | `SSH_USER` | `igun2` |
 | `SSH_PRIVATE_KEY` | содержимое `~/.ssh/id_ed25519_igun_server` (вместе с `-----BEGIN…`/`-----END…`) |
 
-### Variables (видны в логах, не секрет)
+### Variables
 | Name | Value |
 |---|---|
-| `PUBLIC_HOST` | `pm.giper.fm` |
+| `PUBLIC_HOST` | `pm.since-b24-ru.ru` |
 
-В **Settings → Environments → New environment** создай `production`. Опционально включи
-*Required reviewers* — тогда каждый деплой будет ждать твоего ручного approval.
+**Settings → Environments → New environment** → `production`. Опционально
+включи *Required reviewers* — каждый деплой будет ждать твоего approval.
 
-В **Settings → Actions → General** убедись что *Workflow permissions = Read and write*
+**Settings → Actions → General** → *Workflow permissions = Read and write*
 (нужно чтобы `docker/login-action` пушил в GHCR через `GITHUB_TOKEN`).
 
 ---
@@ -162,43 +158,44 @@ chmod 600 /opt/giper-pm/.ghcr-token
 ## 5. Первый деплой
 
 ```bash
-# Локально
 git push origin main
 ```
 
-Дальше идёшь в **Actions** на GitHub:
+Идём в **Actions** на GitHub:
 1. Workflow `deploy` стартует автоматически
 2. Job `build` собирает три образа (~5-7 минут первый раз, потом 1-2 за счёт cache)
 3. Job `deploy` ждёт approval (если включил), потом scp + ssh
 
-После того как GitHub показал зелёное, проверяем:
+После зелёной галки:
 
 ```bash
 ssh myserver
 cd /opt/giper-pm
 docker compose -f docker-compose.prod.yml ps
-# Все сервисы должны быть Up (postgres, redis, minio, web, ws, caddy)
-# migrate — Exited (0)
+# postgres/redis/minio/web/ws — Up. migrate — Exited (0).
 docker compose -f docker-compose.prod.yml logs web --tail=50
 ```
 
 Smoke-test:
 
 ```bash
-curl -sI https://pm.giper.fm/api/health
-# Ожидаем 200
-curl -sI https://pm.giper.fm/healthz
-# Caddy-уровень
+# с твоей машины
+curl -sI https://pm.since-b24-ru.ru
+# ожидаем 200 / 307
+
+# изнутри сервера, без TLS, через loopback
+ssh myserver 'curl -sI http://127.0.0.1:3110'
+# тоже 200
 ```
 
-Открываем `https://pm.giper.fm` в браузере → должна быть форма логина.
+Открываем `https://pm.since-b24-ru.ru` в браузере → форма логина.
 
 ---
 
 ## 6. Создание первого пользователя
 
-Magic-link Email-провайдер не работает без SMTP, поэтому первого админа добавляем
-руками через Prisma Studio или SQL:
+Magic-link Email-провайдер не работает без SMTP — первого админа добавляем
+руками через psql:
 
 ```bash
 ssh myserver
@@ -211,41 +208,31 @@ ON CONFLICT (email) DO UPDATE SET role = 'ADMIN', "isActive" = true;
 SQL
 ```
 
-После этого можно логиниться через Google OAuth (тот же email) или magic-link
-(если SMTP настроен).
+После этого логин через Google OAuth (тот же email) или magic-link если SMTP настроен.
 
 ---
 
 ## 7. Откат / rollback
 
-Каждый билд тегается `sha-<12-знаков-коммита>` и `latest`. Откат = поставить старый sha
-вручную:
+Каждый билд тегается `sha-<12-знаков-коммита>` и `latest`. Откат = поставить старый sha:
 
 ```bash
 ssh myserver
 cd /opt/giper-pm
-
-# Узнаём, что было до текущего
-docker images | grep giper-web
-
-# Подменяем тег и поднимаем
+docker images | grep giper-web   # узнаём предыдущий sha
 export IMAGE_TAG=sha-abc123def456
-export GHCR_OWNER=<твой-github>
+export GHCR_OWNER=burgartigor150-svg
 docker compose -f docker-compose.prod.yml pull
 docker compose -f docker-compose.prod.yml up -d
 ```
 
 **Важно:** откат образа НЕ откатывает миграцию БД. Если новая версия применила
-ломающую миграцию, надо отдельно её откатить (`prisma migrate resolve` или
-ручной SQL). На практике: пишем миграции expand-then-contract, чтобы старый код
-работал на новой схеме.
+ломающую миграцию, надо отдельно её откатить (`prisma migrate resolve` или ручной SQL).
+Пишем миграции expand-then-contract, чтобы старый код работал на новой схеме.
 
 ---
 
 ## 8. Ручной запуск миграции
-
-Бывает что `migrate deploy` упал в CI (например, конфликт), а сервисы уже подняты.
-Тогда руками:
 
 ```bash
 ssh myserver
@@ -253,19 +240,11 @@ cd /opt/giper-pm
 docker compose -f docker-compose.prod.yml run --rm migrate
 ```
 
-Или через web-контейнер (он содержит Prisma engine):
-
-```bash
-docker compose -f docker-compose.prod.yml exec -T web \
-  node node_modules/.pnpm/prisma@*/node_modules/prisma/build/index.js \
-  migrate deploy --schema packages/db/prisma/schema.prisma
-```
-
 ---
 
 ## 9. Бэкапы
 
-Минимум — снимок Postgres и MinIO раз в сутки. Кладём в `/opt/giper-pm/backups/`,
+Минимум — снимок Postgres + MinIO раз в сутки. Кладём в `/opt/giper-pm/backups/`,
 ротация 14 дней.
 
 ```bash
@@ -277,27 +256,21 @@ DEST=/opt/giper-pm/backups
 DATE=$(date +%Y%m%d-%H%M%S)
 mkdir -p "$DEST"
 
-# Postgres
 docker compose -f /opt/giper-pm/docker-compose.prod.yml exec -T postgres \
   pg_dump -U giper giper_pm | gzip > "$DEST/pg-$DATE.sql.gz"
 
-# MinIO — копируем весь том
 docker run --rm \
   -v giper-pm_minio_data:/data \
   -v "$DEST":/backup \
   alpine tar czf "/backup/minio-$DATE.tar.gz" -C /data .
 
-# Чистим старше 14 дней
 find "$DEST" -type f -mtime +14 -delete
 BASH
 sudo chmod +x /usr/local/bin/giper-backup.sh
 
-# Cron каждый день в 03:30
 echo "30 3 * * * root /usr/local/bin/giper-backup.sh >> /var/log/giper-backup.log 2>&1" \
   | sudo tee /etc/cron.d/giper-backup
 ```
-
-Off-site копия (в R2/B2/S3) — в roadmap, пока локально.
 
 ---
 
@@ -306,17 +279,20 @@ Off-site копия (в R2/B2/S3) — в roadmap, пока локально.
 | Симптом | Где смотреть |
 |---|---|
 | `docker compose pull` 401 unauthorized | `.ghcr-token` истёк или scope не тот → перевыпустить |
-| Caddy не выдаёт сертификат | `docker compose logs caddy` — обычно DNS ещё не пропагировался или порт 80 закрыт |
-| Web возвращает 502 | `docker compose logs web` — скорее всего миграция не прошла, контейнер упал на старте |
-| WS не коннектится | проверь что `PUBLIC_WS_URL=wss://<host>/ws`, Caddy строчка `handle /ws*` присутствует |
-| `migrate deploy` падает на P3009 | ручной фикс: `prisma migrate resolve --applied <name>` внутри web-контейнера |
-| Диск забит | `docker system df`; чистка: `docker image prune -af --filter "until=72h"` |
+| 502 Bad Gateway от nginx | `docker compose ps` — web лёг; `docker compose logs web` |
+| Сертификат не выдаётся | DNS ещё не прорезался или порт 80 не доходит до сервера → `dig`, `curl http://pm.since-b24-ru.ru` |
+| WS не коннектится | проверь `PUBLIC_WS_URL=wss://pm.since-b24-ru.ru/ws`, в nginx есть `location /ws` с `Upgrade` headers |
+| `migrate deploy` падает на P3009 | внутри web-контейнера: `prisma migrate resolve --applied <name>` |
+| Диск забит | `docker system df`; `docker image prune -af --filter "until=72h"` |
+| Конфликт порта 3110/3111 | другой проект занял; поменять в `docker-compose.prod.yml` *и* в nginx-vhost синхронно |
 
 ---
 
 ## 11. Что *не* делать
 
-- Не редактировать `.env` руками без записи в 1Password — потеряешь секрет, восстановить нельзя
-- Не запускать `docker compose down -v` — `-v` снесёт тома (postgres/minio/caddy)
+- Не редактировать `.env` без записи в 1Password — потеряешь секрет
+- Не запускать `docker compose down -v` — `-v` снесёт тома (postgres/minio)
 - Не пушить `*.env` в git
-- Не использовать `latest` тег для отката — он *по определению* подвижный
+- Не использовать `latest` тег для отката — он подвижный
+- Не трогать **другие** docker-compose проекты на этом сервере (`docker compose ls` → 9 чужих стеков)
+- Не редактировать чужие nginx vhost'ы в `/etc/nginx/sites-enabled/`

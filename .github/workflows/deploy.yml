@@ -90,16 +90,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Copy compose + Caddyfile to the server. The .env file is
-      # bootstrapped manually once via the runbook in infra/deploy/README.md;
-      # CI never writes secrets to disk.
+      # Copy compose to the server. The .env file is bootstrapped manually
+      # once via the runbook in infra/deploy/README.md; CI never writes
+      # secrets to disk. Nginx vhost lives at /etc/nginx/sites-enabled/
+      # and is managed manually (system-level).
       - name: Sync infra files to server
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: 'infra/docker-compose.prod.yml,infra/Caddyfile'
+          source: 'infra/docker-compose.prod.yml'
           target: /opt/giper-pm/
           strip_components: 1
           overwrite: true
