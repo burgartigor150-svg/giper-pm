@@ -26,23 +26,24 @@ COPY packages/ui/package.json packages/ui/
 RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
     pnpm install --frozen-lockfile --prefer-offline --filter @giper/ws...
 
-# pnpm uses symlinks into a content-addressable store. Docker COPY --from
-# cannot follow them, so dereference into flat directories.
-RUN cp -rL /repo/node_modules /repo/node_modules_flat && \
-    cp -rL /repo/apps/ws/node_modules /repo/ws_node_modules_flat
+# pnpm's symlinked layout breaks runtime ESM resolution for transitive
+# deps (get-tsconfig is a dep of tsx but lives in .pnpm/<hash>/...).
+# Re-install with hoisted node-linker into a clean flat tree at /flat
+# that we can COPY straight into runtime.
+RUN mkdir -p /flat && \
+    cp /repo/apps/ws/package.json /flat/package.json && \
+    cd /flat && \
+    npm install --omit=dev --no-package-lock --prefer-offline 2>&1 | tail -5 && \
+    ls /flat/node_modules | head -10
 
 # Runtime — same image, just trim and copy source over.
 FROM node:${NODE_VERSION}-alpine AS runtime
 RUN apk add --no-cache libc6-compat tini
 WORKDIR /app
 
-COPY --from=deps /repo/node_modules_flat ./node_modules
-COPY --from=deps /repo/ws_node_modules_flat ./apps/ws/node_modules
+COPY --from=deps /flat/node_modules ./apps/ws/node_modules
 COPY apps/ws ./apps/ws
 COPY tsconfig.base.json ./tsconfig.base.json
-
-# Ensure tsx is resolvable from /app (NODE_PATH fallback for module resolution)
-ENV NODE_PATH=/app/apps/ws/node_modules
 
 ENV NODE_ENV=production \
     WS_PORT=3001 \
