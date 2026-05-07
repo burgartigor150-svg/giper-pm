@@ -64,6 +64,7 @@ export const createTaskSchema = z.object({
   estimateHours: z.coerce.number().nonnegative().max(10_000).optional(),
   dueDate: optionalDate,
   tags: tagsSchema,
+  parentId: z.string().min(1).optional(),
 });
 export type CreateTaskInput = z.infer<typeof createTaskSchema>;
 
@@ -86,8 +87,11 @@ export const assignTaskSchema = z.object({
   assigneeId: z.string().min(1).nullable().or(z.literal('').transform(() => null)),
 });
 
+export const commentVisibilitySchema = z.enum(['EXTERNAL', 'INTERNAL']);
+
 export const addCommentSchema = z.object({
   body: z.string().trim().min(1, 'Пустой комментарий').max(10_000),
+  visibility: commentVisibilitySchema.optional().default('EXTERNAL'),
 });
 
 export const taskListFilterSchema = z.object({

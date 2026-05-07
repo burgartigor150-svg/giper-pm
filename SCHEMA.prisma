@@ -56,12 +56,18 @@ model User {
   memberProjects    ProjectMember[]
   assignedTasks     Task[]               @relation("TaskAssignee")
   createdTasks      Task[]               @relation("TaskCreator")
+  reviewerTasks     Task[]               @relation("TaskReviewer")
   timeEntries       TimeEntry[]
   activities        Activity[]
   comments          Comment[]
   auditLogs         AuditLog[]
   integrationLinks  UserIntegrationLink[]
   notifications     Notification[]
+  taskWatching      TaskWatcher[]
+  positions         UserPosition[]
+  taskAssignments   TaskAssignment[]
+  inPmTeams         PmTeamMember[]       @relation("PmTeamMembers")
+  pmTeam            PmTeamMember[]       @relation("PmTeamOwner")
 
   @@index([role, isActive])
 }
@@ -110,6 +116,66 @@ enum UserRole {
   PM          // создаёт проекты, видит отчёты команды
   MEMBER      // обычный сотрудник, видит свои данные + общие задачи
   VIEWER      // read-only, например для клиента
+}
+
+enum Position {
+  FRONTEND
+  BACKEND
+  FULLSTACK
+  MOBILE
+  QA
+  QA_AUTO
+  DESIGNER
+  UX
+  ANALYST
+  BA
+  PM
+  LEAD
+  DEVOPS
+  SRE
+  CONTENT
+  MARKETING
+  OTHER
+}
+
+model UserPosition {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  position  Position
+  primary   Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, position])
+  @@index([position])
+}
+
+model PmTeamMember {
+  id        String   @id @default(cuid())
+  pmId      String
+  pm        User     @relation("PmTeamOwner", fields: [pmId], references: [id], onDelete: Cascade)
+  memberId  String
+  member    User     @relation("PmTeamMembers", fields: [memberId], references: [id], onDelete: Cascade)
+  note      String?
+  createdAt DateTime @default(now())
+
+  @@unique([pmId, memberId])
+  @@index([memberId])
+}
+
+model TaskAssignment {
+  id          String   @id @default(cuid())
+  taskId      String
+  task        Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  position    Position
+  createdAt   DateTime @default(now())
+  createdById String
+
+  @@unique([taskId, userId, position])
+  @@index([userId])
+  @@index([taskId])
 }
 
 model UserConsent {
@@ -183,6 +249,9 @@ model Project {
   externalId       String?
   externalSource   String?
 
+  // WIP-лимиты по колонкам канбана.
+  wipLimits     Json?
+
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
   archivedAt    DateTime?
@@ -238,7 +307,9 @@ model Task {
   assignee      User?        @relation("TaskAssignee", fields: [assigneeId], references: [id])
   creatorId     String
   creator       User         @relation("TaskCreator", fields: [creatorId], references: [id])
-  
+  reviewerId    String?
+  reviewer      User?        @relation("TaskReviewer", fields: [reviewerId], references: [id])
+
   parentId      String?
   parent        Task?        @relation("TaskSubtasks", fields: [parentId], references: [id])
   subtasks      Task[]       @relation("TaskSubtasks")
@@ -253,7 +324,15 @@ model Task {
   // Внешние идентификаторы для синка
   externalId    String?      // ID в Bitrix24/Jira
   externalSource String?     // "bitrix24" / "jira" / null
-  
+
+  // Two-way sync bookkeeping (Bitrix24).
+  bitrixSyncedAt   DateTime?
+  bitrixSyncedHash String?
+  syncConflict     Boolean   @default(false)
+
+  // Internal track — independent from Bitrix-mirrored `status`.
+  internalStatus   TaskStatus @default(BACKLOG)
+
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
 
@@ -261,11 +340,99 @@ model Task {
   comments      Comment[]
   statusChanges TaskStatusChange[]
   attachments   Attachment[]
+  watchers      TaskWatcher[]
+  checklists    Checklist[]
+  blocks        TaskDependency[] @relation("BlocksFrom")
+  blockedBy     TaskDependency[] @relation("BlocksTo")
+  pullRequests  TaskPullRequest[]
+  assignments   TaskAssignment[]
 
   @@unique([projectId, number])
   @@index([assigneeId, status])
   @@index([projectId, status])
+  @@index([projectId, internalStatus])
   @@index([dueDate])
+}
+
+model Checklist {
+  id        String          @id @default(cuid())
+  taskId    String
+  task      Task            @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  title     String          @default("Чек-лист")
+  order     Int             @default(0)
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+  items     ChecklistItem[]
+
+  @@index([taskId, order])
+}
+
+model ChecklistItem {
+  id          String    @id @default(cuid())
+  checklistId String
+  checklist   Checklist @relation(fields: [checklistId], references: [id], onDelete: Cascade)
+  body        String
+  isDone      Boolean   @default(false)
+  order       Int       @default(0)
+  doneById    String?
+  doneAt      DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([checklistId, order])
+}
+
+model TaskDependency {
+  id          String   @id @default(cuid())
+  fromTaskId  String
+  fromTask    Task     @relation("BlocksFrom", fields: [fromTaskId], references: [id], onDelete: Cascade)
+  toTaskId    String
+  toTask      Task     @relation("BlocksTo", fields: [toTaskId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  createdById String
+
+  @@unique([fromTaskId, toTaskId])
+  @@index([toTaskId])
+}
+
+model TaskPullRequest {
+  id          String           @id @default(cuid())
+  taskId      String
+  task        Task             @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  repo        String
+  number      Int
+  title       String
+  state       PullRequestState @default(OPEN)
+  url         String
+  headRef     String?
+  baseRef     String?
+  authorLogin String?
+  mergedAt    DateTime?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@unique([repo, number, taskId])
+  @@index([taskId])
+  @@index([repo, number])
+}
+
+enum PullRequestState {
+  OPEN
+  CLOSED
+  MERGED
+  DRAFT
+}
+
+model TaskWatcher {
+  id        String   @id @default(cuid())
+  taskId    String
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([taskId, userId])
+  @@index([userId])
 }
 
 enum TaskStatus {
@@ -313,10 +480,24 @@ model Comment {
   author      User      @relation(fields: [authorId], references: [id])
   body        String    @db.Text
   source      CommentSource @default(WEB)
+
+  // EXTERNAL: visible to client, pushed to Bitrix. INTERNAL: stays here.
+  visibility  CommentVisibility @default(EXTERNAL)
+
+  // Outbound bookkeeping for EXTERNAL comments mirrored to Bitrix.
+  externalId     String?
+  externalSource String?
+
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
-  
+
   @@index([taskId, createdAt])
+  @@unique([externalSource, externalId])
+}
+
+enum CommentVisibility {
+  EXTERNAL
+  INTERNAL
 }
 
 enum CommentSource {
@@ -334,10 +515,15 @@ model Attachment {
   filename    String
   mimeType    String
   sizeBytes   Int
-  storageKey  String    // S3 key
-  uploadedById String
+  storageKey  String
+  uploadedById String?
   uploadedAt  DateTime  @default(now())
-  
+
+  // Read-only mirror (Bitrix24)
+  externalSource String?
+  externalId     String?
+
+  @@unique([externalSource, externalId])
   @@index([taskId])
 }
 
@@ -392,6 +578,7 @@ enum TimeFlag {
   OVERLAPPING          // два таймера пересекаются
   EXCESSIVE            // > 12 часов в день
   IDLE_LOGGED          // юзер залогировал время в период idle
+  AUTO_STOPPED         // таймер закрыт системой по лимиту
 }
 
 // Сырые данные от агента и расширения. Агрегируются в TimeEntry.

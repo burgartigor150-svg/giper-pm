@@ -56,12 +56,20 @@ model User {
   memberProjects    ProjectMember[]
   assignedTasks     Task[]               @relation("TaskAssignee")
   createdTasks      Task[]               @relation("TaskCreator")
+  reviewerTasks     Task[]               @relation("TaskReviewer")
   timeEntries       TimeEntry[]
   activities        Activity[]
   comments          Comment[]
   auditLogs         AuditLog[]
   integrationLinks  UserIntegrationLink[]
   notifications     Notification[]
+  taskWatching      TaskWatcher[]
+  positions         UserPosition[]
+  taskAssignments   TaskAssignment[]
+  // PM team membership: edges where this user is a member of someone's team.
+  inPmTeams         PmTeamMember[]       @relation("PmTeamMembers")
+  // PM team ownership: edges where this user is the PM of a team.
+  pmTeam            PmTeamMember[]       @relation("PmTeamOwner")
 
   @@index([role, isActive])
 }
@@ -110,6 +118,81 @@ enum UserRole {
   PM          // создаёт проекты, видит отчёты команды
   MEMBER      // обычный сотрудник, видит свои данные + общие задачи
   VIEWER      // read-only, например для клиента
+}
+
+// Specialty (должность) — what this person actually does. Decoupled
+// from UserRole (org-level permission) — a person can be a FRONTEND
+// who happens to also have PM role. One user can hold multiple
+// positions via UserPosition.
+enum Position {
+  FRONTEND
+  BACKEND
+  FULLSTACK
+  MOBILE
+  QA
+  QA_AUTO
+  DESIGNER
+  UX
+  ANALYST
+  BA            // business analyst
+  PM
+  LEAD
+  DEVOPS
+  SRE
+  CONTENT
+  MARKETING
+  OTHER
+}
+
+model UserPosition {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  position  Position
+  // primary = the headline specialty shown next to the user's name.
+  primary   Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, position])
+  @@index([position])
+}
+
+// PM "team": a private roster a PM curates so they can quickly pick
+// from "my people" when assigning a task. People can sit in multiple
+// PMs' teams simultaneously — that's the whole "shared resource"
+// point. Capacity is computed on the fly from active assignments.
+model PmTeamMember {
+  id        String   @id @default(cuid())
+  pmId      String
+  pm        User     @relation("PmTeamOwner", fields: [pmId], references: [id], onDelete: Cascade)
+  memberId  String
+  member    User     @relation("PmTeamMembers", fields: [memberId], references: [id], onDelete: Cascade)
+  // Free-form note from the PM about why this person is on the team.
+  note      String?
+  createdAt DateTime @default(now())
+
+  @@unique([pmId, memberId])
+  @@index([memberId])
+}
+
+// Multi-assignment with role: a single task can have a frontend, a
+// backend, and a QA all assigned. Distinct from Task.assigneeId which
+// remains the "primary" / Bitrix-mirror slot. The single-assignee
+// field on Task is preserved for back-compat with all the existing
+// canEdit/notification/sync code.
+model TaskAssignment {
+  id        String   @id @default(cuid())
+  taskId    String
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  position  Position
+  createdAt DateTime @default(now())
+  createdById String
+
+  @@unique([taskId, userId, position])
+  @@index([userId])
+  @@index([taskId])
 }
 
 model UserConsent {
@@ -183,6 +266,11 @@ model Project {
   externalId       String?         // sonet group / repo / external project key
   externalSource   String?         // "bitrix24" | "github" | ...
 
+  // WIP-лимиты по колонкам канбана: { TODO: 5, IN_PROGRESS: 3, REVIEW: 2 }.
+  // null/missing key = без лимита. Soft-limit only — система не блокирует
+  // переход, а подсвечивает колонку красным при превышении.
+  wipLimits     Json?
+
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
   archivedAt    DateTime?
@@ -238,7 +326,12 @@ model Task {
   assignee      User?        @relation("TaskAssignee", fields: [assigneeId], references: [id])
   creatorId     String
   creator       User         @relation("TaskCreator", fields: [creatorId], references: [id])
-  
+  // Optional REVIEW gate — if set and != assignee, only this user can
+  // close the task by moving REVIEW → DONE. Without a reviewer the task
+  // works the old way (anyone with edit can close).
+  reviewerId    String?
+  reviewer      User?        @relation("TaskReviewer", fields: [reviewerId], references: [id])
+
   parentId      String?
   parent        Task?        @relation("TaskSubtasks", fields: [parentId], references: [id])
   subtasks      Task[]       @relation("TaskSubtasks")
@@ -253,7 +346,18 @@ model Task {
   // Внешние идентификаторы для синка
   externalId    String?      // ID в Bitrix24/Jira
   externalSource String?     // "bitrix24" / "jira" / null
-  
+
+  // Two-way sync bookkeeping (Bitrix24).
+  bitrixSyncedAt   DateTime?
+  bitrixSyncedHash String?
+  syncConflict     Boolean   @default(false)
+
+  // Internal track — independent from the Bitrix-mirror status above.
+  // The mirrored `status` reflects what the client sees in Bitrix; the
+  // internal track is what our team uses day-to-day. Defaults match
+  // the mirror so non-mirrored tasks behave the old way.
+  internalStatus  TaskStatus  @default(BACKLOG)
+
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
 
@@ -261,11 +365,125 @@ model Task {
   comments      Comment[]
   statusChanges TaskStatusChange[]
   attachments   Attachment[]
+  watchers      TaskWatcher[]
+  checklists    Checklist[]
+  blocks        TaskDependency[] @relation("BlocksFrom")
+  blockedBy     TaskDependency[] @relation("BlocksTo")
+  pullRequests  TaskPullRequest[]
+  assignments   TaskAssignment[]
 
   @@unique([projectId, number])
   @@index([assigneeId, status])
   @@index([projectId, status])
+  @@index([projectId, internalStatus])
   @@index([dueDate])
+}
+
+// Linked-list of small actionable items inside a task. A task may have
+// multiple checklists ("Definition of Done" + "QA" is a common case).
+model Checklist {
+  id        String          @id @default(cuid())
+  taskId    String
+  task      Task            @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  title     String          @default("Чек-лист")
+  // order within the task — lower = top.
+  order     Int             @default(0)
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+  items     ChecklistItem[]
+
+  @@index([taskId, order])
+}
+
+model ChecklistItem {
+  id          String    @id @default(cuid())
+  checklistId String
+  checklist   Checklist @relation(fields: [checklistId], references: [id], onDelete: Cascade)
+  body        String
+  isDone      Boolean   @default(false)
+  // order within the checklist — lower = top.
+  order       Int       @default(0)
+  // Audit: who and when checked it. Cleared on uncheck.
+  doneById    String?
+  doneAt      DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([checklistId, order])
+}
+
+// "from blocks to" — the source task must reach DONE/CANCELED before
+// the target task can move to IN_PROGRESS without a warning.
+// We only persist BLOCKS edges; "blockedBy" is the inverse relation.
+// Cycles are prevented at the action layer with a DFS check; the
+// schema unique constraint catches duplicate edges.
+model TaskDependency {
+  id          String   @id @default(cuid())
+  fromTaskId  String
+  fromTask    Task     @relation("BlocksFrom", fields: [fromTaskId], references: [id], onDelete: Cascade)
+  toTaskId    String
+  toTask      Task     @relation("BlocksTo", fields: [toTaskId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  createdById String
+
+  @@unique([fromTaskId, toTaskId])
+  @@index([toTaskId])
+}
+
+// Linkage between a task and a GitHub pull request. Webhook-fed: when
+// a PR title/body/branch contains a `KEY-N` reference we ensure a row
+// exists; subsequent webhook events (synchronize, review, merge, close)
+// update the same row by (repo, number) — that pair is unique per PR.
+//
+// We keep the bare metadata we need to render a status badge on the
+// task page (state, mergedAt, url). For richer GH metadata (CI checks,
+// reviewers) we'd add a polling worker — out of scope for v1.
+model TaskPullRequest {
+  id        String          @id @default(cuid())
+  taskId    String
+  task      Task            @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  // "owner/repo" — what GitHub calls full_name.
+  repo      String
+  // PR number within the repo, e.g. 42.
+  number    Int
+  title     String
+  state     PullRequestState @default(OPEN)
+  // GitHub PR URL — clickable on the task page.
+  url       String
+  // Branches: head = source, base = target.
+  headRef   String?
+  baseRef   String?
+  authorLogin String?
+  mergedAt  DateTime?
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+
+  @@unique([repo, number, taskId])
+  @@index([taskId])
+  @@index([repo, number])
+}
+
+enum PullRequestState {
+  OPEN
+  CLOSED
+  MERGED
+  DRAFT
+}
+
+// Subscription record: when a user toggles "watch" on a task they get
+// pinged on subsequent comments / status changes the same way assignee
+// and creator are. Assignee/creator are NOT stored here — they're
+// always-watchers by definition; the fan-out logic dedupes on userId.
+model TaskWatcher {
+  id        String   @id @default(cuid())
+  taskId    String
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([taskId, userId])
+  @@index([userId])
 }
 
 enum TaskStatus {
@@ -313,10 +531,29 @@ model Comment {
   author      User      @relation(fields: [authorId], references: [id])
   body        String    @db.Text
   source      CommentSource @default(WEB)
+
+  // EXTERNAL: pushed to the source-of-truth (Bitrix24 etc.) and visible to
+  // the client. INTERNAL: stays in our system only — useful for technical
+  // notes the team writes about a task ("hack here, refactor later") that
+  // the client shouldn't see.
+  visibility  CommentVisibility @default(EXTERNAL)
+
+  // Outbound bookkeeping. When we successfully push an EXTERNAL comment to
+  // Bitrix we store the remote id here so subsequent edits/deletes target
+  // the right record (and so we can dedupe if the user re-saves).
+  externalId     String?
+  externalSource String?
+
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
-  
+
   @@index([taskId, createdAt])
+  @@unique([externalSource, externalId])
+}
+
+enum CommentVisibility {
+  EXTERNAL
+  INTERNAL
 }
 
 enum CommentSource {
@@ -334,10 +571,19 @@ model Attachment {
   filename    String
   mimeType    String
   sizeBytes   Int
-  storageKey  String    // S3 key
-  uploadedById String
+  // For locally-uploaded files: S3 / R2 object key.
+  // For mirrored files (externalSource set) we leave it empty and rebuild
+  // the download URL at request time from the live webhook credentials.
+  storageKey  String
+  uploadedById String?
   uploadedAt  DateTime  @default(now())
-  
+
+  // Read-only mirror (Bitrix24): which external system this file lives in
+  // and the attachedObject id we use to query metadata + download URL.
+  externalSource String?
+  externalId     String?
+
+  @@unique([externalSource, externalId])
   @@index([taskId])
 }
 
@@ -392,6 +638,7 @@ enum TimeFlag {
   OVERLAPPING          // два таймера пересекаются
   EXCESSIVE            // > 12 часов в день
   IDLE_LOGGED          // юзер залогировал время в период idle
+  AUTO_STOPPED         // таймер закрыт системой по лимиту (см. timeLimits.ts)
 }
 
 // Сырые данные от агента и расширения. Агрегируются в TimeEntry.
