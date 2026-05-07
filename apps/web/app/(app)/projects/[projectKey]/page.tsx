@@ -8,6 +8,7 @@ import { getProject } from '@/lib/projects';
 import { canEditProject, canCreateTask } from '@/lib/permissions';
 import { DomainError } from '@/lib/errors';
 import { getT } from '@/lib/i18n';
+import { renderRichText } from '@/lib/text/renderRichText';
 import { StatusBadge } from '@/components/domain/StatusBadge';
 import { TaskStatusBadge } from '@/components/domain/TaskStatusBadge';
 import { listRecentTasksForProject } from '@/lib/tasks';
@@ -107,7 +108,7 @@ export default async function ProjectOverviewPage({
             {project.description ? (
               <div className="col-span-2">
                 <div className="text-xs uppercase text-muted-foreground">Описание</div>
-                <p className="mt-1 whitespace-pre-wrap text-sm">{project.description}</p>
+                <p className="mt-1 whitespace-pre-wrap text-sm">{renderRichText(project.description)}</p>
               </div>
             ) : null}
           </CardContent>

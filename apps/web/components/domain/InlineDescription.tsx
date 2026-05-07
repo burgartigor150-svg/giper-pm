@@ -4,6 +4,7 @@ import { useState, useTransition } from 'react';
 import { Button } from '@giper/ui/components/Button';
 import { updateTaskAction } from '@/actions/tasks';
 import { useT } from '@/lib/useT';
+import { renderRichText } from '@/lib/text/renderRichText';
 
 type Props = {
   taskId: string;
@@ -72,7 +73,7 @@ export function InlineDescription({ taskId, projectKey, taskNumber, initial, can
           </div>
         </>
       ) : initial ? (
-        <p className="whitespace-pre-wrap text-sm">{initial}</p>
+        <p className="whitespace-pre-wrap text-sm">{renderRichText(initial)}</p>
       ) : (
         <p className="text-sm italic text-muted-foreground">{t('descriptionEmpty')}</p>
       )}

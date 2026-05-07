@@ -6,6 +6,7 @@ import { Globe, Lock } from 'lucide-react';
 import type { TaskStatus } from '@giper/db';
 import { useT } from '@/lib/useT';
 import { CommentForm } from './CommentForm';
+import { renderRichText } from '@/lib/text/renderRichText';
 
 type Author = { id: string; name: string; image: string | null };
 type CommentItem = {
@@ -229,7 +230,9 @@ function renderMentions(body: string, users: Map<string, Author>): React.ReactNo
     const u = users.get(id);
     if (!u) continue;
     if (match.index > lastIndex) {
-      out.push(<span key={key++}>{body.slice(lastIndex, match.index)}</span>);
+      out.push(
+        <span key={key++}>{renderRichText(body.slice(lastIndex, match.index))}</span>,
+      );
     }
     out.push(
       <a
@@ -243,7 +246,7 @@ function renderMentions(body: string, users: Map<string, Author>): React.ReactNo
     lastIndex = match.index + match[0].length;
   }
   if (lastIndex < body.length) {
-    out.push(<span key={key++}>{body.slice(lastIndex)}</span>);
+    out.push(<span key={key++}>{renderRichText(body.slice(lastIndex))}</span>);
   }
-  return out.length === 0 ? body : out;
+  return out.length === 0 ? renderRichText(body) : out;
 }
