@@ -393,6 +393,9 @@ type QuickAddInput = {
   title: string;
   /** When set, the new task becomes a subtask of this id. */
   parentTaskId?: string;
+  /** Optional pre-selection from the dialog. */
+  assigneeId?: string;
+  priority?: 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
 };
 
 /**
@@ -408,6 +411,8 @@ export async function quickAddTaskAction(
     projectKey: input.projectKey,
     title: input.title,
     parentId: input.parentTaskId,
+    assigneeId: input.assigneeId || undefined,
+    priority: input.priority,
   });
   if (!parsed.success) {
     return {
@@ -436,6 +441,35 @@ export async function quickAddTaskAction(
 }
 
 export type QuickAddProject = { id: string; key: string; name: string };
+export type QuickAddMember = { id: string; name: string; image: string | null };
+
+/**
+ * Project members eligible to be assigned to a new task — owner +
+ * regular members, deduped. Used by QuickAddDialog so a subtask can be
+ * assigned in one keystroke.
+ */
+export async function listProjectMembersForAssign(
+  projectKey: string,
+): Promise<QuickAddMember[]> {
+  await requireAuth();
+  const project = await prisma.project.findUnique({
+    where: { key: projectKey },
+    select: {
+      ownerId: true,
+      owner: { select: { id: true, name: true, image: true } },
+      members: {
+        select: {
+          user: { select: { id: true, name: true, image: true } },
+        },
+      },
+    },
+  });
+  if (!project) return [];
+  const map = new Map<string, QuickAddMember>();
+  map.set(project.owner.id, project.owner);
+  for (const m of project.members) map.set(m.user.id, m.user);
+  return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+}
 
 /**
  * Projects the current user can create tasks in. ADMIN/PM see all active

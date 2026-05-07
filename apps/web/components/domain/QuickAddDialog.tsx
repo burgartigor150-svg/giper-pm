@@ -7,8 +7,10 @@ import { Plus, X } from 'lucide-react';
 import { Button } from '@giper/ui/components/Button';
 import {
   listMyProjects,
+  listProjectMembersForAssign,
   quickAddTaskAction,
   type QuickAddProject,
+  type QuickAddMember,
 } from '@/actions/tasks';
 
 const LAST_PROJECT_KEY = 'giper:lastProjectKey';
@@ -29,9 +31,27 @@ export function QuickAddDialog() {
   const [projectKey, setProjectKey] = useState<string>('');
   const [parentTaskId, setParentTaskId] = useState<string | null>(null);
   const [title, setTitle] = useState('');
+  const [assigneeId, setAssigneeId] = useState<string>('');
+  const [priority, setPriority] = useState<'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT'>('MEDIUM');
+  const [members, setMembers] = useState<QuickAddMember[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const titleRef = useRef<HTMLTextAreaElement>(null);
+
+  // Reload project members whenever the selected project changes.
+  useEffect(() => {
+    if (!open || !projectKey) {
+      setMembers(null);
+      return;
+    }
+    let cancelled = false;
+    listProjectMembersForAssign(projectKey).then((list) => {
+      if (!cancelled) setMembers(list);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, projectKey]);
 
   // Hook into the global event bus. Event detail can carry overrides
   // (parentTaskId, projectKey) to scope the dialog — e.g. opening from
@@ -71,6 +91,8 @@ export function QuickAddDialog() {
       setTitle('');
       setError(null);
       setParentTaskId(null);
+      setAssigneeId('');
+      setPriority('MEDIUM');
     } else {
       // Focus textarea on next paint.
       setTimeout(() => titleRef.current?.focus(), 0);
@@ -107,6 +129,8 @@ export function QuickAddDialog() {
           projectKey,
           title: t,
           parentTaskId: parentTaskId ?? undefined,
+          assigneeId: assigneeId || undefined,
+          priority,
         });
         if (!res.ok) {
           setError(res.error.message);
@@ -123,7 +147,7 @@ export function QuickAddDialog() {
         setOpen(false);
       });
     },
-    [projectKey, title, parentTaskId, router],
+    [projectKey, title, parentTaskId, assigneeId, priority, router],
   );
 
   if (typeof document === 'undefined' || !open) return null;
@@ -161,8 +185,9 @@ export function QuickAddDialog() {
             <select
               value={projectKey}
               onChange={(e) => setProjectKey(e.target.value)}
-              disabled={!projects || pending}
-              className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+              disabled={!projects || pending || !!parentTaskId}
+              className="h-9 rounded-md border border-input bg-background px-2 text-sm disabled:opacity-60"
+              title={parentTaskId ? 'Подзадача создаётся в проекте родителя' : undefined}
             >
               {!projects ? (
                 <option>Загрузка…</option>
@@ -205,6 +230,48 @@ export function QuickAddDialog() {
               className="min-h-[64px] resize-none rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring"
             />
           </label>
+
+          <div className="grid grid-cols-2 gap-3">
+            <label className="flex flex-col gap-1.5">
+              <span className="text-xs uppercase tracking-wide text-muted-foreground">
+                Исполнитель
+              </span>
+              <select
+                value={assigneeId}
+                onChange={(e) => setAssigneeId(e.target.value)}
+                disabled={!members || pending}
+                className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+              >
+                <option value="">— не назначен —</option>
+                {members
+                  ? members.map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.name}
+                      </option>
+                    ))
+                  : null}
+              </select>
+            </label>
+
+            <label className="flex flex-col gap-1.5">
+              <span className="text-xs uppercase tracking-wide text-muted-foreground">
+                Срочность
+              </span>
+              <select
+                value={priority}
+                onChange={(e) =>
+                  setPriority(e.target.value as 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT')
+                }
+                disabled={pending}
+                className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+              >
+                <option value="LOW">Низкая</option>
+                <option value="MEDIUM">Средняя</option>
+                <option value="HIGH">Высокая</option>
+                <option value="URGENT">Срочно</option>
+              </select>
+            </label>
+          </div>
 
           {error ? <p className="text-xs text-red-600">{error}</p> : null}
         </div>
