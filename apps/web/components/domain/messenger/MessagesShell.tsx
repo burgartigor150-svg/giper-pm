@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Send, Hash, Lock, MessageSquare, Plus } from 'lucide-react';
+import { Hash, Lock, MessageSquare, Plus } from 'lucide-react';
 import { Avatar } from '@giper/ui/components/Avatar';
 import { Button } from '@giper/ui/components/Button';
 import { cn } from '@giper/ui/cn';
@@ -16,6 +16,9 @@ import {
 } from '@/actions/messenger';
 import { renderRichText } from '@/lib/text/renderRichText';
 import { MessageReactions } from './MessageReactions';
+import { ThreadPane } from './ThreadPane';
+import { MessageComposer } from './MessageComposer';
+import { MessageSquareReply } from 'lucide-react';
 
 type ChannelKind = 'PUBLIC' | 'PRIVATE' | 'DM' | 'GROUP_DM';
 
@@ -56,9 +59,13 @@ export function MessagesShell({
 }: Props) {
   const router = useRouter();
   const [messages, setMessages] = useState<MessageRow[]>(initialMessages);
-  const [draft, setDraft] = useState('');
-  const [pending, startTransition] = useTransition();
+  const [openThreadId, setOpenThreadId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Close thread when navigating channels.
+  useEffect(() => {
+    setOpenThreadId(null);
+  }, [activeChannelId]);
 
   // Reset when navigating between channels.
   useEffect(() => {
@@ -92,42 +99,15 @@ export function MessagesShell({
     (c) => !memberChannels.some((mc) => mc.id === c.id),
   );
 
-  function handleSend() {
-    if (!activeChannelId || !draft.trim()) return;
-    const body = draft.trim();
-    setDraft('');
-    // Optimistic append.
-    const tempId = `temp-${Date.now()}`;
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: tempId,
-        body,
-        authorId: meId ?? '',
-        author: { id: meId ?? '', name: 'Вы', image: null },
-        parentId: null,
-        replyCount: 0,
-        editedAt: null,
-        createdAt: new Date(),
-        reactions: [],
-      },
-    ]);
-    startTransition(async () => {
-      const res = await postMessageAction({ channelId: activeChannelId, body });
-      if (!res.ok) {
-        // Revert the optimistic append, keep draft so user can retry.
-        setMessages((prev) => prev.filter((m) => m.id !== tempId));
-        setDraft(body);
-      } else {
-        // Pull the real list once after a successful post — replaces
-        // the temp row with the server-id one.
-        router.refresh();
-      }
-    });
-  }
-
   return (
-    <div className="-mx-4 -my-6 grid h-[calc(100vh-3.5rem)] grid-cols-[260px_minmax(0,1fr)] md:-mx-8">
+    <div
+      className={cn(
+        '-mx-4 -my-6 grid h-[calc(100vh-3.5rem)] md:-mx-8',
+        openThreadId
+          ? 'grid-cols-[260px_minmax(0,1fr)_360px]'
+          : 'grid-cols-[260px_minmax(0,1fr)]',
+      )}
+    >
       {/* Left rail: channels & DMs */}
       <aside className="flex h-full flex-col border-r border-border bg-background">
         <div className="flex items-center justify-between border-b border-border px-3 py-2">
@@ -192,42 +172,60 @@ export function MessagesShell({
               ) : (
                 <ul className="flex flex-col gap-3">
                   {messages.map((m) => (
-                    <MessageRow key={m.id} m={m} meId={meId ?? ''} />
+                    <MessageRow
+                      key={m.id}
+                      m={m}
+                      meId={meId ?? ''}
+                      onOpenThread={() => setOpenThreadId(m.id)}
+                    />
                   ))}
                 </ul>
               )}
             </div>
             <div className="border-t border-border bg-background p-3">
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  handleSend();
+              <MessageComposer
+                placeholder="Написать сообщение… (@ — упомянуть пользователя, Enter — отправить)"
+                onSend={async (body) => {
+                  if (!activeChannelId) return;
+                  // Optimistic append.
+                  const tempId = `temp-${Date.now()}`;
+                  setMessages((prev) => [
+                    ...prev,
+                    {
+                      id: tempId,
+                      body,
+                      authorId: meId ?? '',
+                      author: { id: meId ?? '', name: 'Вы', image: null },
+                      parentId: null,
+                      replyCount: 0,
+                      editedAt: null,
+                      createdAt: new Date(),
+                      reactions: [],
+                    },
+                  ]);
+                  const res = await postMessageAction({
+                    channelId: activeChannelId,
+                    body,
+                  });
+                  if (!res.ok) {
+                    setMessages((prev) => prev.filter((m) => m.id !== tempId));
+                    throw new Error(res.error.message);
+                  }
+                  router.refresh();
                 }}
-                className="flex items-end gap-2"
-              >
-                <textarea
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    // Enter to send, Shift+Enter for newline.
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault();
-                      handleSend();
-                    }
-                  }}
-                  placeholder="Написать сообщение… (Enter — отправить, Shift+Enter — новая строка)"
-                  rows={1}
-                  className="min-h-[40px] flex-1 resize-none rounded-md border border-input bg-background px-3 py-2 text-sm"
-                  disabled={pending}
-                />
-                <Button type="submit" disabled={pending || !draft.trim()} size="icon">
-                  <Send className="h-4 w-4" />
-                </Button>
-              </form>
+              />
             </div>
           </>
         )}
       </section>
+
+      {openThreadId ? (
+        <ThreadPane
+          rootMessageId={openThreadId}
+          meId={meId ?? ''}
+          onClose={() => setOpenThreadId(null)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -282,9 +280,17 @@ function ChannelLink({
   );
 }
 
-function MessageRow({ m, meId }: { m: MessageRow; meId: string }) {
+function MessageRow({
+  m,
+  meId,
+  onOpenThread,
+}: {
+  m: MessageRow;
+  meId: string;
+  onOpenThread: () => void;
+}) {
   return (
-    <li className="group flex gap-3">
+    <li className="group relative flex gap-3">
       <Avatar src={m.author.image} alt={m.author.name} className="h-8 w-8 shrink-0" />
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline gap-2 text-xs">
@@ -308,11 +314,36 @@ function MessageRow({ m, meId }: { m: MessageRow; meId: string }) {
           meId={meId}
         />
         {m.replyCount > 0 ? (
-          <div className="mt-1 text-xs text-blue-600">{m.replyCount} ответов в треде</div>
+          <button
+            type="button"
+            onClick={onOpenThread}
+            className="mt-1 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-blue-600 hover:bg-accent"
+          >
+            <MessageSquareReply className="h-3 w-3" />
+            {m.replyCount} {pluralReplies(m.replyCount)}
+          </button>
         ) : null}
       </div>
+      {/* Hover affordance: appears on the right edge to start a thread. */}
+      <button
+        type="button"
+        onClick={onOpenThread}
+        className="absolute right-0 top-0 rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground opacity-0 shadow-sm transition-opacity hover:bg-accent group-hover:opacity-100"
+        title="Ответить в треде"
+      >
+        <MessageSquareReply className="inline h-3 w-3" />
+      </button>
     </li>
   );
+}
+
+function pluralReplies(n: number): string {
+  // ru pluralisation: 1 — ответ, 2-4 — ответа, 5+ — ответов
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return 'ответ';
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'ответа';
+  return 'ответов';
 }
 
 function CreateChannelButton() {

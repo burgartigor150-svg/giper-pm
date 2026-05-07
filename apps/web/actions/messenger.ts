@@ -396,6 +396,28 @@ export async function loadThreadAction(rootMessageId: string) {
   return { root, replies, channelId: root.channelId };
 }
 
+/**
+ * Lightweight user search for @mention autocomplete in the composer.
+ * Active users only, name/email contains, capped at 8.
+ */
+export async function searchUsersForMention(q: string) {
+  await requireAuth();
+  const trimmed = q.trim();
+  if (!trimmed) return [];
+  return prisma.user.findMany({
+    where: {
+      isActive: true,
+      OR: [
+        { name: { contains: trimmed, mode: 'insensitive' } },
+        { email: { contains: trimmed, mode: 'insensitive' } },
+      ],
+    },
+    take: 8,
+    orderBy: { name: 'asc' },
+    select: { id: true, name: true, email: true, image: true },
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Reactions
 // ---------------------------------------------------------------------------
