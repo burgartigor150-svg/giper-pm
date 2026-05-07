@@ -50,8 +50,19 @@ COPY --from=deps /repo/packages/ui/node_modules ./packages/ui/node_modules
 COPY . .
 
 # Generate the Prisma client into node_modules/.prisma — Next standalone
-# tracer picks it up from there.
-RUN pnpm --filter @giper/db exec prisma generate
+# tracer picks it up from there. Then materialize the pnpm symlinks at
+# /repo/node_modules/.prisma and /repo/node_modules/@prisma into real
+# directories so the runtime stage can COPY them (Docker COPY refuses
+# to follow symlinks pointing into pnpm's hashed .pnpm/<hash>/... tree).
+RUN pnpm --filter @giper/db exec prisma generate && \
+    for d in .prisma @prisma/client @prisma/engines; do \
+      src="$(readlink -f /repo/node_modules/$d 2>/dev/null || true)"; \
+      [ -n "$src" ] && [ -d "$src" ] && [ "$src" != "/repo/node_modules/$d" ] && { \
+        rm -rf "/repo/node_modules/$d"; \
+        mkdir -p "/repo/node_modules/$(dirname $d)"; \
+        cp -RL "$src" "/repo/node_modules/$d"; \
+      } || true; \
+    done
 
 # Build with standalone output. NEXT_TELEMETRY_DISABLED keeps logs clean.
 ENV NEXT_TELEMETRY_DISABLED=1
@@ -74,15 +85,16 @@ COPY --from=build /repo/apps/web/.next/standalone ./
 COPY --from=build /repo/apps/web/.next/static ./apps/web/.next/static
 COPY --from=build /repo/apps/web/public ./apps/web/public
 
-# Prisma generated client + Alpine query engine. The standalone tracer
-# sometimes misses the .prisma/client folder (especially the linux-musl
-# .so.node binary). Schema's `output = "../node_modules/.prisma/client"`
-# pins the generated client under packages/db/node_modules (a real
-# directory, not a pnpm symlink), so Docker COPY can follow it.
-# We mirror it into both root node_modules and Next's standalone
-# server chunks — different runtime code paths look in different places.
-COPY --from=build /repo/packages/db/node_modules/.prisma ./node_modules/.prisma
-COPY --from=build /repo/packages/db/node_modules/.prisma ./apps/web/.next/server/node_modules/.prisma
+# Prisma generated client + Alpine query engine. The build stage
+# already dereferenced pnpm's symlinks at /repo/node_modules/.prisma,
+# /repo/node_modules/@prisma/client, and /repo/node_modules/@prisma/engines
+# into real directories, so we can COPY them now. We mirror into both
+# root node_modules and Next's standalone server chunks — different
+# runtime code paths look in different places.
+COPY --from=build /repo/node_modules/.prisma ./node_modules/.prisma
+COPY --from=build /repo/node_modules/@prisma ./node_modules/@prisma
+COPY --from=build /repo/node_modules/.prisma ./apps/web/.next/server/node_modules/.prisma
+COPY --from=build /repo/node_modules/@prisma ./apps/web/.next/server/node_modules/@prisma
 
 # Schema + migrations on board for `prisma migrate deploy` if we ever
 # run it from inside the web container instead of the dedicated migrate
