@@ -12,6 +12,7 @@ import { renderRichText } from '@/lib/text/renderRichText';
 import { StatusBadge } from '@/components/domain/StatusBadge';
 import { TaskStatusBadge } from '@/components/domain/TaskStatusBadge';
 import { listRecentTasksForProject } from '@/lib/tasks';
+import { ProjectMembersEditor } from '@/components/domain/ProjectMembersEditor';
 
 export default async function ProjectOverviewPage({
   params,
@@ -21,7 +22,6 @@ export default async function ProjectOverviewPage({
   const { projectKey } = await params;
   const user = await requireAuth();
   const t = await getT('projects.detail');
-  const tRoles = await getT('projects.memberRole');
 
   let project;
   try {
@@ -119,20 +119,11 @@ export default async function ProjectOverviewPage({
             <CardTitle>{t('members')} ({project.members.length})</CardTitle>
           </CardHeader>
           <CardContent>
-            <ul className="flex flex-col gap-3 text-sm">
-              {project.members.map((m) => (
-                <li key={m.id} className="flex items-center gap-3">
-                  <Avatar src={m.user.image} alt={m.user.name} className="h-7 w-7" />
-                  <div className="flex flex-1 flex-col">
-                    <span className="text-sm">{m.user.name}</span>
-                    <span className="text-xs text-muted-foreground">{m.user.email}</span>
-                  </div>
-                  <span className="rounded-md bg-muted px-2 py-0.5 text-xs">
-                    {tRoles(m.role)}
-                  </span>
-                </li>
-              ))}
-            </ul>
+            <ProjectMembersEditor
+              projectId={project.id}
+              members={project.members}
+              canEdit={canEdit}
+            />
           </CardContent>
         </Card>
       </div>
