@@ -53,4 +53,7 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
 
 EXPOSE 3001
 ENTRYPOINT ["/sbin/tini", "--"]
-CMD ["node", "--import", "tsx/esm", "apps/ws/src/index.ts"]
+# Absolute import paths so node's ESM resolver doesn't need to walk
+# node_modules from /app (where tsx is not installed). NODE_PATH does
+# not affect the ESM loader, hence the explicit file:// URLs.
+CMD ["node", "--import", "file:///app/apps/ws/node_modules/tsx/dist/esm/index.mjs", "/app/apps/ws/src/index.ts"]

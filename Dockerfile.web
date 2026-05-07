@@ -81,13 +81,16 @@ COPY --from=build /repo/apps/web/.next/static ./apps/web/.next/static
 COPY --from=build /repo/apps/web/public ./apps/web/public
 
 # Prisma generated client + Alpine query engine from the dereferenced
-# export directory. Mirror into both root node_modules and Next
-# standalone's server chunks — different runtime code paths look in
-# different places.
+# export directory. Prisma's runtime probes several locations across
+# Next bundle modes, so we mirror into all three known-good targets:
+#   - /app/node_modules/.prisma/client                        (default)
+#   - /app/apps/web/.next/server/node_modules/.prisma/client  (Next chunk dir)
+#   - /app/apps/web/.prisma/client                            (app-rooted fallback)
 COPY --from=build /prisma-out/.prisma ./node_modules/.prisma
 COPY --from=build /prisma-out/@prisma ./node_modules/@prisma
 COPY --from=build /prisma-out/.prisma ./apps/web/.next/server/node_modules/.prisma
 COPY --from=build /prisma-out/@prisma ./apps/web/.next/server/node_modules/@prisma
+COPY --from=build /prisma-out/.prisma ./apps/web/.prisma
 
 # Schema + migrations on board for `prisma migrate deploy` if we ever
 # run it from inside the web container instead of the dedicated migrate
