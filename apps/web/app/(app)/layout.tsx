@@ -13,6 +13,7 @@ function buildNav(user: SessionUser): NavItem[] {
     { key: 'me', href: '/me' },
     { key: 'projects', href: '/projects' },
     { key: 'time', href: '/time' },
+    { key: 'messages', href: '/messages' },
   ];
   if (user.role === 'ADMIN' || user.role === 'PM') {
     items.push({ key: 'team', href: '/team' });

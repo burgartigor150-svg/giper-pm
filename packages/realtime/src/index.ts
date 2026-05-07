@@ -16,7 +16,7 @@ export type RealtimeEventEnvelope<T = unknown> = {
   payload: T;
 };
 
-export type RealtimeChannelKind = 'user' | 'task' | 'project';
+export type RealtimeChannelKind = 'user' | 'task' | 'project' | 'chat';
 
 /**
  * Conventional channel names — keep them centralised so the publisher
@@ -30,4 +30,7 @@ export function channelForTask(taskId: string): string {
 }
 export function channelForProject(projectId: string): string {
   return `project:${projectId}`;
+}
+export function channelForChat(channelId: string): string {
+  return `chat:${channelId}`;
 }
