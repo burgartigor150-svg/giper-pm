@@ -16,6 +16,7 @@ import {
   setUserActive,
   updateUser,
 } from '@/lib/users';
+import { enrichUserFromBitrixBestEffort } from '@/lib/integrations/bitrix24Outbound';
 
 export type UserSearchHit = {
   id: string;
@@ -88,11 +89,46 @@ export async function createUserAction(
       id: me.id,
       role: me.role,
     });
+    // Best-effort: pull bitrixUserId / name / image / timezone from
+    // Bitrix24 in the same flow. Failures are silent — the user is
+    // created either way, manual "Подтянуть из Bitrix" button on the
+    // detail page is the retry path.
+    await enrichUserFromBitrixBestEffort(user.id);
     revalidatePath('/settings/users');
     return { ok: true, data: { id: user.id, tempPassword } };
   } catch (e) {
     return toErr(e);
   }
+}
+
+/**
+ * Manual "pull from Bitrix24" trigger on the user detail page. Same
+ * code path as the create-time enrichment but synchronous — caller
+ * sees the result and can decide whether to flash success or warn.
+ */
+export async function syncUserFromBitrixAction(
+  userId: string,
+): Promise<
+  | { ok: true; matched: boolean; updatedFields: string[] }
+  | { ok: false; error: { code: string; message: string } }
+> {
+  const me = await requireAuth();
+  if (me.role !== 'ADMIN') {
+    return {
+      ok: false,
+      error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Только ADMIN' },
+    };
+  }
+  const res = await enrichUserFromBitrixBestEffort(userId);
+  if (!res.ok) {
+    return { ok: false, error: { code: 'PUBLISH_FAILED', message: res.error } };
+  }
+  revalidatePath(`/settings/users/${userId}`);
+  revalidatePath('/settings/users');
+  if (!res.matched) {
+    return { ok: true, matched: false, updatedFields: [] };
+  }
+  return { ok: true, matched: true, updatedFields: res.updated };
 }
 
 export async function updateUserAction(

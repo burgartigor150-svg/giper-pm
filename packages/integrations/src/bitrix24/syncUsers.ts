@@ -28,14 +28,41 @@ export async function syncUsers(
     const email = u.EMAIL.trim().toLowerCase();
     const existing = await prisma.user.findUnique({
       where: { email },
-      select: { id: true, bitrixUserId: true },
+      select: {
+        id: true,
+        name: true,
+        image: true,
+        timezone: true,
+        bitrixUserId: true,
+      },
     });
     if (!existing) continue;
     stats.matched++;
-    if (existing.bitrixUserId !== u.ID) {
+
+    const fullName = [u.NAME, u.LAST_NAME].filter(Boolean).join(' ').trim();
+    const looksAutoNamed =
+      !existing.name ||
+      existing.name === email ||
+      existing.name === email.split('@')[0];
+
+    const updates: Record<string, unknown> = {};
+    if (existing.bitrixUserId !== u.ID) updates.bitrixUserId = u.ID;
+    if (looksAutoNamed && fullName) updates.name = fullName.slice(0, 80);
+    if (!existing.image && u.PERSONAL_PHOTO) {
+      updates.image = u.PERSONAL_PHOTO;
+      updates.avatarUrl = u.PERSONAL_PHOTO;
+    }
+    if (
+      (existing.timezone === 'Europe/Moscow' || !existing.timezone) &&
+      u.TIME_ZONE
+    ) {
+      updates.timezone = u.TIME_ZONE;
+    }
+
+    if (Object.keys(updates).length > 0) {
       await prisma.user.update({
         where: { id: existing.id },
-        data: { bitrixUserId: u.ID },
+        data: updates,
       });
       stats.updated++;
     }

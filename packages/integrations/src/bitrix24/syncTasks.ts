@@ -2,6 +2,8 @@ import type { PrismaClient } from '@giper/db';
 import { Bitrix24Client } from './client';
 import type { BxTask } from './types';
 import { mapBitrixTask } from './mappers';
+import { syncTaskAttachments, type SyncFilesResult } from './syncFiles';
+import { syncTaskComments, type SyncCommentsResult } from './syncComments';
 
 export type SyncTasksResult = {
   totalSeen: number;
@@ -9,6 +11,8 @@ export type SyncTasksResult = {
   updated: number;
   skippedNoProject: number;
   errors: number;
+  files: SyncFilesResult;
+  comments: SyncCommentsResult;
 };
 
 export type SyncTasksOptions = {
@@ -40,6 +44,8 @@ export async function syncTasks(
     updated: 0,
     skippedNoProject: 0,
     errors: 0,
+    files: { totalSeen: 0, created: 0, updated: 0, deleted: 0, errors: 0 },
+    comments: { totalSeen: 0, created: 0, updated: 0, deleted: 0, errors: 0 },
   };
 
   const projectByExternalId = new Map<string, string>();
@@ -104,6 +110,7 @@ export async function syncTasks(
           'DEADLINE',
           'START_DATE_PLAN',
           'PARENT_ID',
+          'UF_TASK_WEBDAV_FILES',
         ],
         start,
       });
@@ -115,7 +122,7 @@ export async function syncTasks(
         seenIds.add(raw.id);
         stats.totalSeen++;
         try {
-          await upsertOne(
+          const localTaskId = await upsertOne(
             prisma,
             raw,
             projectByExternalId,
@@ -124,6 +131,26 @@ export async function syncTasks(
             ensurePersonal,
             stats,
           );
+          if (localTaskId) {
+            // Files live on the camelCase response as `ufTaskWebdavFiles`.
+            const fileIds = (raw.ufTaskWebdavFiles ?? []).map(String).filter(Boolean);
+            await syncTaskAttachments(
+              prisma,
+              client,
+              { id: localTaskId, bitrixTaskId: raw.id, attachmentIds: fileIds },
+              stats.files,
+            );
+            // Comments — pulled per task because `task.commentitem.list`
+            // (the bulk endpoint) doesn't exist; we have to enumerate
+            // per task ID. Cheap on incremental syncs because the
+            // since-watermark already shrinks the task list.
+            await syncTaskComments(
+              prisma,
+              client,
+              { id: localTaskId, bitrixTaskId: raw.id },
+              stats.comments,
+            );
+          }
         } catch (e) {
           stats.errors++;
           // eslint-disable-next-line no-console
@@ -147,7 +174,7 @@ async function upsertOne(
   fallbackCreator: string | null,
   ensurePersonalProjectId: () => Promise<string | null>,
   stats: SyncTasksResult,
-): Promise<void> {
+): Promise<string | null> {
   const mapped = mapBitrixTask(raw);
   let projectId: string | undefined;
 
@@ -158,7 +185,7 @@ async function upsertOne(
       // when the user can read the task but isn't a member of its group
       // and the group wasn't seeded into extraGroupIds).
       stats.skippedNoProject++;
-      return;
+      return null;
     }
   } else {
     // Personal task (groupId=0). Land it in the user's MINE project.
@@ -166,7 +193,7 @@ async function upsertOne(
     if (!personal) {
       // Global mirror isn't allowed to manufacture a MINE project.
       stats.skippedNoProject++;
-      return;
+      return null;
     }
     projectId = personal;
   }
@@ -179,7 +206,7 @@ async function upsertOne(
     fallbackCreator;
   if (!creatorId) {
     stats.errors++;
-    return;
+    return null;
   }
 
   const found = await prisma.task.findFirst({
@@ -223,7 +250,7 @@ async function upsertOne(
       });
       stats.updated++;
     }
-    return;
+    return found.id;
   }
 
   // Allocate next number per project. Not hot-path during steady state.
@@ -232,7 +259,7 @@ async function upsertOne(
     _max: { number: true },
   });
   const number = (max._max.number ?? 0) + 1;
-  await prisma.task.create({
+  const created = await prisma.task.create({
     data: {
       projectId,
       number,
@@ -248,8 +275,10 @@ async function upsertOne(
       externalSource: 'bitrix24',
       externalId: mapped.externalId,
     },
+    select: { id: true },
   });
   stats.created++;
+  return created.id;
 }
 
 function sameDate(a: Date | null | undefined, b: Date | null | undefined): boolean {

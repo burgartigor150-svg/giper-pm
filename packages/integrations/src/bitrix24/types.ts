@@ -45,4 +45,10 @@ export type BxTask = {
   startDatePlan?: string | null;
   durationPlan?: string | null;
   parentId?: string | null;
+  /**
+   * UF_TASK_WEBDAV_FILES — task-level attachment ids (disk.attachedObject.ID).
+   * Bitrix returns this as `ufTaskWebdavFiles` in the camelCase response shape.
+   * Empty array when the task has no files.
+   */
+  ufTaskWebdavFiles?: Array<string | number> | null;
 };

@@ -77,6 +77,79 @@ export async function runBitrix24SyncNow(
   return runBitrix24Sync(prisma, client, { since });
 }
 
+/**
+ * Sync every member of a PM's roster from Bitrix24 in one pass. Each
+ * member is synced with their own `forBitrixUserId` scope so we pull
+ * only their tasks, not the whole portal. The PM themselves is also
+ * included — they're effectively the "lead" of their team.
+ *
+ * Returns per-member stats so the UI can surface "Глеб: 12 tasks
+ * created, 3 updated" feedback.
+ */
+export async function runBitrix24TeamSyncNow(
+  pmId: string,
+  opts: { force?: boolean } = {},
+): Promise<
+  | { ok: true; perMember: Array<{ memberId: string; name: string; created: number; updated: number; comments: number }> }
+  | { ok: false; error: string }
+> {
+  const client = getBitrix24Client();
+  const last = await lastSuccessfulSyncStart(prisma);
+  const since = opts.force
+    ? null
+    : last ?? new Date(Date.now() - 30 * 24 * 3600_000);
+
+  // Pull the PM's team plus the PM themselves. Members without a
+  // bitrixUserId are skipped — sync needs the upstream id to scope.
+  const team = await prisma.pmTeamMember.findMany({
+    where: { pmId },
+    select: {
+      member: {
+        select: { id: true, name: true, bitrixUserId: true },
+      },
+    },
+  });
+  const pm = await prisma.user.findUnique({
+    where: { id: pmId },
+    select: { id: true, name: true, bitrixUserId: true },
+  });
+  if (!pm) return { ok: false, error: 'PM не найден' };
+
+  const targets = [
+    pm,
+    ...team
+      .map((t) => t.member)
+      .filter((m) => m.bitrixUserId && m.id !== pm.id),
+  ].filter((u) => u.bitrixUserId);
+
+  if (targets.length === 0) {
+    return { ok: false, error: 'Никто из команды не связан с Bitrix24' };
+  }
+
+  const perMember: Array<{
+    memberId: string;
+    name: string;
+    created: number;
+    updated: number;
+    comments: number;
+  }> = [];
+  for (const u of targets) {
+    if (!u.bitrixUserId) continue;
+    const r = await runBitrix24Sync(prisma, client, {
+      since,
+      forBitrixUserId: u.bitrixUserId,
+    });
+    perMember.push({
+      memberId: u.id,
+      name: u.name,
+      created: r.tasks.created,
+      updated: r.tasks.updated,
+      comments: r.tasks.comments.created,
+    });
+  }
+  return { ok: true, perMember };
+}
+
 async function findLinkedAdmin() {
   return prisma.user.findFirst({
     where: { role: 'ADMIN', isActive: true, bitrixUserId: { not: null } },

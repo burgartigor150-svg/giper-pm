@@ -65,6 +65,8 @@ export async function runBitrix24Sync(
     updated: 0,
     skippedNoProject: 0,
     errors: 0,
+    files: { totalSeen: 0, created: 0, updated: 0, deleted: 0, errors: 0 },
+    comments: { totalSeen: 0, created: 0, updated: 0, deleted: 0, errors: 0 },
   };
   let ok = true;
   let error: string | undefined;
@@ -104,16 +106,27 @@ export async function runBitrix24Sync(
   const finishedAt = new Date();
   const durationMs = finishedAt.getTime() - startedAt.getTime();
 
+  const totalErrors =
+    tasks.errors + tasks.files.errors + tasks.comments.errors;
   await prisma.integrationSyncLog.update({
     where: { id: log.id },
     data: {
       finishedAt,
-      status: ok ? (tasks.errors > 0 ? 'PARTIAL' : 'SUCCESS') : 'FAILED',
-      itemsProcessed: users.totalSeen + projects.totalSeen + tasks.totalSeen,
+      status: ok ? (totalErrors > 0 ? 'PARTIAL' : 'SUCCESS') : 'FAILED',
+      itemsProcessed:
+        users.totalSeen +
+        projects.totalSeen +
+        tasks.totalSeen +
+        tasks.files.totalSeen +
+        tasks.comments.totalSeen,
       errors: error
         ? { fatal: error }
-        : tasks.errors > 0
-          ? { taskErrors: tasks.errors }
+        : totalErrors > 0
+          ? {
+              taskErrors: tasks.errors,
+              fileErrors: tasks.files.errors,
+              commentErrors: tasks.comments.errors,
+            }
           : undefined,
     },
   });

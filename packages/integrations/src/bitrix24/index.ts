@@ -4,10 +4,25 @@ export { mapBitrixTask, mapBitrixStatus, mapBitrixPriority, stripBitrixHtml } fr
 export type { DomainTaskFromBitrix, DomainTaskStatus, DomainTaskPriority } from './mappers';
 export { syncUsers } from './syncUsers';
 export type { SyncUsersResult } from './syncUsers';
+export { enrichUserFromBitrix } from './enrichUser';
+export type { EnrichResult } from './enrichUser';
 export { syncProjects } from './syncProjects';
 export type { SyncProjectsResult } from './syncProjects';
 export { syncTasks } from './syncTasks';
 export type { SyncTasksResult } from './syncTasks';
+export { syncTaskAttachments, bitrix24DownloadUrl } from './syncFiles';
+export type { SyncFilesResult } from './syncFiles';
+export { syncTaskComments } from './syncComments';
+export type { SyncCommentsResult } from './syncComments';
 export { runBitrix24Sync, lastSuccessfulSyncStart } from './runSync';
 export type { RunSyncResult } from './runSync';
+export {
+  pushTaskStatus,
+  pushComment,
+  pushProjectAsWorkgroup,
+  pushTaskAsBitrix,
+  hashTaskState,
+} from './outbound';
+export { syncOneTask, syncOneComment } from './inbound';
+export type { InboundResult } from './inbound';
 export type { BxUser, BxWorkgroup, BxTask } from './types';
