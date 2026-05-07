@@ -8,6 +8,8 @@ export type BoardFilter = {
   priority?: 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
   q?: string;
   onlyMine?: boolean;
+  /** Tag IDs (from Tag model) — task must have ALL of them assigned. */
+  tagIds?: string[];
 };
 
 /** All non-CANCELED tasks for the project, no pagination — kanban shows everything. */
@@ -59,6 +61,13 @@ export async function listTasksForBoard(
       { title: { contains: filter.q, mode: 'insensitive' } },
       { description: { contains: filter.q, mode: 'insensitive' } },
     ];
+  }
+  if (filter.tagIds && filter.tagIds.length > 0) {
+    // AND-semantics: task must carry every selected tag. Done with one
+    // AND-array of relation filters so Prisma stays in a single query.
+    where.AND = filter.tagIds.map((tagId) => ({
+      taskTags: { some: { tagId } },
+    }));
   }
 
   const rawTasks = await prisma.task.findMany({

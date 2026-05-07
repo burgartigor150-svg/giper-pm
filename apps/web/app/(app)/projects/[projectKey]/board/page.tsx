@@ -10,6 +10,7 @@ import { KanbanBoard } from '@/components/domain/KanbanBoard';
 import { KanbanFilters } from '@/components/domain/KanbanFilters';
 import { RevalidateOnEvent } from '@/components/domain/RevalidateOnEvent';
 import { channelForProject } from '@giper/realtime';
+import { listTagsForProject } from '@/actions/tags';
 
 export default async function ProjectBoardPage({
   params,
@@ -29,12 +30,20 @@ export default async function ProjectBoardPage({
   const priority = priorityParsed?.success ? priorityParsed.data : undefined;
   const q = typeof sp.q === 'string' ? sp.q : undefined;
   const onlyMine = sp.onlyMine === '1';
+  // tagIds may arrive as a single string or an array depending on the
+  // form encoding. Normalize and trim before sending to the query.
+  const rawTagIds = sp.tagIds ?? sp.tagId; // accept either spelling
+  const tagIds = Array.isArray(rawTagIds)
+    ? rawTagIds
+    : typeof rawTagIds === 'string'
+      ? rawTagIds.split(',').map((s) => s.trim()).filter(Boolean)
+      : undefined;
 
   let result;
   try {
     result = await listTasksForBoard(
       projectKey,
-      { assigneeId, priority, q, onlyMine },
+      { assigneeId, priority, q, onlyMine, tagIds },
       { id: me.id, role: me.role },
     );
   } catch (e) {
@@ -53,6 +62,9 @@ export default async function ProjectBoardPage({
   const memberMap = new Map<string, { id: string; name: string }>();
   for (const m of project.members) memberMap.set(m.user.id, { id: m.user.id, name: m.user.name });
   const members = Array.from(memberMap.values());
+
+  // Available tags for the multi-select filter.
+  const availableTags = await listTagsForProject(project.id);
 
   return (
     <div className="mx-auto max-w-[1400px] space-y-4">
@@ -79,6 +91,8 @@ export default async function ProjectBoardPage({
           priority={priority}
           q={q}
           onlyMine={onlyMine}
+          availableTags={availableTags}
+          activeTagIds={tagIds ?? []}
         />
       </Card>
 
