@@ -6,6 +6,18 @@ export type SyncUsersResult = {
   totalSeen: number;
   matched: number;
   updated: number;
+  created: number;
+};
+
+export type SyncUsersOptions = {
+  /**
+   * When true, create a stub User row for every Bitrix user we don't already
+   * have (role=MEMBER, isActive=false, no password). This keeps comment and
+   * task author attribution intact during a Bitrix mirror without granting
+   * those users login access — flipping `isActive=true` and setting a
+   * password is an explicit admin operation later.
+   */
+  createMissing?: boolean;
 };
 
 /**
@@ -13,15 +25,23 @@ export type SyncUsersResult = {
  * email (case-insensitive). When matched, we store `bitrixUserId` so future
  * task syncs can resolve assignees by reference.
  *
- * Read-only mirror policy: we do NOT auto-create local users. Access lives
- * on our side; sync only enriches existing accounts.
+ * Default policy: read-only mirror — we don't auto-create. Pass
+ * `createMissing: true` to also seed inactive stub accounts (used for
+ * full-org mirrors where comment authorship matters more than account
+ * hygiene).
  */
 export async function syncUsers(
   prisma: PrismaClient,
   client: Bitrix24Client,
+  options: SyncUsersOptions = {},
 ): Promise<SyncUsersResult> {
   const all: BxUser[] = await client.all<BxUser>('user.get', { ACTIVE: true });
-  const stats: SyncUsersResult = { totalSeen: all.length, matched: 0, updated: 0 };
+  const stats: SyncUsersResult = {
+    totalSeen: all.length,
+    matched: 0,
+    updated: 0,
+    created: 0,
+  };
 
   for (const u of all) {
     if (!u.EMAIL) continue;
@@ -36,10 +56,31 @@ export async function syncUsers(
         bitrixUserId: true,
       },
     });
-    if (!existing) continue;
-    stats.matched++;
 
     const fullName = [u.NAME, u.LAST_NAME].filter(Boolean).join(' ').trim();
+
+    if (!existing) {
+      if (!options.createMissing) continue;
+      await prisma.user.create({
+        data: {
+          email,
+          name: (fullName || email.split('@')[0]).slice(0, 80),
+          role: 'MEMBER',
+          // Inactive on purpose — admins must opt in before these accounts
+          // can authenticate. They still resolve as comment/task authors.
+          isActive: false,
+          bitrixUserId: u.ID,
+          image: u.PERSONAL_PHOTO ?? null,
+          avatarUrl: u.PERSONAL_PHOTO ?? null,
+          timezone: u.TIME_ZONE || 'Europe/Moscow',
+        },
+      });
+      stats.created++;
+      continue;
+    }
+
+    stats.matched++;
+
     const looksAutoNamed =
       !existing.name ||
       existing.name === email ||

@@ -24,6 +24,13 @@ export type RunSyncOptions = {
    * single-user installs (matches the "personal mirror" use-case).
    */
   forBitrixUserId?: string | null;
+  /**
+   * Pass through to syncUsers — when true, seed inactive stub accounts for
+   * every Bitrix user we don't already have. Required for full-org mirrors
+   * where comment/task authorship would otherwise collapse onto the
+   * fallback admin.
+   */
+  createMissingUsers?: boolean;
 };
 
 /**
@@ -52,7 +59,7 @@ export async function runBitrix24Sync(
     },
   });
 
-  let users: SyncUsersResult = { totalSeen: 0, matched: 0, updated: 0 };
+  let users: SyncUsersResult = { totalSeen: 0, matched: 0, updated: 0, created: 0 };
   let projects: SyncProjectsResult = {
     totalSeen: 0,
     created: 0,
@@ -72,7 +79,9 @@ export async function runBitrix24Sync(
   let error: string | undefined;
 
   try {
-    users = await syncUsers(prisma, client);
+    users = await syncUsers(prisma, client, {
+      createMissing: !!opts.createMissingUsers,
+    });
 
     if (opts.forBitrixUserId) {
       // Personal-mirror path. The user can be a member of N groups but

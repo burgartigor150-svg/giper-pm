@@ -56,6 +56,7 @@ export async function runBitrix24SyncNow(
       await runBitrix24Sync(prisma, client, {
         since,
         forBitrixUserId: '__bootstrap__', // any non-empty string nobody owns
+        createMissingUsers: true,
       });
       me = await findLinkedAdmin();
     }
@@ -63,6 +64,7 @@ export async function runBitrix24SyncNow(
       return runBitrix24Sync(prisma, client, {
         since,
         forBitrixUserId: me.bitrixUserId,
+        createMissingUsers: true,
       });
     }
     // Still not linked — emails don't match. Surface a no-op so the UI
@@ -71,10 +73,11 @@ export async function runBitrix24SyncNow(
     return runBitrix24Sync(prisma, client, {
       since,
       forBitrixUserId: '__bootstrap__',
+      createMissingUsers: true,
     });
   }
 
-  return runBitrix24Sync(prisma, client, { since });
+  return runBitrix24Sync(prisma, client, { since, createMissingUsers: true });
 }
 
 /**
@@ -138,6 +141,7 @@ export async function runBitrix24TeamSyncNow(
     const r = await runBitrix24Sync(prisma, client, {
       since,
       forBitrixUserId: u.bitrixUserId,
+      createMissingUsers: true,
     });
     perMember.push({
       memberId: u.id,
