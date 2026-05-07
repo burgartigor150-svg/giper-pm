@@ -73,7 +73,7 @@ export function InlineDescription({ taskId, projectKey, taskNumber, initial, can
           </div>
         </>
       ) : initial ? (
-        <p className="whitespace-pre-wrap text-sm">{renderRichText(initial)}</p>
+        <p className="whitespace-pre-wrap break-words text-sm">{renderRichText(initial)}</p>
       ) : (
         <p className="text-sm italic text-muted-foreground">{t('descriptionEmpty')}</p>
       )}

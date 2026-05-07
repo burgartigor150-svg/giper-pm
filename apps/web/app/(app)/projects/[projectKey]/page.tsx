@@ -108,7 +108,7 @@ export default async function ProjectOverviewPage({
             {project.description ? (
               <div className="col-span-2">
                 <div className="text-xs uppercase text-muted-foreground">Описание</div>
-                <p className="mt-1 whitespace-pre-wrap text-sm">{renderRichText(project.description)}</p>
+                <p className="mt-1 whitespace-pre-wrap break-words text-sm">{renderRichText(project.description)}</p>
               </div>
             ) : null}
           </CardContent>

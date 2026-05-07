@@ -179,7 +179,7 @@ function CommentRow({
             </span>
           ) : null}
         </div>
-        <p className="mt-1 whitespace-pre-wrap text-sm">
+        <p className="mt-1 whitespace-pre-wrap break-words text-sm">
           {renderMentions(item.body, mentions)}
         </p>
       </div>
