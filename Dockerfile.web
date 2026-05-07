@@ -76,11 +76,13 @@ COPY --from=build /repo/apps/web/public ./apps/web/public
 
 # Prisma generated client + Alpine query engine. The standalone tracer
 # sometimes misses the .prisma/client folder (especially the linux-musl
-# .so.node binary), so we copy it into multiple paths Next might look at.
-COPY --from=build /repo/node_modules/.prisma ./node_modules/.prisma
-COPY --from=build /repo/node_modules/@prisma ./node_modules/@prisma
-# Also place the engine where Next standalone's server chunks expect it.
-COPY --from=build /repo/node_modules/.prisma ./apps/web/.next/server/node_modules/.prisma
+# .so.node binary). Schema's `output = "../node_modules/.prisma/client"`
+# pins the generated client under packages/db/node_modules (a real
+# directory, not a pnpm symlink), so Docker COPY can follow it.
+# We mirror it into both root node_modules and Next's standalone
+# server chunks — different runtime code paths look in different places.
+COPY --from=build /repo/packages/db/node_modules/.prisma ./node_modules/.prisma
+COPY --from=build /repo/packages/db/node_modules/.prisma ./apps/web/.next/server/node_modules/.prisma
 
 # Schema + migrations on board for `prisma migrate deploy` if we ever
 # run it from inside the web container instead of the dedicated migrate

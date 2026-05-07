@@ -47,7 +47,5 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
   CMD wget -qO- http://localhost:3001/health > /dev/null || exit 1
 
 EXPOSE 3001
-# Run from the package dir so node resolves `tsx` via apps/ws/node_modules.
-WORKDIR /app/apps/ws
 ENTRYPOINT ["/sbin/tini", "--"]
-CMD ["node", "--import", "tsx/esm", "src/index.ts"]
+CMD ["node", "--import", "tsx/esm", "apps/ws/src/index.ts"]

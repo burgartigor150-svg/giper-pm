@@ -5,6 +5,10 @@
 
 generator client {
   provider      = "prisma-client-js"
+  // Explicit output keeps the generated client in a stable filesystem
+  // path (instead of pnpm's hashed .pnpm/* tree), which lets the Docker
+  // build COPY it into the runtime image.
+  output        = "../node_modules/.prisma/client"
   // native = host (macOS/Linux dev). linux-musl-openssl-3.0.x = Alpine prod image.
   binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
 }
