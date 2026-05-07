@@ -171,7 +171,15 @@ export function RealtimeProvider({ url, getToken, children }: Props) {
     [status, subscribe],
   );
 
-  return <Ctx.Provider value={ctxValue}>{children}</Ctx.Provider>;
+  // Concurrent @types/react versions in the monorepo make Ctx.Provider
+  // resolve as an incompatible JSX type. The runtime is identical;
+  // silence the structural mismatch.
+  const Provider = Ctx.Provider as unknown as (props: {
+    value: RealtimeCtx;
+    children: ReactNode;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  }) => any;
+  return <Provider value={ctxValue}>{children}</Provider>;
 }
 
 /**

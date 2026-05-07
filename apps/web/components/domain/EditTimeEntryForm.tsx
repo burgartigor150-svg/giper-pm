@@ -32,7 +32,7 @@ export function EditTimeEntryForm({ entryId, initial: init }: Props) {
   const [taskPicked, setTaskPicked] = useState<TaskSearchHit | null>(init.task);
   const [results, setResults] = useState<TaskSearchHit[]>([]);
   const [showResults, setShowResults] = useState(false);
-  const wrapRef = useRef<HTMLDivElement>(null);
+  const wrapRef = useRef<HTMLFormElement>(null);
 
   useEffect(() => {
     function onDoc(e: MouseEvent) {

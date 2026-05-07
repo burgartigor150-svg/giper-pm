@@ -29,7 +29,7 @@ export type ActionResult<T = unknown> =
   | { ok: true; data?: T }
   | { ok: false; error: { code: string; message: string; fieldErrors?: Record<string, string[]> } };
 
-function toErr(e: unknown): ActionResult {
+function toErr<T = unknown>(e: unknown): ActionResult<T> {
   if (e instanceof DomainError) {
     return { ok: false, error: { code: e.code, message: e.message } };
   }
@@ -190,7 +190,7 @@ export async function resetPasswordAction(
 export async function changeOwnPasswordAction(
   _prev: unknown,
   formData: FormData,
-): Promise<ActionResult | never> {
+): Promise<ActionResult> {
   const me = await requireAuth();
   const parsed = changeOwnPasswordSchema.safeParse(fromForm(formData));
   if (!parsed.success) {
@@ -212,4 +212,7 @@ export async function changeOwnPasswordAction(
   // flag and we don't refresh JWTs server-side. Forcing a fresh login is the
   // safest invalidation path and matches standard "rotate creds → re-auth" UX.
   await signOut({ redirectTo: '/login?changed=1' });
+  // Unreachable — signOut throws NEXT_REDIRECT — but the type checker
+  // wants a terminating statement on every path.
+  return { ok: true };
 }

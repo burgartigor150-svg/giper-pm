@@ -28,7 +28,7 @@ export function ManualTimeForm({ onCancel }: { onCancel?: () => void }) {
   const [taskPicked, setTaskPicked] = useState<TaskSearchHit | null>(null);
   const [results, setResults] = useState<TaskSearchHit[]>([]);
   const [showResults, setShowResults] = useState(false);
-  const wrapRef = useRef<HTMLDivElement>(null);
+  const wrapRef = useRef<HTMLFormElement>(null);
 
   useEffect(() => {
     function onDoc(e: MouseEvent) {

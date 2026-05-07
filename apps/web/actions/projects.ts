@@ -10,7 +10,7 @@ import {
   type UpdateProjectInput,
   type AddMemberInput,
 } from '@giper/shared';
-import { prisma } from '@giper/db';
+import { prisma, Prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
 import {
   addProjectMember,
@@ -27,7 +27,7 @@ export type ActionResult<T = unknown> =
   | { ok: true; data?: T }
   | { ok: false; error: { code: string; message: string; fieldErrors?: Record<string, string[]> } };
 
-function toErr(e: unknown): ActionResult {
+function toErr<T = unknown>(e: unknown): ActionResult<T> {
   if (e instanceof DomainError) {
     return { ok: false, error: { code: e.code, message: e.message } };
   }
@@ -261,7 +261,12 @@ export async function setWipLimitsAction(
   }
   await prisma.project.update({
     where: { id: projectId },
-    data: { wipLimits: Object.keys(clean).length > 0 ? clean : null },
+    data: {
+      wipLimits:
+        Object.keys(clean).length > 0
+          ? (clean as Prisma.InputJsonValue)
+          : Prisma.JsonNull,
+    },
   });
   revalidatePath(`/projects/${project.key}`);
   revalidatePath(`/projects/${project.key}/board`);

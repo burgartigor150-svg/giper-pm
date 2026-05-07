@@ -24,7 +24,7 @@ export type ActionResult<T = unknown> =
   | { ok: true; data?: T }
   | { ok: false; error: { code: string; message: string; fieldErrors?: Record<string, string[]> } };
 
-function toErr(e: unknown): ActionResult {
+function toErr<T = unknown>(e: unknown): ActionResult<T> {
   if (e instanceof DomainError) {
     return { ok: false, error: { code: e.code, message: e.message } };
   }
