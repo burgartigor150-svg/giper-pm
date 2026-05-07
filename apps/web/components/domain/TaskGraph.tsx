@@ -5,6 +5,8 @@ import dagre from '@dagrejs/dagre';
 import {
   Background,
   Controls,
+  Handle,
+  Position,
   ReactFlow,
   type Edge,
   type Node,
@@ -129,26 +131,42 @@ function TaskCardNode({ data, id }: { data: GraphNodeData; id: string }) {
   const colour = STATUS_COLOR[data.internalStatus] ?? '#94a3b8';
   const isRoot = data.kind === 'root';
   return (
-    <Link
-      href={`/projects/${data.projectKey}/tasks/${data.number}`}
-      className={`flex flex-col gap-1 rounded-md border bg-white px-3 py-2 text-xs shadow-sm hover:bg-muted ${
-        isRoot ? 'border-blue-500 ring-2 ring-blue-200' : 'border-border'
-      }`}
+    <div
+      className="relative"
       style={{ width: NODE_WIDTH, height: NODE_HEIGHT }}
       data-id={id}
     >
-      <div className="flex items-center justify-between gap-2">
-        <span className="font-mono text-[10px] text-muted-foreground">
-          {data.projectKey}-{data.number}
-        </span>
-        <span
-          className="rounded-full px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-white"
-          style={{ backgroundColor: colour }}
-        >
-          {data.internalStatus}
-        </span>
-      </div>
-      <span className="line-clamp-2 text-xs">{data.title}</span>
-    </Link>
+      {/* Invisible handles let reactflow attach edges. Top = target,
+          bottom = source — matches our top-to-bottom dagre layout. */}
+      <Handle
+        type="target"
+        position={Position.Top}
+        style={{ background: 'transparent', border: 'none' }}
+      />
+      <Link
+        href={`/projects/${data.projectKey}/tasks/${data.number}`}
+        className={`flex h-full w-full flex-col gap-1 rounded-md border bg-white px-3 py-2 text-xs shadow-sm hover:bg-muted ${
+          isRoot ? 'border-blue-500 ring-2 ring-blue-200' : 'border-border'
+        }`}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <span className="font-mono text-[10px] text-muted-foreground">
+            {data.projectKey}-{data.number}
+          </span>
+          <span
+            className="rounded-full px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-white"
+            style={{ backgroundColor: colour }}
+          >
+            {data.internalStatus}
+          </span>
+        </div>
+        <span className="line-clamp-2 text-xs">{data.title}</span>
+      </Link>
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        style={{ background: 'transparent', border: 'none' }}
+      />
+    </div>
   );
 }
