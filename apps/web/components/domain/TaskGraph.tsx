@@ -14,13 +14,20 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import Link from 'next/link';
+import { Avatar } from '@giper/ui/components/Avatar';
+
+type Person = { id: string; name: string; image: string | null };
 
 type GraphNodeData = {
   number: number;
   title: string;
   internalStatus: string;
+  priority: string;
+  estimateHours: number | null;
   projectKey: string;
-  kind: 'root' | 'parent' | 'subtask' | 'blocks' | 'blockedBy';
+  assignee: Person | null;
+  coAssignees: Person[];
+  kind: 'root' | 'ancestor' | 'descendant' | 'blocks' | 'blockedBy';
 };
 
 type Props = {
@@ -30,7 +37,11 @@ type Props = {
     title: string;
     status: string;
     internalStatus: string;
+    priority: string;
+    estimateHours: number | null;
     projectKey: string;
+    assignee: Person | null;
+    coAssignees: Person[];
     kind: GraphNodeData['kind'];
   }>;
   edges: Array<{
@@ -53,16 +64,31 @@ const STATUS_COLOR: Record<string, string> = {
   CANCELED: '#6b7280',
 };
 
+const PRIORITY_DOT: Record<string, string> = {
+  LOW: '#94a3b8',
+  MEDIUM: '#3b82f6',
+  HIGH: '#f59e0b',
+  URGENT: '#ef4444',
+};
+
+const PRIORITY_LABEL: Record<string, string> = {
+  LOW: 'Низкая',
+  MEDIUM: 'Средняя',
+  HIGH: 'Высокая',
+  URGENT: 'Срочно',
+};
+
 /**
  * Vertical hierarchical task graph. Layout: dagre top-to-bottom so
  * parents sit above subtasks, blockers above blocked. Custom node card
- * shows the project key, task number, title, and status pill.
+ * shows project key, status pill, priority dot, assignee + co-assignees,
+ * and estimate.
  */
 export function TaskGraph({ nodes, edges }: Props) {
   const { rfNodes, rfEdges } = useMemo(() => {
     const g = new dagre.graphlib.Graph();
     g.setDefaultEdgeLabel(() => ({}));
-    g.setGraph({ rankdir: 'TB', nodesep: 48, ranksep: 64 });
+    g.setGraph({ rankdir: 'TB', nodesep: 56, ranksep: 80 });
 
     for (const n of nodes) {
       g.setNode(n.id, { width: NODE_WIDTH, height: NODE_HEIGHT });
@@ -82,7 +108,11 @@ export function TaskGraph({ nodes, edges }: Props) {
           number: n.number,
           title: n.title,
           internalStatus: n.internalStatus,
+          priority: n.priority,
+          estimateHours: n.estimateHours,
           projectKey: n.projectKey,
+          assignee: n.assignee,
+          coAssignees: n.coAssignees,
           kind: n.kind,
         },
         draggable: false,
@@ -98,13 +128,21 @@ export function TaskGraph({ nodes, edges }: Props) {
       labelStyle: { fontSize: 10 },
       style: {
         stroke:
-          e.kind === 'blocks' ? '#ef4444' : e.kind === 'parent' ? '#94a3b8' : '#3b82f6',
+          e.kind === 'blocks'
+            ? '#ef4444'
+            : e.kind === 'parent'
+              ? '#94a3b8'
+              : '#3b82f6',
         strokeWidth: 1.5,
       },
       markerEnd: {
         type: MarkerType.ArrowClosed,
         color:
-          e.kind === 'blocks' ? '#ef4444' : e.kind === 'parent' ? '#94a3b8' : '#3b82f6',
+          e.kind === 'blocks'
+            ? '#ef4444'
+            : e.kind === 'parent'
+              ? '#94a3b8'
+              : '#3b82f6',
       },
     }));
 
@@ -132,12 +170,10 @@ function TaskCardNode({ data, id }: { data: GraphNodeData; id: string }) {
   const isRoot = data.kind === 'root';
   return (
     <div
-      className="relative"
+      className="group relative"
       style={{ width: NODE_WIDTH, height: NODE_HEIGHT }}
       data-id={id}
     >
-      {/* Invisible handles let reactflow attach edges. Top = target,
-          bottom = source — matches our top-to-bottom dagre layout. */}
       <Handle
         type="target"
         position={Position.Top}
@@ -167,6 +203,89 @@ function TaskCardNode({ data, id }: { data: GraphNodeData; id: string }) {
         position={Position.Bottom}
         style={{ background: 'transparent', border: 'none' }}
       />
+      <TaskHoverCard data={data} />
+    </div>
+  );
+}
+
+/**
+ * Detail tooltip that appears on hover over the small node card.
+ * Positioned to the right of the node so it doesn't cover its own
+ * trigger or the parent edge above. Uses group-hover so it doesn't
+ * need a JS state.
+ */
+function TaskHoverCard({ data }: { data: GraphNodeData }) {
+  const allWorkers = [
+    ...(data.assignee ? [data.assignee] : []),
+    ...data.coAssignees.filter((u) => u.id !== data.assignee?.id),
+  ];
+  const prioColour = PRIORITY_DOT[data.priority] ?? '#94a3b8';
+  const statusColour = STATUS_COLOR[data.internalStatus] ?? '#94a3b8';
+
+  return (
+    <div className="pointer-events-none absolute left-full top-0 z-50 ml-2 hidden w-64 rounded-md border border-border bg-popover p-3 text-xs text-popover-foreground shadow-lg group-hover:block">
+      <div className="mb-2 flex items-center gap-2 text-[10px] uppercase tracking-wide text-muted-foreground">
+        <span className="font-mono">
+          {data.projectKey}-{data.number}
+        </span>
+        <span
+          className="rounded-full px-1.5 py-0.5 text-[9px] text-white"
+          style={{ backgroundColor: statusColour }}
+        >
+          {data.internalStatus}
+        </span>
+      </div>
+      <div className="mb-2 text-sm font-medium">{data.title}</div>
+      <dl className="grid grid-cols-[80px_1fr] gap-x-2 gap-y-1.5">
+        <dt className="text-muted-foreground">Исполнитель</dt>
+        <dd>
+          {data.assignee ? (
+            <span className="inline-flex items-center gap-1.5">
+              <Avatar
+                src={data.assignee.image}
+                alt={data.assignee.name}
+                className="h-4 w-4"
+              />
+              {data.assignee.name}
+            </span>
+          ) : (
+            <span className="italic text-muted-foreground">не назначен</span>
+          )}
+        </dd>
+        {data.coAssignees.length > 0 ? (
+          <>
+            <dt className="text-muted-foreground">Соисполнители</dt>
+            <dd className="flex flex-col gap-1">
+              {data.coAssignees.map((u) => (
+                <span key={u.id} className="inline-flex items-center gap-1.5">
+                  <Avatar src={u.image} alt={u.name} className="h-4 w-4" />
+                  {u.name}
+                </span>
+              ))}
+            </dd>
+          </>
+        ) : null}
+        <dt className="text-muted-foreground">Срочность</dt>
+        <dd className="inline-flex items-center gap-1.5">
+          <span
+            className="inline-block h-2 w-2 rounded-full"
+            style={{ backgroundColor: prioColour }}
+          />
+          {PRIORITY_LABEL[data.priority] ?? data.priority}
+        </dd>
+        <dt className="text-muted-foreground">Оценка</dt>
+        <dd>
+          {data.estimateHours != null
+            ? `${data.estimateHours} ч`
+            : <span className="italic text-muted-foreground">нет</span>}
+        </dd>
+        {allWorkers.length === 0 ? null : (
+          <>
+            <dt className="text-muted-foreground">Работают</dt>
+            <dd>{allWorkers.length}</dd>
+          </>
+        )}
+      </dl>
     </div>
   );
 }
