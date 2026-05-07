@@ -1,0 +1,91 @@
+# syntax=docker/dockerfile:1.7
+
+# -----------------------------------------------------------------------
+# Production image for apps/web (Next.js standalone). Multi-stage:
+#   1. deps  — install full monorepo dependencies once (pnpm cache)
+#   2. build — generate Prisma client, compile Next standalone output
+#   3. runtime — minimal Node image with the standalone server only
+#
+# Build context: REPO ROOT (so pnpm-workspace.yaml + all package.json
+# files are visible). Trigger from GitHub Actions or `docker build .`.
+# -----------------------------------------------------------------------
+
+ARG NODE_VERSION=20
+ARG PNPM_VERSION=9.12.3
+
+# ---------- 1. deps -----------------------------------------------------
+FROM node:${NODE_VERSION}-alpine AS deps
+RUN apk add --no-cache libc6-compat openssl
+RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate
+WORKDIR /repo
+
+# Copy only manifests for layer-cache friendliness.
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml turbo.json tsconfig.base.json ./
+COPY apps/web/package.json apps/web/
+COPY apps/ws/package.json apps/ws/
+COPY packages/db/package.json packages/db/
+COPY packages/db/prisma ./packages/db/prisma
+COPY packages/integrations/package.json packages/integrations/
+COPY packages/realtime/package.json packages/realtime/
+COPY packages/shared/package.json packages/shared/
+COPY packages/ui/package.json packages/ui/
+
+# Install everything (including dev deps — needed for the build stage).
+RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
+    pnpm install --frozen-lockfile --prefer-offline
+
+# ---------- 2. build ----------------------------------------------------
+FROM node:${NODE_VERSION}-alpine AS build
+RUN apk add --no-cache libc6-compat openssl
+RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate
+WORKDIR /repo
+
+COPY --from=deps /repo/node_modules ./node_modules
+COPY --from=deps /repo/apps/web/node_modules ./apps/web/node_modules
+COPY --from=deps /repo/packages/db/node_modules ./packages/db/node_modules
+COPY --from=deps /repo/packages/integrations/node_modules ./packages/integrations/node_modules
+COPY --from=deps /repo/packages/realtime/node_modules ./packages/realtime/node_modules
+COPY --from=deps /repo/packages/shared/node_modules ./packages/shared/node_modules
+COPY --from=deps /repo/packages/ui/node_modules ./packages/ui/node_modules
+COPY . .
+
+# Generate the Prisma client into node_modules/.prisma — Next standalone
+# tracer picks it up from there.
+RUN pnpm --filter @giper/db exec prisma generate
+
+# Build with standalone output. NEXT_TELEMETRY_DISABLED keeps logs clean.
+ENV NEXT_TELEMETRY_DISABLED=1
+RUN pnpm --filter @giper/web build
+
+# ---------- 3. runtime --------------------------------------------------
+FROM node:${NODE_VERSION}-alpine AS runtime
+RUN apk add --no-cache libc6-compat openssl tini
+WORKDIR /app
+
+ENV NODE_ENV=production \
+    PORT=3000 \
+    HOSTNAME=0.0.0.0 \
+    NEXT_TELEMETRY_DISABLED=1
+
+# Standalone artifact bundles its own minimal node_modules. We add
+# .next/static and public on top — they're served from the same Node
+# process via Next's built-in static handler.
+COPY --from=build /repo/apps/web/.next/standalone ./
+COPY --from=build /repo/apps/web/.next/static ./apps/web/.next/static
+COPY --from=build /repo/apps/web/public ./apps/web/public
+
+# Prisma engines are bundled inside .next/standalone via the tracer,
+# but the schema needs to be reachable for `prisma migrate deploy`
+# at deploy time. Keep the migrations folder in the image so the
+# entrypoint can run migrations against the live DB without the full
+# repo on the server.
+COPY --from=build /repo/packages/db/prisma ./packages/db/prisma
+
+# Healthcheck pings Next's default 200 page, GET /api/health is even
+# better when we add one — for now the homepage redirect works.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD wget -qO- http://localhost:3000/ > /dev/null || exit 1
+
+EXPOSE 3000
+ENTRYPOINT ["/sbin/tini", "--"]
+CMD ["node", "apps/web/server.js"]

@@ -1,0 +1,175 @@
+# Production stack for giper-pm. Lives on the deploy host (myserver).
+#
+# Usage on the server:
+#   cd /opt/giper-pm
+#   docker compose -f docker-compose.prod.yml pull
+#   docker compose -f docker-compose.prod.yml up -d
+#   docker compose -f docker-compose.prod.yml exec web \
+#     node node_modules/prisma/build/index.js migrate deploy \
+#     --schema packages/db/prisma/schema.prisma
+#
+# Secrets: every $VAR below is read from /opt/giper-pm/.env on the
+# host. Never check that file in.
+
+name: giper-pm
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-giper_pm}
+      POSTGRES_USER: ${POSTGRES_USER:-giper}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    # Postgres is reachable only via the docker network; never exposed
+    # to the public internet. Override here if you need external psql.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-giper} -d ${POSTGRES_DB:-giper_pm}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${STORAGE_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${STORAGE_SECRET_KEY}
+    volumes:
+      - minio_data:/data
+    # MinIO API is exposed only over the internal network. The Caddy
+    # reverse proxy serves attachment downloads via /api/attachments/*
+    # which proxies through the web container.
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_started
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        until mc alias set local http://minio:9000 ${STORAGE_ACCESS_KEY} ${STORAGE_SECRET_KEY}; do
+          sleep 1
+        done
+        mc mb -p local/${STORAGE_BUCKET:-attachments} || true
+    restart: "no"
+
+  # One-shot Prisma migrator. Runs once per deploy before web starts;
+  # idempotent because `migrate deploy` skips already-applied
+  # migrations. We use service_completed_successfully on web's depends_on
+  # so a failed migration blocks the new web from coming up — old web
+  # keeps serving traffic until you fix the migration.
+  migrate:
+    image: ghcr.io/${GHCR_OWNER}/giper-migrate:${IMAGE_TAG:-latest}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-giper}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-giper_pm}
+    restart: "no"
+
+  web:
+    image: ghcr.io/${GHCR_OWNER}/giper-web:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      minio:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-giper}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-giper_pm}
+      REDIS_URL: redis://redis:6379
+
+      AUTH_SECRET: ${AUTH_SECRET}
+      AUTH_URL: ${PUBLIC_BASE_URL}
+      AUTH_TRUST_HOST: 'true'
+
+      # Bitrix24
+      BITRIX24_WEBHOOK_URL: ${BITRIX24_WEBHOOK_URL}
+      BITRIX24_INBOUND_SECRET: ${BITRIX24_INBOUND_SECRET}
+
+      # Realtime
+      WS_AUTH_SECRET: ${WS_AUTH_SECRET}
+      WS_PUBLISH_SECRET: ${WS_PUBLISH_SECRET}
+      WS_PUBLISH_URL: http://ws:3001/publish
+      NEXT_PUBLIC_WS_URL: ${PUBLIC_WS_URL}
+
+      # GitHub webhook
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET}
+
+      # S3-compatible storage (MinIO in this stack)
+      STORAGE_ENDPOINT: http://minio:9000
+      STORAGE_REGION: us-east-1
+      STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY}
+      STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY}
+      STORAGE_BUCKET: ${STORAGE_BUCKET:-attachments}
+      STORAGE_FORCE_PATH_STYLE: '1'
+
+      # Cron secret (used by /api/cron/bitrix24)
+      CRON_SECRET: ${CRON_SECRET}
+
+  ws:
+    image: ghcr.io/${GHCR_OWNER}/giper-ws:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      WS_PORT: 3001
+      WS_HOST: 0.0.0.0
+      WS_AUTH_SECRET: ${WS_AUTH_SECRET}
+      WS_PUBLISH_SECRET: ${WS_PUBLISH_SECRET}
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - web
+      - ws
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      PUBLIC_HOST: ${PUBLIC_HOST}
+      ACME_EMAIL: ${ACME_EMAIL:-igor@giper.fm}
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  caddy_data:
+  caddy_config:

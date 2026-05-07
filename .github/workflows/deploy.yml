@@ -1,0 +1,148 @@
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      force_migrate:
+        description: 'Force run prisma migrate deploy'
+        required: false
+        default: 'true'
+
+# We don't want two deploys racing each other on the same host.
+# `cancel-in-progress: false` so a freshly-pushed commit waits for the
+# current deploy to finish before starting — safer than aborting
+# mid-migration.
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_OWNER: ${{ github.repository_owner }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: tag
+        run: echo "tag=sha-${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & push web
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.web
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/giper-web:${{ steps.tag.outputs.tag }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/giper-web:latest
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,scope=web,mode=max
+
+      - name: Build & push ws
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.ws
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/giper-ws:${{ steps.tag.outputs.tag }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/giper-ws:latest
+          cache-from: type=gha,scope=ws
+          cache-to: type=gha,scope=ws,mode=max
+
+      - name: Build & push migrate
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.migrate
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/giper-migrate:${{ steps.tag.outputs.tag }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/giper-migrate:latest
+          cache-from: type=gha,scope=migrate
+          cache-to: type=gha,scope=migrate,mode=max
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://${{ vars.PUBLIC_HOST }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Copy compose + Caddyfile to the server. The .env file is
+      # bootstrapped manually once via the runbook in infra/deploy/README.md;
+      # CI never writes secrets to disk.
+      - name: Sync infra files to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: 'infra/docker-compose.prod.yml,infra/Caddyfile'
+          target: /opt/giper-pm/
+          strip_components: 1
+          overwrite: true
+
+      - name: Pull, migrate, restart
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          IMAGE_TAG: ${{ needs.build.outputs.tag }}
+          GHCR_OWNER: ${{ env.IMAGE_OWNER }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: IMAGE_TAG,GHCR_OWNER
+          script: |
+            set -euo pipefail
+            cd /opt/giper-pm
+
+            # Login to GHCR with a fine-grained PAT stored on the host.
+            # The host file /opt/giper-pm/.ghcr-token holds a PAT with
+            # only `read:packages` scope.
+            if [ -f .ghcr-token ]; then
+              cat .ghcr-token | docker login ghcr.io \
+                -u "${SSH_USER:-igun2}" --password-stdin
+            fi
+
+            export IMAGE_TAG GHCR_OWNER
+            echo "Deploying $IMAGE_TAG"
+
+            docker compose -f docker-compose.prod.yml pull
+            docker compose -f docker-compose.prod.yml up -d --remove-orphans
+
+            # Wait for postgres + web to come up before migration.
+            sleep 5
+
+            # Run prisma migrate inside the freshly-deployed web image.
+            # Standalone build doesn't include prisma CLI; we exec it
+            # via the Prisma engine that ships in node_modules.
+            docker compose -f docker-compose.prod.yml exec -T web \
+              node node_modules/.pnpm/prisma@*/node_modules/prisma/build/index.js \
+              migrate deploy \
+              --schema packages/db/prisma/schema.prisma || \
+              echo "::warning::migrate deploy failed — check manually"
+
+            # Drop old image layers older than 24h to save disk.
+            docker image prune -f --filter "until=24h" || true

@@ -1,0 +1,27 @@
+# syntax=docker/dockerfile:1.7
+
+# -----------------------------------------------------------------------
+# One-shot Prisma migrator. Runs `prisma migrate deploy` against the
+# live database before the web service comes up. Keeps the runtime
+# web image lean (no prisma CLI bundled there).
+#
+# Same pnpm install as the build stage of Dockerfile.web — but we only
+# need @giper/db's deps + the schema and migrations folder.
+# -----------------------------------------------------------------------
+
+ARG NODE_VERSION=20
+ARG PNPM_VERSION=9.12.3
+
+FROM node:${NODE_VERSION}-alpine
+RUN apk add --no-cache libc6-compat openssl
+RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate
+WORKDIR /repo
+
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+COPY packages/db ./packages/db
+
+RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
+    pnpm install --frozen-lockfile --prefer-offline --filter @giper/db...
+
+WORKDIR /repo/packages/db
+ENTRYPOINT ["pnpm", "exec", "prisma", "migrate", "deploy"]
