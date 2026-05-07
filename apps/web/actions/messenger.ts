@@ -416,12 +416,11 @@ export async function loadThreadAction(rootMessageId: string) {
 }
 
 /**
- * Lightweight user search for @mention autocomplete in the composer.
- * Returns BOTH active and inactive accounts — the inactive ones are
- * Bitrix24-mirrored stubs that can still be a meaningful @-target
- * (the message will reach them via cross-channel notifications once
- * they sign in). Empty query → alphabetised top-8 so the popup shows
- * instantly on a bare '@' before the user types.
+ * User search reused by @mention autocomplete and the UserPicker
+ * (assignee/reviewer/co-assignee). Returns BOTH active and inactive
+ * accounts — the inactive ones are Bitrix24-mirrored stubs that can
+ * still be a meaningful @-target. Empty query → alphabetised top-25
+ * so the picker has a usable instant list before the user types.
  */
 export async function searchUsersForMention(q: string) {
   await requireAuth();
@@ -435,7 +434,7 @@ export async function searchUsersForMention(q: string) {
           ],
         }
       : {},
-    take: 8,
+    take: 25,
     orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
     select: { id: true, name: true, email: true, image: true },
   });

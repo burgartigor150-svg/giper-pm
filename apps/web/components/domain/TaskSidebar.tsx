@@ -16,6 +16,7 @@ import {
   setInternalStatusAction,
 } from '@/actions/assignments';
 import { useT } from '@/lib/useT';
+import { UserPicker } from './UserPicker';
 
 const STATUSES = ['BACKLOG', 'TODO', 'IN_PROGRESS', 'REVIEW', 'BLOCKED', 'DONE', 'CANCELED'] as const;
 const PRIORITIES = ['LOW', 'MEDIUM', 'HIGH', 'URGENT'] as const;
@@ -164,23 +165,23 @@ export function TaskSidebar(props: Props) {
       </Field>
 
       <Field label="Ревьюер" saved={savedField === 'reviewer'}>
-        <select
-          value={props.reviewer?.id ?? ''}
-          onChange={(e) => {
-            const id = e.target.value || null;
+        <UserPicker
+          value={props.reviewer ?? null}
+          preload={props.members}
+          disabled={!props.canEdit || pending}
+          placeholder="— без ревьюера —"
+          onPick={(user) => {
             startTransition(async () => {
-              await setReviewerAction(props.taskId, props.projectKey, props.taskNumber, id);
+              await setReviewerAction(
+                props.taskId,
+                props.projectKey,
+                props.taskNumber,
+                user?.id ?? null,
+              );
               flash('reviewer');
             });
           }}
-          disabled={!props.canEdit || pending}
-          className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-        >
-          <option value="">— без ревьюера —</option>
-          {props.members.map((m) => (
-            <option key={m.id} value={m.id}>{m.name}</option>
-          ))}
-        </select>
+        />
         {props.reviewer ? (
           <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
             <Avatar src={props.reviewer.image} alt={props.reviewer.name} className="h-5 w-5" />
@@ -398,19 +399,17 @@ function AssignmentList({
       {canEdit ? (
         adding ? (
           <div className="flex flex-col gap-1.5 rounded-md border border-input bg-background p-2">
-            <select
-              value={pickUserId}
-              onChange={(e) => setPickUserId(e.target.value)}
-              className="h-8 rounded-md border border-input bg-background px-2 text-xs"
-              autoFocus
-            >
-              <option value="">— участник —</option>
-              {members.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.name}
-                </option>
-              ))}
-            </select>
+            <UserPicker
+              value={
+                pickUserId
+                  ? members.find((m) => m.id === pickUserId) ?? null
+                  : null
+              }
+              preload={members}
+              placeholder="— участник —"
+              clearable={false}
+              onPick={(u) => setPickUserId(u?.id ?? '')}
+            />
             <select
               value={pickPosition}
               onChange={(e) => setPickPosition(e.target.value as Position)}

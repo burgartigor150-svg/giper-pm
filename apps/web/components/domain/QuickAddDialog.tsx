@@ -12,6 +12,7 @@ import {
   type QuickAddProject,
   type QuickAddMember,
 } from '@/actions/tasks';
+import { UserPicker } from './UserPicker';
 
 const LAST_PROJECT_KEY = 'giper:lastProjectKey';
 
@@ -232,26 +233,22 @@ export function QuickAddDialog() {
           </label>
 
           <div className="grid grid-cols-2 gap-3">
-            <label className="flex flex-col gap-1.5">
+            <div className="flex flex-col gap-1.5">
               <span className="text-xs uppercase tracking-wide text-muted-foreground">
                 Исполнитель
               </span>
-              <select
-                value={assigneeId}
-                onChange={(e) => setAssigneeId(e.target.value)}
-                disabled={!members || pending}
-                className="h-9 rounded-md border border-input bg-background px-2 text-sm"
-              >
-                <option value="">— не назначен —</option>
-                {members
-                  ? members.map((u) => (
-                      <option key={u.id} value={u.id}>
-                        {u.name}
-                      </option>
-                    ))
-                  : null}
-              </select>
-            </label>
+              <UserPicker
+                value={
+                  assigneeId
+                    ? members?.find((m) => m.id === assigneeId) ?? null
+                    : null
+                }
+                preload={members ?? []}
+                placeholder="— не назначен —"
+                disabled={pending}
+                onPick={(u) => setAssigneeId(u?.id ?? '')}
+              />
+            </div>
 
             <label className="flex flex-col gap-1.5">
               <span className="text-xs uppercase tracking-wide text-muted-foreground">
