@@ -7,6 +7,7 @@ import {
   createNotification,
   fanoutToTaskAudience,
 } from '@/lib/notifications/createNotifications';
+import { autoUnblockDependents } from '@/lib/tasks/autoTransitions';
 
 type ActionResult<T = unknown> =
   | { ok: true; data?: T }
@@ -214,6 +215,10 @@ export async function setInternalStatusAction(
     where: { id: taskId },
     data: { internalStatus: rawStatus as never },
   });
+  // Closing this task may unblock its dependants.
+  if (rawStatus === 'DONE' || rawStatus === 'CANCELED') {
+    await autoUnblockDependents(taskId, me.id);
+  }
   revalidatePath(`/projects/${projectKey}/tasks/${taskNumber}`);
   revalidatePath(`/projects/${projectKey}/board`);
   return { ok: true };

@@ -28,6 +28,9 @@ import { RevalidateOnEvent } from '@/components/domain/RevalidateOnEvent';
 import { PresenceBar } from '@/components/domain/PresenceBar';
 import { SubtaskList } from '@/components/domain/SubtaskList';
 import { Checklists } from '@/components/domain/Checklists';
+import { SendToReviewCTA } from '@/components/domain/SendToReviewCTA';
+import { TaskGraph } from '@/components/domain/TaskGraph';
+import { getTaskGraph } from '@/lib/tasks/getTaskGraph';
 import { Dependencies } from '@/components/domain/Dependencies';
 import { TagPicker } from '@/components/domain/TagPicker';
 import { listTagsForProject } from '@/actions/tags';
@@ -61,12 +64,14 @@ export default async function TaskDetailPage({ params }: { params: Params }) {
     watchingExplicit,
     taskTimeEntries,
     availableTags,
+    graph,
   ] = await Promise.all([
     getActiveTimer(me.id),
     getTaskSpentMinutes(task.id),
     isWatchingTask(task.id, me.id),
     listTaskTimeEntries(task.id, 10),
     listTagsForProject(task.project.id),
+    getTaskGraph(task.id),
   ]);
   // Assignee/creator are always notified — the explicit watch toggle is
   // disabled with a tooltip in that case.
@@ -337,7 +342,7 @@ export default async function TaskDetailPage({ params }: { params: Params }) {
               <CardHeader>
                 <CardTitle className="text-base">Чек-листы</CardTitle>
               </CardHeader>
-              <CardContent>
+              <CardContent className="flex flex-col gap-3">
                 <Checklists
                   taskId={task.id}
                   projectKey={task.project.key}
@@ -345,6 +350,15 @@ export default async function TaskDetailPage({ params }: { params: Params }) {
                   checklists={task.checklists}
                   canEdit={canEdit}
                 />
+                {canEdit ? (
+                  <SendToReviewCTA
+                    taskId={task.id}
+                    projectKey={task.project.key}
+                    taskNumber={task.number}
+                    internalStatus={task.internalStatus}
+                    checklists={task.checklists}
+                  />
+                ) : null}
               </CardContent>
             </Card>
           ) : null}
@@ -363,6 +377,17 @@ export default async function TaskDetailPage({ params }: { params: Params }) {
                   blockedBy={task.blockedBy.map((b) => ({ id: b.id, task: b.fromTask }))}
                   canEdit={canEdit}
                 />
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {graph && graph.nodes.length > 1 ? (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Граф связей</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <TaskGraph nodes={graph.nodes} edges={graph.edges} />
               </CardContent>
             </Card>
           ) : null}

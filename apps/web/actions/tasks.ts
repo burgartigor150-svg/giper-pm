@@ -31,6 +31,7 @@ import {
   createNotification,
   fanoutToTaskAudience,
 } from '@/lib/notifications/createNotifications';
+import { autoUnblockDependents } from '@/lib/tasks/autoTransitions';
 import { extractValidMentions } from '@/lib/notifications/parseMentions';
 import { publishTaskEvent } from '@/lib/realtime/publishTask';
 import { canEditTaskInternal } from '@/lib/permissions';
@@ -227,6 +228,11 @@ export async function changeStatusAction(
   // bitrixSyncedAt and will retry on the next status change. The webhook
   // path will still detect the divergence and surface a sync error.
   await pushBitrixStatusBestEffort(taskId);
+
+  // If the move closed the task, unblock its downstream dependants.
+  if (parsed.data.status === 'DONE' || parsed.data.status === 'CANCELED') {
+    await autoUnblockDependents(taskId, me.id);
+  }
 
   // Notify watchers / assignee / creator that the status moved.
   const link = `/projects/${projectKey}/tasks/${taskNumber}`;

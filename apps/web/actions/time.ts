@@ -19,6 +19,7 @@ import {
   startTimer,
   stopTimer,
 } from '@/lib/time';
+import { autoMoveToInProgress } from '@/lib/tasks/autoTransitions';
 
 export type ActionResult<T = unknown> =
   | { ok: true; data?: T }
@@ -54,6 +55,8 @@ export async function startTimerAction(taskId: string): Promise<ActionResult> {
   } catch (e) {
     return toErr(e);
   }
+  // Auto-move BACKLOG/TODO → IN_PROGRESS on first real activity.
+  await autoMoveToInProgress(taskId, me.id);
   revalidatePath('/', 'layout');
   return { ok: true };
 }
@@ -372,6 +375,8 @@ export async function logTaskHoursAction(
       } as LogTimeInput,
       { id: me.id, role: me.role },
     );
+    // Auto-move BACKLOG/TODO → IN_PROGRESS on first hours logged.
+    await autoMoveToInProgress(taskId, me.id);
     revalidatePath(`/projects/${projectKey}/tasks/${taskNumber}`);
     revalidatePath('/time');
     revalidatePath('/me');
