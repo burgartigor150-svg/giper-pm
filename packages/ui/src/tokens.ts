@@ -13,6 +13,12 @@ export const tokens = {
     destructiveForeground: 'hsl(0 0% 98%)',
     accent: 'hsl(240 4.8% 95.9%)',
     accentForeground: 'hsl(240 5.9% 10%)',
+    // Popover and card surfaces — opaque white so floating UI never
+    // blends into the page beneath. Foreground matches body text.
+    popover: 'hsl(0 0% 100%)',
+    popoverForeground: 'hsl(240 10% 3.9%)',
+    card: 'hsl(0 0% 100%)',
+    cardForeground: 'hsl(240 10% 3.9%)',
   },
   radius: {
     sm: '0.25rem',

@@ -23,6 +23,14 @@ const preset: Partial<Config> = {
           DEFAULT: tokens.colors.accent,
           foreground: tokens.colors.accentForeground,
         },
+        popover: {
+          DEFAULT: tokens.colors.popover,
+          foreground: tokens.colors.popoverForeground,
+        },
+        card: {
+          DEFAULT: tokens.colors.card,
+          foreground: tokens.colors.cardForeground,
+        },
         border: tokens.colors.border,
         input: tokens.colors.input,
         ring: tokens.colors.ring,

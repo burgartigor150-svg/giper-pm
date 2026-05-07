@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import { Smile } from 'lucide-react';
 import { cn } from '@giper/ui/cn';
 import { toggleReactionAction } from '@/actions/messenger';
@@ -20,6 +21,7 @@ type Props = {
  * own reaction; click 😀 to open the quick palette.
  */
 export function MessageReactions({ messageId, reactions, meId }: Props) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [, startTransition] = useTransition();
 
@@ -35,8 +37,10 @@ export function MessageReactions({ messageId, reactions, meId }: Props) {
     setOpen(false);
     startTransition(async () => {
       await toggleReactionAction(messageId, emoji);
-      // The WS event will trigger a refresh of the parent list — no
-      // local optimistic update here to keep the row stateless.
+      // Refresh the RSC tree explicitly; WS event will arrive too but
+      // a local refresh guarantees the UI updates even if the socket
+      // is briefly disconnected.
+      router.refresh();
     });
   }
 

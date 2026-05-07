@@ -328,10 +328,11 @@ function MessageRow({
       <button
         type="button"
         onClick={onOpenThread}
-        className="absolute right-0 top-0 rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground opacity-0 shadow-sm transition-opacity hover:bg-accent group-hover:opacity-100"
+        className="absolute right-0 top-0 inline-flex items-center gap-1 rounded-md border border-blue-300 bg-white px-2 py-1 text-xs font-medium text-blue-700 opacity-0 shadow-md transition-opacity hover:bg-blue-50 group-hover:opacity-100"
         title="Ответить в треде"
       >
-        <MessageSquareReply className="inline h-3 w-3" />
+        <MessageSquareReply className="h-3.5 w-3.5" />
+        Ответить
       </button>
     </li>
   );
