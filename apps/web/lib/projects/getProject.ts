@@ -38,7 +38,22 @@ export async function getProject(projectKey: string, user: SessionUser) {
     },
   });
   if (!project) throw new DomainError('NOT_FOUND', 404, 'Проект не найден');
-  if (!canViewProject(user, project)) {
+
+  // Implicit-membership probe: a single COUNT to know whether the
+  // current user has any task in this project (Bitrix-mirror groups
+  // typically have no ProjectMember rows for our users).
+  const userTaskCount = await prisma.task.count({
+    where: {
+      projectId: project.id,
+      OR: [
+        { creatorId: user.id },
+        { assigneeId: user.id },
+        { assignments: { some: { userId: user.id } } },
+      ],
+    },
+  });
+  const projectForPerm = { ...project, hasTaskForCurrentUser: userTaskCount > 0 };
+  if (!canViewProject(user, projectForPerm)) {
     throw new DomainError('INSUFFICIENT_PERMISSIONS', 403);
   }
   return project;

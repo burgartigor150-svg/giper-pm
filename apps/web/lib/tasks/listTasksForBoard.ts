@@ -36,7 +36,26 @@ export async function listTasksForBoard(
     },
   });
   if (!project) throw new DomainError('NOT_FOUND', 404);
-  if (!canViewProject(user, project)) throw new DomainError('INSUFFICIENT_PERMISSIONS', 403);
+  // Bitrix-mirror groups have no ProjectMember rows for our users, so
+  // membership is inferred from owning at least one task there.
+  const userTaskCount = await prisma.task.count({
+    where: {
+      projectId: project.id,
+      OR: [
+        { creatorId: user.id },
+        { assigneeId: user.id },
+        { assignments: { some: { userId: user.id } } },
+      ],
+    },
+  });
+  if (
+    !canViewProject(user, {
+      ...project,
+      hasTaskForCurrentUser: userTaskCount > 0,
+    })
+  ) {
+    throw new DomainError('INSUFFICIENT_PERMISSIONS', 403);
+  }
 
   // Kanban buckets by *internal* status now — that's the team's track.
   // For non-mirrored tasks internalStatus was backfilled from status at

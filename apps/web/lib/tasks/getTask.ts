@@ -186,7 +186,21 @@ export async function getTask(projectKey: string, number: number, user: SessionU
   });
 
   if (!task) throw new DomainError('NOT_FOUND', 404);
-  if (!canViewTask(user, task)) throw new DomainError('INSUFFICIENT_PERMISSIONS', 403);
+
+  // Tell the permission gate whether THIS user has any task ownership
+  // in the project — needed for Bitrix-mirror projects that have no
+  // explicit ProjectMember rows.
+  const taskShape = {
+    ...task,
+    project: {
+      ...task.project,
+      hasTaskForCurrentUser:
+        task.creatorId === user.id ||
+        task.assigneeId === user.id ||
+        task.assignments.some((a) => a.user.id === user.id),
+    },
+  };
+  if (!canViewTask(user, taskShape)) throw new DomainError('INSUFFICIENT_PERMISSIONS', 403);
   return task;
 }
 

@@ -15,6 +15,14 @@ export type SessionUser = {
 export type ProjectForPerm = {
   ownerId: string;
   members?: { userId: string; role: MemberRole }[];
+  /**
+   * Optional precomputed signal that *this user* has at least one task
+   * (as assignee, creator, or accomplice) in the project. Bitrix-mirror
+   * projects don't have ProjectMember rows for our users, but everyone
+   * who got a task assigned in Bitrix should still see the project.
+   * Callers fill this from a single COUNT query alongside the fetch.
+   */
+  hasTaskForCurrentUser?: boolean;
 };
 
 export type TaskForPerm = {
@@ -39,11 +47,18 @@ export function canEditProject(user: SessionUser, project: ProjectForPerm): bool
   return !!project.members?.some((m) => m.userId === user.id && m.role === 'LEAD');
 }
 
-/** View project: ADMIN/PM see all; MEMBER/VIEWER see only projects they're a member of. */
+/**
+ * View project: ADMIN/PM see all; MEMBER/VIEWER see projects they own,
+ * are a member of, OR have a task in (assignee/creator/accomplice).
+ * The last leg covers Bitrix-mirror groups where members are tracked
+ * implicitly via task ownership.
+ */
 export function canViewProject(user: SessionUser, project: ProjectForPerm): boolean {
   if (user.role === 'ADMIN' || user.role === 'PM') return true;
   if (project.ownerId === user.id) return true;
-  return !!project.members?.some((m) => m.userId === user.id);
+  if (project.members?.some((m) => m.userId === user.id)) return true;
+  if (project.hasTaskForCurrentUser) return true;
+  return false;
 }
 
 // ---- Task ---------------------------------------------------------------

@@ -124,7 +124,30 @@ export default async function TaskDetailPage({ params }: { params: Params }) {
     },
   );
 
-  const members = task.project.members.map((m) => m.user);
+  // Pool of candidates for assignee/reviewer/co-assignee pickers:
+  //   1. explicit project members
+  //   2. people already involved with this task (assignee, creator,
+  //      reviewer, co-assignees) — mirrors picks the user has already
+  //      made for this task even if they aren't formal project members
+  //   3. all active users in the system — gives a baseline so brand-new
+  //      Bitrix-mirror tasks (no project members) still have a list to
+  //      pick from. Inactive Bitrix stubs are kept out by default.
+  const memberPool = new Map<string, { id: string; name: string; image: string | null }>();
+  for (const m of task.project.members) memberPool.set(m.user.id, m.user);
+  if (task.assignee) memberPool.set(task.assignee.id, task.assignee);
+  if (task.creator) memberPool.set(task.creator.id, task.creator);
+  if (task.reviewer) memberPool.set(task.reviewer.id, task.reviewer);
+  for (const a of task.assignments) memberPool.set(a.user.id, a.user);
+  const activeUsers = await prisma.user.findMany({
+    where: { isActive: true },
+    select: { id: true, name: true, image: true },
+    orderBy: { name: 'asc' },
+    take: 200,
+  });
+  for (const u of activeUsers) if (!memberPool.has(u.id)) memberPool.set(u.id, u);
+  const members = Array.from(memberPool.values()).sort((a, b) =>
+    a.name.localeCompare(b.name),
+  );
 
   // Merge comments + status changes into a single timeline.
   type TLItem =
