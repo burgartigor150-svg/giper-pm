@@ -652,17 +652,19 @@ export async function setReviewerAction(
     };
   }
 
-  // The reviewer (if any) must be a project member. We don't enforce
-  // that they can edit — read access is enough to look at the task and
-  // approve.
+  // The reviewer (if any) must exist as an active user. We used to
+  // require formal project membership, but Bitrix-mirror groups have
+  // no ProjectMember rows so that gate blocked legit picks. Just check
+  // the user is real and active.
   if (reviewerId) {
-    const isMember =
-      reviewerId === task.project.ownerId ||
-      task.project.members.some((m) => m.userId === reviewerId);
-    if (!isMember) {
+    const u = await prisma.user.findUnique({
+      where: { id: reviewerId },
+      select: { id: true },
+    });
+    if (!u) {
       return {
         ok: false,
-        error: { code: 'VALIDATION', message: 'Ревьюер должен быть участником проекта' },
+        error: { code: 'VALIDATION', message: 'Пользователь не найден' },
       };
     }
   }
@@ -671,6 +673,37 @@ export async function setReviewerAction(
     where: { id: taskId },
     data: { reviewerId },
   });
+
+  // Notify the new reviewer + the rest of the audience (creator,
+  // assignee, watchers, co-assignees). The reviewer gets a specific
+  // ping; everyone else gets a generic "reviewer changed" so they
+  // know who's gating the close.
+  const link = `/projects/${projectKey}/tasks/${taskNumber}`;
+  if (reviewerId && reviewerId !== me.id) {
+    await createNotification({
+      userId: reviewerId,
+      kind: 'TASK_ASSIGNED',
+      title: `${me.name ?? 'Кто-то'} назначил(а) вас ревьюером`,
+      link,
+      payload: { taskId, projectKey, taskNumber, role: 'reviewer' },
+    });
+  }
+  if (reviewerId !== task.reviewerId) {
+    await fanoutToTaskAudience(
+      taskId,
+      me.id,
+      {
+        kind: 'TASK_STATUS_CHANGED',
+        title: reviewerId
+          ? `${me.name ?? 'Кто-то'} назначил(а) ревьюера`
+          : `${me.name ?? 'Кто-то'} снял(а) ревьюера`,
+        link,
+        payload: { taskId, projectKey, taskNumber, reviewerId },
+      },
+      { excludeUserIds: reviewerId ? [reviewerId] : [] },
+    );
+  }
+
   revalidatePath(`/projects/${projectKey}/tasks/${taskNumber}`);
   return { ok: true };
 }

@@ -3,6 +3,10 @@
 import { revalidatePath } from 'next/cache';
 import { prisma, type Position } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
+import {
+  createNotification,
+  fanoutToTaskAudience,
+} from '@/lib/notifications/createNotifications';
 
 type ActionResult<T = unknown> =
   | { ok: true; data?: T }
@@ -87,6 +91,27 @@ export async function addTaskAssignmentAction(
     }
     throw e;
   }
+  const link = `/projects/${projectKey}/tasks/${taskNumber}`;
+  if (userId !== me.id) {
+    await createNotification({
+      userId,
+      kind: 'TASK_ASSIGNED',
+      title: `${me.name ?? 'Кто-то'} назначил(а) вас соисполнителем`,
+      link,
+      payload: { taskId, projectKey, taskNumber, position: rawPosition },
+    });
+  }
+  await fanoutToTaskAudience(
+    taskId,
+    me.id,
+    {
+      kind: 'TASK_STATUS_CHANGED',
+      title: `${me.name ?? 'Кто-то'} добавил(а) соисполнителя`,
+      link,
+      payload: { taskId, projectKey, taskNumber, addedUserId: userId },
+    },
+    { excludeUserIds: [userId] },
+  );
   revalidatePath(`/projects/${projectKey}/tasks/${taskNumber}`);
   return { ok: true };
 }

@@ -22,6 +22,7 @@ import {
 import { canEditProject } from '@/lib/permissions';
 import { DomainError } from '@/lib/errors';
 import { publishProjectToBitrix } from '@/lib/integrations/bitrix24Outbound';
+import { createNotification } from '@/lib/notifications/createNotifications';
 
 export type ActionResult<T = unknown> =
   | { ok: true; data?: T }
@@ -186,6 +187,23 @@ export async function addProjectMemberAction(
     await addProjectMember(projectId, parsed.data, { id: user.id, role: user.role });
   } catch (e) {
     return toErr(e);
+  }
+  // Ping the new member that they're now in the project — except when
+  // someone added themselves.
+  if (parsed.data.userId !== user.id) {
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { key: true, name: true },
+    });
+    if (project) {
+      await createNotification({
+        userId: parsed.data.userId,
+        kind: 'SYSTEM',
+        title: `${user.name ?? 'Кто-то'} добавил(а) вас в проект «${project.name}»`,
+        link: `/projects/${project.key}`,
+        payload: { projectId, role: parsed.data.role },
+      });
+    }
   }
   revalidatePath('/projects');
   return { ok: true };

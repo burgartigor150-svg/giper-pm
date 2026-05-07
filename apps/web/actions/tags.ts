@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { prisma, Prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
 import { canEditTaskInternal } from '@/lib/permissions';
+import { fanoutToTaskAudience } from '@/lib/notifications/createNotifications';
 
 /**
  * Per-project tags. Permission model:
@@ -144,11 +145,29 @@ export async function assignTagToTaskAction(
   if (!tag || tag.projectId !== task.project.id) {
     return { ok: false, error: { code: 'NOT_FOUND', message: 'Тег не найден в этом проекте' } };
   }
+  const existing = await prisma.taskTag.findUnique({
+    where: { taskId_tagId: { taskId, tagId } },
+    select: { taskId: true },
+  });
   await prisma.taskTag.upsert({
     where: { taskId_tagId: { taskId, tagId } },
     create: { taskId, tagId, assignedById: me.id },
     update: {},
   });
+  // Notify the task's audience only on a NEW assignment (upsert that
+  // updates an existing row would be a no-op spam).
+  if (!existing) {
+    const tagName = await prisma.tag.findUnique({
+      where: { id: tagId },
+      select: { name: true },
+    });
+    await fanoutToTaskAudience(taskId, me.id, {
+      kind: 'TASK_STATUS_CHANGED',
+      title: `${me.name ?? 'Кто-то'} добавил(а) тег «${tagName?.name ?? ''}»`,
+      link: `/projects/${task.project.key}/tasks/${taskId}`,
+      payload: { taskId, tagId, projectKey: task.project.key },
+    });
+  }
   revalidatePath(`/projects/${task.project.key}/tasks/${taskId}`);
   revalidatePath(`/projects/${task.project.key}/board`);
   revalidatePath(`/projects/${task.project.key}`);

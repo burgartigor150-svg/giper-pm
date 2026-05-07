@@ -62,36 +62,45 @@ export async function createNotification(
 
 /**
  * Fan-out helper for "this happened on a task — notify everyone who
- * cares". Recipients are: assignee, creator, all explicit watchers.
+ * cares". Recipients are everyone who has a stake in the task:
+ *   - assignee
+ *   - creator
+ *   - reviewer
+ *   - all explicit watchers
+ *   - all co-assignees (TaskAssignment)
  * The actor (the user who caused the event) is filtered out so people
  * don't get pinged about their own actions. Pass `excludeUserIds` to
  * skip people who are already getting a more specific notification
- * (e.g. mentioned in a comment).
+ * (e.g. mentioned in a comment, or just got a TASK_ASSIGNED).
  */
 export async function fanoutToTaskAudience(
   taskId: string,
   actorId: string,
   notification: Omit<CreateInput, 'userId'>,
-  opts: { excludeUserIds?: string[] } = {},
+  opts: { excludeUserIds?: string[]; dedupe?: boolean } = {},
 ): Promise<number> {
   const task = await prisma.task.findUnique({
     where: { id: taskId },
     select: {
       assigneeId: true,
       creatorId: true,
+      reviewerId: true,
       watchers: { select: { userId: true } },
+      assignments: { select: { userId: true } },
     },
   });
   if (!task) return 0;
   const recipients = new Set<string>();
   if (task.assigneeId) recipients.add(task.assigneeId);
   recipients.add(task.creatorId);
+  if (task.reviewerId) recipients.add(task.reviewerId);
   for (const w of task.watchers) recipients.add(w.userId);
+  for (const a of task.assignments) recipients.add(a.userId);
   recipients.delete(actorId);
   for (const id of opts.excludeUserIds ?? []) recipients.delete(id);
   let count = 0;
   for (const userId of recipients) {
-    const id = await createNotification({ ...notification, userId });
+    const id = await createNotification({ ...notification, userId }, { dedupe: opts.dedupe });
     if (id) count++;
   }
   return count;
