@@ -37,6 +37,49 @@ services:
       retries: 10
       start_period: 5s
 
+  # S3-compatible storage for user-uploaded attachments. In prod we
+  # swap this for Cloudflare R2 (or MinIO on the deploy host); the web
+  # app speaks plain S3 API in both cases, so the env vars are the only
+  # diff between dev and prod.
+  minio:
+    image: minio/minio:latest
+    container_name: giper-minio
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: giper
+      MINIO_ROOT_PASSWORD: gipergiper
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # web console (http://localhost:9001)
+    volumes:
+      - giper_minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  # One-shot bucket creation. Idempotent — re-running compose is safe.
+  minio-init:
+    image: minio/mc:latest
+    container_name: giper-minio-init
+    depends_on:
+      minio:
+        condition: service_started
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        until mc alias set local http://minio:9000 giper gipergiper; do
+          sleep 1
+        done
+        mc mb -p local/attachments || true
+        echo "minio bucket ready"
+    restart: "no"
+
 volumes:
   giper_postgres_data:
   giper_redis_data:
+  giper_minio_data:

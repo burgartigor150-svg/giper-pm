@@ -12,7 +12,11 @@
       "@giper/shared": ["../../packages/shared/src/index.ts"],
       "@giper/shared/*": ["../../packages/shared/src/*"],
       "@giper/ui": ["../../packages/ui/src/index.ts"],
-      "@giper/ui/*": ["../../packages/ui/src/*"]
+      "@giper/ui/*": ["../../packages/ui/src/*"],
+      "@giper/realtime": ["../../packages/realtime/src/index.ts"],
+      "@giper/realtime/server": ["../../packages/realtime/src/server.ts"],
+      "@giper/realtime/client": ["../../packages/realtime/src/client.tsx"],
+      "@giper/realtime/token": ["../../packages/realtime/src/token.ts"]
     }
   },
   "include": [
