@@ -60,7 +60,7 @@ export function renderRichText(
         out.push(
           <a
             key={`m${key++}`}
-            href={`/team/${u.id}`}
+            href={`/messages/dm/${u.id}`}
             className="rounded bg-blue-100 px-1 py-0.5 text-blue-800 hover:bg-blue-200"
           >
             @{u.name}

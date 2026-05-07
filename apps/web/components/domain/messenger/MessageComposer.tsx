@@ -44,22 +44,21 @@ export function MessageComposer({ placeholder, disabled, onSend }: Props) {
   const [matches, setMatches] = useState<MentionUser[]>([]);
   const [activeIdx, setActiveIdx] = useState(0);
 
-  // Debounced fetch of mention candidates.
+  // Debounced fetch of mention candidates. Empty query is supported —
+  // the server returns an alphabetised top-8 of active users, so the
+  // popup appears immediately on '@' even before any letter is typed
+  // (matches Slack/Discord behaviour).
   useEffect(() => {
     if (!mentionState) {
       setMatches([]);
       return;
     }
     const q = mentionState.query;
-    if (q.length < 1) {
-      setMatches([]);
-      return;
-    }
     const t = setTimeout(async () => {
-      const users = await searchUsersForMention(q);
+      const users = await searchUsersForMention(q || ' ');
       setMatches(users);
       setActiveIdx(0);
-    }, 120);
+    }, 100);
     return () => clearTimeout(t);
   }, [mentionState?.query, mentionState]);
 

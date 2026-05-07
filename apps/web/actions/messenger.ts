@@ -417,22 +417,26 @@ export async function loadThreadAction(rootMessageId: string) {
 
 /**
  * Lightweight user search for @mention autocomplete in the composer.
- * Active users only, name/email contains, capped at 8.
+ * Returns BOTH active and inactive accounts — the inactive ones are
+ * Bitrix24-mirrored stubs that can still be a meaningful @-target
+ * (the message will reach them via cross-channel notifications once
+ * they sign in). Empty query → alphabetised top-8 so the popup shows
+ * instantly on a bare '@' before the user types.
  */
 export async function searchUsersForMention(q: string) {
   await requireAuth();
   const trimmed = q.trim();
-  if (!trimmed) return [];
   return prisma.user.findMany({
-    where: {
-      isActive: true,
-      OR: [
-        { name: { contains: trimmed, mode: 'insensitive' } },
-        { email: { contains: trimmed, mode: 'insensitive' } },
-      ],
-    },
+    where: trimmed
+      ? {
+          OR: [
+            { name: { contains: trimmed, mode: 'insensitive' } },
+            { email: { contains: trimmed, mode: 'insensitive' } },
+          ],
+        }
+      : {},
     take: 8,
-    orderBy: { name: 'asc' },
+    orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
     select: { id: true, name: true, email: true, image: true },
   });
 }
