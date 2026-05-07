@@ -76,9 +76,11 @@ COPY --from=build /repo/apps/web/public ./apps/web/public
 
 # Prisma generated client + Alpine query engine. The standalone tracer
 # sometimes misses the .prisma/client folder (especially the linux-musl
-# .so.node binary), so we copy it into the path Next will look at first.
+# .so.node binary), so we copy it into multiple paths Next might look at.
 COPY --from=build /repo/node_modules/.prisma ./node_modules/.prisma
 COPY --from=build /repo/node_modules/@prisma ./node_modules/@prisma
+# Also place the engine where Next standalone's server chunks expect it.
+COPY --from=build /repo/node_modules/.prisma ./apps/web/.next/server/node_modules/.prisma
 
 # Schema + migrations on board for `prisma migrate deploy` if we ever
 # run it from inside the web container instead of the dedicated migrate

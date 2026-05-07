@@ -36,6 +36,9 @@ COPY --from=deps /repo/apps/ws/node_modules ./apps/ws/node_modules
 COPY apps/ws ./apps/ws
 COPY tsconfig.base.json ./tsconfig.base.json
 
+# Ensure tsx is resolvable from /app (NODE_PATH fallback for module resolution)
+ENV NODE_PATH=/app/apps/ws/node_modules
+
 ENV NODE_ENV=production \
     WS_PORT=3001 \
     WS_HOST=0.0.0.0
