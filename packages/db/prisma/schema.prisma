@@ -73,6 +73,16 @@ model User {
   // PM team ownership: edges where this user is the PM of a team.
   pmTeam            PmTeamMember[]       @relation("PmTeamOwner")
 
+  // Tags assigned by this user (audit trail of tag activity).
+  tagAssignments    TaskTag[]            @relation("TaskTagAssigner")
+
+  // Messenger relations.
+  channelsCreated     Channel[]          @relation("ChannelCreator")
+  channelMemberships  ChannelMember[]    @relation("ChannelMembership")
+  messages            Message[]          @relation("MessageAuthor")
+  messageReactions    MessageReaction[]  @relation("MessageReactor")
+  messageMentions     MessageMention[]   @relation("MessageMentioned")
+
   @@index([role, isActive])
 }
 
@@ -280,6 +290,8 @@ model Project {
   members       ProjectMember[]
   tasks         Task[]
   integrations  ProjectIntegration[]
+  tags          Tag[]
+  channels      Channel[]
 
   @@unique([externalSource, externalId])
   @@index([status])
@@ -373,6 +385,9 @@ model Task {
   blockedBy     TaskDependency[] @relation("BlocksTo")
   pullRequests  TaskPullRequest[]
   assignments   TaskAssignment[]
+  // Native tag system (separate from the legacy `tags String[]` mirror
+  // of Bitrix24 TAGS payloads above).
+  taskTags      TaskTag[]
 
   @@unique([projectId, number])
   @@index([assigneeId, status])
@@ -837,5 +852,199 @@ enum NotificationKind {
   DEADLINE_APPROACHING
   DEADLINE_PASSED
   MENTION
+  CHAT_MENTION            // упоминание в мессенджере
+  CHAT_DM                 // личное сообщение / GROUP_DM
   SYSTEM
+}
+
+// ============================================================================
+// TAGS (per-project, with colors). The legacy Task.tags String[] field
+// stays as a flat read-only mirror of Bitrix24's TAGS payload; native
+// app tagging goes through Tag + TaskTag with referential integrity,
+// rename support, and per-project scoping.
+// ============================================================================
+
+model Tag {
+  id        String    @id @default(cuid())
+  projectId String
+  project   Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name      String
+  // Slug used for URLs and external-id matching. Lowercase, no spaces.
+  slug      String
+  // Tailwind-friendly hex string e.g. "#3b82f6"; the UI maps it to a
+  // background+text pair.
+  color     String    @default("#94a3b8")
+  // For future: read-only tags pulled from external system kept apart
+  // from native ones (`externalSource = 'bitrix24'` etc).
+  externalSource String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  tasks     TaskTag[]
+
+  @@unique([projectId, slug])
+  @@index([projectId, name])
+}
+
+model TaskTag {
+  taskId    String
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  tagId     String
+  tag       Tag      @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  assignedAt DateTime @default(now())
+  assignedById String?
+  assignedBy User?    @relation("TaskTagAssigner", fields: [assignedById], references: [id])
+
+  @@id([taskId, tagId])
+  @@index([tagId])
+}
+
+// ============================================================================
+// MESSENGER (channels, threads, reactions, mentions, full-text search).
+// Discord/Slack-style: every conversation is a Channel; DMs and group-DMs
+// are Channel.kind=DM/GROUP_DM with explicit members. Threads use
+// Message.parentId (one level deep — replies in a thread reply to the
+// thread root, not to each other).
+//
+// Search: Message.searchVector is a tsvector populated by trigger,
+// indexed via GIN. Created in raw SQL inside the migration.
+// ============================================================================
+
+model Channel {
+  id          String        @id @default(cuid())
+  kind        ChannelKind   @default(PUBLIC)
+  // Slug is unique inside a project (or globally when projectId is null).
+  // For DM/GROUP_DM the slug is auto-generated from member ids and not
+  // surfaced in the URL.
+  slug        String
+  name        String
+  description String?       @db.Text
+  // Org-wide channel when null; per-project when set.
+  projectId   String?
+  project     Project?      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  // For PRIVATE/DM/GROUP_DM only members can read; for PUBLIC anyone in
+  // the org can join. ARCHIVED hides from sidebar but keeps history.
+  isArchived  Boolean       @default(false)
+  createdById String
+  createdBy   User          @relation("ChannelCreator", fields: [createdById], references: [id])
+
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  members     ChannelMember[]
+  messages    Message[]
+
+  @@unique([projectId, slug])
+  @@index([kind, isArchived])
+}
+
+enum ChannelKind {
+  PUBLIC      // discoverable, joinable by anyone in the org
+  PRIVATE     // invite-only
+  DM          // exactly 2 members; auto-created on first DM
+  GROUP_DM    // 3+ members, named optionally
+}
+
+model ChannelMember {
+  channelId   String
+  channel     Channel    @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User       @relation("ChannelMembership", fields: [userId], references: [id], onDelete: Cascade)
+  // Per-channel role — admin can rename/archive, member can post/read.
+  role        ChannelRole @default(MEMBER)
+  // For unread badges + "mark all as read".
+  lastReadAt  DateTime?
+  // Suppress notifications without leaving the channel.
+  isMuted     Boolean    @default(false)
+  joinedAt    DateTime   @default(now())
+
+  @@id([channelId, userId])
+  @@index([userId, lastReadAt])
+}
+
+enum ChannelRole {
+  ADMIN
+  MEMBER
+}
+
+model Message {
+  id          String     @id @default(cuid())
+  channelId   String
+  channel     Channel    @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  authorId    String
+  author      User       @relation("MessageAuthor", fields: [authorId], references: [id])
+  // Thread root reference. NULL = top-level message in the channel;
+  // non-null = reply inside a thread keyed by the root message.
+  parentId    String?
+  parent      Message?   @relation("MessageThread", fields: [parentId], references: [id], onDelete: Cascade)
+  replies     Message[]  @relation("MessageThread")
+
+  body        String     @db.Text
+  // Lightweight markdown-style flag set so the renderer knows whether
+  // to allow code blocks / link previews / etc. Default WEB.
+  source      MessageSource @default(WEB)
+  editedAt    DateTime?
+  deletedAt   DateTime?
+
+  // Cached counts kept in sync by triggers / app code so the channel
+  // list can show "12 replies" without a sub-query per row.
+  replyCount  Int        @default(0)
+
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  reactions   MessageReaction[]
+  mentions    MessageMention[]
+  attachments MessageAttachment[]
+
+  @@index([channelId, createdAt])
+  @@index([parentId, createdAt])
+  @@index([authorId])
+}
+
+model MessageAttachment {
+  id          String   @id @default(cuid())
+  messageId   String
+  message     Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  filename    String
+  mimeType    String
+  sizeBytes   Int
+  // S3-compatible (MinIO in prod) object key.
+  storageKey  String
+  uploadedAt  DateTime @default(now())
+
+  @@index([messageId])
+}
+
+enum MessageSource {
+  WEB
+  MOBILE
+  API
+  SYSTEM       // service messages: "X joined", "channel renamed", etc.
+}
+
+model MessageReaction {
+  messageId String
+  message   Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User    @relation("MessageReactor", fields: [userId], references: [id], onDelete: Cascade)
+  // Unicode emoji (single code point or ZWJ sequence). One reaction per
+  // emoji per user per message.
+  emoji     String
+  createdAt DateTime @default(now())
+
+  @@id([messageId, userId, emoji])
+  @@index([messageId, emoji])
+}
+
+model MessageMention {
+  messageId String
+  message   Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User    @relation("MessageMentioned", fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([messageId, userId])
+  @@index([userId, createdAt])
 }
