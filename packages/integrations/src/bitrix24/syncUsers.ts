@@ -64,7 +64,7 @@ export async function syncUsers(
       await prisma.user.create({
         data: {
           email,
-          name: (fullName || email.split('@')[0]).slice(0, 80),
+          name: (fullName || email.split('@')[0] || email).slice(0, 80),
           role: 'MEMBER',
           // Inactive on purpose — admins must opt in before these accounts
           // can authenticate. They still resolve as comment/task authors.

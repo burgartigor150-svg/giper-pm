@@ -68,6 +68,7 @@ export type DomainTaskFromBitrix = {
   startedAt: Date | null;
   completedAt: Date | null;
   externalUpdatedAt: Date | null;
+  tags: string[];
 };
 
 export function mapBitrixTask(t: BxTask): DomainTaskFromBitrix {
@@ -86,6 +87,9 @@ export function mapBitrixTask(t: BxTask): DomainTaskFromBitrix {
     startedAt: parseDate(t.startDatePlan),
     completedAt: status === 'DONE' ? parseDate(t.closedDate) : null,
     externalUpdatedAt: parseDate(t.changedDate),
+    tags: Array.isArray(t.tags)
+      ? t.tags.map((s) => String(s).trim()).filter(Boolean)
+      : [],
   };
 }
 

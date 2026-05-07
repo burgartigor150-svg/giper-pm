@@ -7,6 +7,7 @@ import { AlertCircle, Ban } from 'lucide-react';
 import { Avatar } from '@giper/ui/components/Avatar';
 import { cn } from '@giper/ui/cn';
 import type { BoardTask } from '@/lib/tasks';
+import { TagPill } from './TagPill';
 
 const PRIORITY_DOT: Record<NonNullable<BoardTask['priority']>, string> = {
   LOW: 'bg-neutral-400',
@@ -34,8 +35,18 @@ export function KanbanCard({ projectKey, task, isOverlay = false }: Props) {
     opacity: isDragging && !isOverlay ? 0.4 : 1,
   };
 
-  const visibleTags = task.tags.slice(0, 2);
-  const extraTags = task.tags.length - visibleTags.length;
+  // Native tags first (with colour), then legacy Bitrix-mirror string
+  // tags as a fallback. Limit total to 3 to keep cards compact.
+  const nativeTags = (task.taskTags ?? []).map((tt) => tt.tag);
+  const legacyTags = task.tags.filter(
+    (raw) => !nativeTags.some((nt) => nt.name.toLowerCase() === raw.toLowerCase()),
+  );
+  const allTagPills: { key: string; name: string; color: string }[] = [
+    ...nativeTags.map((t) => ({ key: `n-${t.id}`, name: t.name, color: t.color })),
+    ...legacyTags.map((t) => ({ key: `l-${t}`, name: t, color: '#94a3b8' })),
+  ];
+  const visibleTags = allTagPills.slice(0, 3);
+  const extraTags = allTagPills.length - visibleTags.length;
 
   return (
     <div
@@ -98,12 +109,7 @@ export function KanbanCard({ projectKey, task, isOverlay = false }: Props) {
         <div className="mt-2 flex items-center justify-between gap-2">
           <div className="flex flex-wrap gap-1">
             {visibleTags.map((t) => (
-              <span
-                key={t}
-                className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
-              >
-                {t}
-              </span>
+              <TagPill key={t.key} name={t.name} color={t.color} />
             ))}
             {extraTags > 0 ? (
               <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">

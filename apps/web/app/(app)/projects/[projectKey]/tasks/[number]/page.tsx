@@ -29,6 +29,8 @@ import { PresenceBar } from '@/components/domain/PresenceBar';
 import { SubtaskList } from '@/components/domain/SubtaskList';
 import { Checklists } from '@/components/domain/Checklists';
 import { Dependencies } from '@/components/domain/Dependencies';
+import { TagPicker } from '@/components/domain/TagPicker';
+import { listTagsForProject } from '@/actions/tags';
 import { channelForTask } from '@giper/realtime';
 import { WatchToggle } from '@/components/domain/WatchToggle';
 import { isWatchingTask } from '@/lib/watchers/isWatching';
@@ -53,13 +55,19 @@ export default async function TaskDetailPage({ params }: { params: Params }) {
     throw e;
   }
 
-  const [activeTimer, spentMinutes, watchingExplicit, taskTimeEntries] =
-    await Promise.all([
-      getActiveTimer(me.id),
-      getTaskSpentMinutes(task.id),
-      isWatchingTask(task.id, me.id),
-      listTaskTimeEntries(task.id, 10),
-    ]);
+  const [
+    activeTimer,
+    spentMinutes,
+    watchingExplicit,
+    taskTimeEntries,
+    availableTags,
+  ] = await Promise.all([
+    getActiveTimer(me.id),
+    getTaskSpentMinutes(task.id),
+    isWatchingTask(task.id, me.id),
+    listTaskTimeEntries(task.id, 10),
+    listTagsForProject(task.project.id),
+  ]);
   // Assignee/creator are always notified — the explicit watch toggle is
   // disabled with a tooltip in that case.
   const watchImplicit = task.assigneeId === me.id || task.creatorId === me.id;
@@ -270,6 +278,18 @@ export default async function TaskDetailPage({ params }: { params: Params }) {
                 initial={task.description}
                 canEdit={canEditMirror}
               />
+              <div className="mt-4 border-t border-border pt-3">
+                <div className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">
+                  Теги
+                </div>
+                <TagPicker
+                  taskId={task.id}
+                  projectId={task.project.id}
+                  assigned={task.taskTags.map((tt) => tt.tag)}
+                  available={availableTags}
+                  canEdit={canEdit}
+                />
+              </div>
             </CardContent>
           </Card>
 

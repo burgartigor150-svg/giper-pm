@@ -94,6 +94,12 @@ export async function getTask(projectKey: string, number: number, user: SessionU
           },
         },
       },
+      taskTags: {
+        orderBy: { tag: { name: 'asc' } },
+        select: {
+          tag: { select: { id: true, name: true, slug: true, color: true } },
+        },
+      },
       checklists: {
         orderBy: { order: 'asc' },
         select: {

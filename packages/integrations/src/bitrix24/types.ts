@@ -51,4 +51,9 @@ export type BxTask = {
    * Empty array when the task has no files.
    */
   ufTaskWebdavFiles?: Array<string | number> | null;
+  /**
+   * Bitrix24 native task tags. New (camelCase) REST returns this as
+   * `tags`; older responses use `TAGS`. Both are arrays of strings.
+   */
+  tags?: string[] | null;
 };

@@ -79,6 +79,11 @@ export async function listTasksForBoard(
       tags: true,
       externalSource: true,
       assignee: { select: { id: true, name: true, image: true } },
+      taskTags: {
+        select: {
+          tag: { select: { id: true, name: true, color: true } },
+        },
+      },
     },
   });
 

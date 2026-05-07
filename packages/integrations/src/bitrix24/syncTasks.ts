@@ -111,6 +111,7 @@ export async function syncTasks(
           'START_DATE_PLAN',
           'PARENT_ID',
           'UF_TASK_WEBDAV_FILES',
+          'TAGS',
         ],
         start,
       });
@@ -246,10 +247,12 @@ async function upsertOne(
           startedAt: mapped.startedAt,
           completedAt: mapped.completedAt,
           assigneeId,
+          tags: mapped.tags,
         },
       });
       stats.updated++;
     }
+    await syncBitrixTagsToProject(prisma, projectId, found.id, mapped.tags);
     return found.id;
   }
 
@@ -274,11 +277,102 @@ async function upsertOne(
       assigneeId,
       externalSource: 'bitrix24',
       externalId: mapped.externalId,
+      tags: mapped.tags,
     },
     select: { id: true },
   });
+  await syncBitrixTagsToProject(prisma, projectId, created.id, mapped.tags);
   stats.created++;
   return created.id;
+}
+
+/**
+ * For every Bitrix tag string seen on this task, ensure a Tag row
+ * exists in the project (marked externalSource='bitrix24' so we can
+ * tell native vs mirrored apart) and attach the TaskTag link. Tags
+ * removed in Bitrix are unlinked here too — the Tag row stays for
+ * other tasks that may still reference it.
+ */
+async function syncBitrixTagsToProject(
+  prisma: PrismaClient,
+  projectId: string,
+  taskId: string,
+  tagNames: string[],
+): Promise<void> {
+  const cleanNames = Array.from(
+    new Set(tagNames.map((s) => s.trim()).filter(Boolean)),
+  );
+
+  // Resolve / create Tag rows for each unique name.
+  const tagIds: string[] = [];
+  for (const name of cleanNames) {
+    const slug = slugifyTag(name);
+    const tag = await prisma.tag.upsert({
+      where: { projectId_slug: { projectId, slug } },
+      create: {
+        projectId,
+        name: name.slice(0, 40),
+        slug,
+        color: pickTagColor(name),
+        externalSource: 'bitrix24',
+      },
+      update: {},
+      select: { id: true },
+    });
+    tagIds.push(tag.id);
+  }
+
+  // Diff: add missing TaskTag links, remove ones not in the new set.
+  const existing = await prisma.taskTag.findMany({
+    where: { taskId },
+    select: { tagId: true },
+  });
+  const existingIds = new Set(existing.map((r) => r.tagId));
+  const targetIds = new Set(tagIds);
+
+  const toAdd = tagIds.filter((id) => !existingIds.has(id));
+  const toRemove = [...existingIds].filter((id) => !targetIds.has(id));
+
+  if (toAdd.length > 0) {
+    await prisma.taskTag.createMany({
+      data: toAdd.map((tagId) => ({ taskId, tagId })),
+      skipDuplicates: true,
+    });
+  }
+  if (toRemove.length > 0) {
+    await prisma.taskTag.deleteMany({
+      where: { taskId, tagId: { in: toRemove } },
+    });
+  }
+}
+
+function slugifyTag(name: string): string {
+  return (
+    name
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-zа-я0-9]+/giu, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 60) || 'tag'
+  );
+}
+
+function pickTagColor(name: string): string {
+  const palette = [
+    '#94a3b8',
+    '#3b82f6',
+    '#8b5cf6',
+    '#ec4899',
+    '#ef4444',
+    '#f97316',
+    '#eab308',
+    '#22c55e',
+    '#14b8a6',
+    '#06b6d4',
+  ];
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) | 0;
+  return palette[Math.abs(hash) % palette.length] ?? '#94a3b8';
 }
 
 function sameDate(a: Date | null | undefined, b: Date | null | undefined): boolean {
