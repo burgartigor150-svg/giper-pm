@@ -8,6 +8,8 @@ import { getT } from '@/lib/i18n';
 import { EditProjectForm } from '@/components/domain/EditProjectForm';
 import { MemberSearch } from '@/components/domain/MemberSearch';
 import { MemberRow } from '@/components/domain/MemberRow';
+import { WipLimitsForm } from '@/components/domain/WipLimitsForm';
+import { PublishToBitrixButton } from '@/components/domain/PublishToBitrixButton';
 
 export default async function ProjectSettingsPage({
   params,
@@ -37,11 +39,21 @@ export default async function ProjectSettingsPage({
     notFound();
   }
 
+  const projectMirrored =
+    project.externalSource === 'bitrix24' && !!project.externalId;
+
   return (
     <div className="mx-auto max-w-4xl space-y-4">
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <span className="rounded-md bg-muted px-2 py-1 font-mono text-xs">{project.key}</span>
         <h1 className="text-xl font-semibold">{t('title')}</h1>
+        <div className="ml-auto">
+          <PublishToBitrixButton
+            kind="project"
+            projectId={project.id}
+            alreadyLinked={projectMirrored}
+          />
+        </div>
       </div>
 
       <Card>
@@ -58,6 +70,18 @@ export default async function ProjectSettingsPage({
               deadline: project.deadline,
               status: project.status,
             }}
+          />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>WIP-лимиты канбана</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <WipLimitsForm
+            projectId={project.id}
+            initial={(project.wipLimits ?? null) as Record<string, number> | null}
           />
         </CardContent>
       </Card>

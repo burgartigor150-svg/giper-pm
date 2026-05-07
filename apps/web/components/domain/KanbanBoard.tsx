@@ -15,6 +15,7 @@ import {
 import { sortableKeyboardCoordinates, arrayMove } from '@dnd-kit/sortable';
 import type { BoardTask } from '@/lib/tasks';
 import { changeStatusAction } from '@/actions/tasks';
+import { setInternalStatusAction } from '@/actions/assignments';
 import { useT } from '@/lib/useT';
 import { KanbanCard } from './KanbanCard';
 import { KanbanColumn } from './KanbanColumn';
@@ -36,9 +37,11 @@ const TOTAL_THRESHOLD = 200;
 type Props = {
   projectKey: string;
   initialTasks: BoardTask[];
+  /** Per-status WIP limits. Missing keys = no limit. */
+  wipLimits?: Partial<Record<Status, number>> | null;
 };
 
-export function KanbanBoard({ projectKey, initialTasks }: Props) {
+export function KanbanBoard({ projectKey, initialTasks, wipLimits }: Props) {
   const router = useRouter();
   const tBoard = useT('tasks.board');
 
@@ -52,12 +55,17 @@ export function KanbanBoard({ projectKey, initialTasks }: Props) {
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
-  // Bucket tasks by status (memoised so dragging doesn't recompute the whole world).
+  // Bucket tasks by *internal* status — board reflects the team's
+  // track. For non-mirrored tasks internalStatus equals status (the
+  // migration backfilled it), so this doesn't change anything for
+  // those. For Bitrix-mirrored tasks the board now shows where our
+  // team is on each task, independent of what the client sees in
+  // Bitrix.
   const byStatus = useMemo(() => {
     const map = new Map<Status, BoardTask[]>();
     for (const c of COLUMNS) map.set(c, []);
     for (const t of tasks) {
-      const arr = map.get(t.status);
+      const arr = map.get(t.internalStatus);
       if (arr) arr.push(t);
     }
     return map;
@@ -69,7 +77,7 @@ export function KanbanBoard({ projectKey, initialTasks }: Props) {
   function findContainer(id: string): Status | null {
     if (id.startsWith('column-')) return id.slice('column-'.length) as Status;
     const t = tasks.find((tt) => tt.id === id);
-    return t ? t.status : null;
+    return t ? t.internalStatus : null;
   }
 
   function handleDragStart(e: DragStartEvent) {
@@ -96,7 +104,7 @@ export function KanbanBoard({ projectKey, initialTasks }: Props) {
       if (oldIndex === -1 || newIndex === -1 || oldIndex === newIndex) return;
 
       const reordered = arrayMove(arr, oldIndex, newIndex);
-      const others = tasks.filter((t) => t.status !== activeContainer);
+      const others = tasks.filter((t) => t.internalStatus !== activeContainer);
       setTasks([...others, ...reordered]);
       return;
     }
@@ -105,16 +113,29 @@ export function KanbanBoard({ projectKey, initialTasks }: Props) {
     const prevSnapshot = tasks;
     const newStatus = overContainer;
 
-    // Optimistic state mutation
+    // Optimistic state mutation — update internalStatus on the moved
+    // card. Mirror status (`status`) is untouched; that's owned by
+    // Bitrix and updated only by the sync round-trip.
     setTasks((cur) =>
-      cur.map((t) => (t.id === taskId ? { ...t, status: newStatus } : t)),
+      cur.map((t) => (t.id === taskId ? { ...t, internalStatus: newStatus } : t)),
     );
 
     const moved = prevSnapshot.find((t) => t.id === taskId);
     if (!moved) return;
 
     startTransition(async () => {
-      const res = await changeStatusAction(taskId, projectKey, moved.number, newStatus);
+      // For mirrored tasks the kanban writes only to the internal
+      // track. For non-mirrored tasks we ALSO update the legacy
+      // `status` so existing time-tracking lifecycle (startedAt /
+      // completedAt) keeps working — those still key off `status`.
+      const res = moved.externalSource
+        ? await setInternalStatusAction(taskId, projectKey, moved.number, newStatus)
+        : await changeStatusAction(taskId, projectKey, moved.number, newStatus);
+      // Belt and braces: also keep internalStatus in sync for legacy
+      // tasks (changeStatusAction doesn't touch it).
+      if (res.ok && !moved.externalSource) {
+        await setInternalStatusAction(taskId, projectKey, moved.number, newStatus);
+      }
       if (!res.ok) {
         // Roll back to prev snapshot.
         setTasks(prevSnapshot);
@@ -147,6 +168,7 @@ export function KanbanBoard({ projectKey, initialTasks }: Props) {
               status={status}
               tasks={byStatus.get(status) ?? []}
               cap={useCap ? COLUMN_CAP : undefined}
+              wipLimit={wipLimits?.[status] ?? null}
             />
           ))}
         </div>

@@ -1,8 +1,18 @@
 import { prisma } from '@giper/db';
 import type { UpdateTaskInput } from '@giper/shared';
 import { DomainError } from '../errors';
-import { canEditTask, type SessionUser } from '../permissions';
+import { canEditTask, canEditTaskInternal, type SessionUser } from '../permissions';
 import { auditTask } from '../audit';
+
+/**
+ * Per-field permission split: writing the title or description on a
+ * Bitrix-mirrored task could overwrite the client-facing wording on
+ * the next outbound sync, so those stay behind the strict
+ * canEditTask. Everything else (priority, estimate, due, tags, type)
+ * is internal-only metadata and uses canEditTaskInternal — meaning
+ * Bitrix-mirrored tasks ARE editable in those fields.
+ */
+const MIRROR_BOUND_FIELDS: (keyof UpdateTaskInput)[] = ['title', 'description'];
 
 export async function updateTask(taskId: string, input: UpdateTaskInput, user: SessionUser) {
   const task = await prisma.task.findUnique({
@@ -25,7 +35,14 @@ export async function updateTask(taskId: string, input: UpdateTaskInput, user: S
     },
   });
   if (!task) throw new DomainError('NOT_FOUND', 404);
-  if (!canEditTask(user, task)) throw new DomainError('INSUFFICIENT_PERMISSIONS', 403);
+
+  const touchesMirrorBound = MIRROR_BOUND_FIELDS.some(
+    (k) => input[k as keyof UpdateTaskInput] !== undefined,
+  );
+  const allowed = touchesMirrorBound
+    ? canEditTask(user, task)
+    : canEditTaskInternal(user, task);
+  if (!allowed) throw new DomainError('INSUFFICIENT_PERMISSIONS', 403);
 
   const before = {
     title: task.title,

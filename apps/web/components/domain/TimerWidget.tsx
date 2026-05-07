@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useRef, useState, useTransition } from 'react';
+import { useCallback, useEffect, useRef, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Pause, Play } from 'lucide-react';
+import { Pause, Play, ArrowRightLeft } from 'lucide-react';
 import { Button } from '@giper/ui/components/Button';
 import { Input } from '@giper/ui/components/Input';
 import { cn } from '@giper/ui/cn';
@@ -26,34 +26,74 @@ type Props = {
   active: ActiveTimer | null;
 };
 
+/**
+ * The header timer widget — the single live indicator of "what am I
+ * working on right now". It does three jobs:
+ *
+ *   1. Shows the active task's project key, title, and live duration.
+ *   2. Single click on the pause button stops the current timer.
+ *   3. Switch button (or T-shortcut → toggle) opens a picker. Picking a
+ *      task starts a new timer; the backend auto-stops the old one in a
+ *      single transaction (single-active-timer invariant in startTimer).
+ *
+ * The T global shortcut hits this component via the `giper:toggle-timer`
+ * window event — we keep the dispatch logic in KeyboardShortcuts so any
+ * page can wire to the same event without prop-drilling.
+ */
 export function TimerWidget({ active }: Props) {
   const t = useT('time.timer');
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [pickerOpen, setPickerOpen] = useState(false);
 
-  function stop() {
+  const stop = useCallback(() => {
     startTransition(async () => {
       const res = await stopTimerAction();
       if (res.ok) router.refresh();
     });
-  }
+  }, [router]);
+
+  // T-shortcut handler:
+  //   - timer running → stop
+  //   - no timer → open picker
+  // Mirrors what a user would expect from a single "toggle" key.
+  useEffect(() => {
+    const onToggle = () => {
+      if (active?.task) stop();
+      else setPickerOpen(true);
+    };
+    window.addEventListener('giper:toggle-timer', onToggle);
+    return () => window.removeEventListener('giper:toggle-timer', onToggle);
+  }, [active, stop]);
 
   if (active?.task) {
     return (
       <div className="flex items-center gap-2 rounded-md border border-border bg-background px-2 py-1">
         <Link
           href={`/projects/${active.task.project.key}/tasks/${active.task.number}`}
-          className="hidden text-xs text-muted-foreground hover:underline sm:inline"
+          className="hidden min-w-0 items-center gap-2 text-xs hover:underline sm:flex"
           title={active.task.title}
         >
-          <span className="font-mono">
+          <span className="font-mono text-muted-foreground">
             {active.task.project.key}-{active.task.number}
           </span>
+          <span className="max-w-[180px] truncate text-foreground">
+            {active.task.title}
+          </span>
         </Link>
-        <span className="font-mono text-xs">
+        <span className="font-mono text-xs tabular-nums">
           <LiveDuration startedAt={active.startedAt} />
         </span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={() => setPickerOpen(true)}
+          aria-label="Переключить задачу"
+          title="Переключить задачу"
+        >
+          <ArrowRightLeft className="h-3 w-3" />
+        </Button>
         <Button
           type="button"
           variant="destructive"
@@ -64,6 +104,13 @@ export function TimerWidget({ active }: Props) {
         >
           <Pause className="h-3 w-3" />
         </Button>
+        {pickerOpen ? (
+          <TaskPicker
+            mode="switch"
+            onClose={() => setPickerOpen(false)}
+            currentTaskId={active.task.id}
+          />
+        ) : null}
       </div>
     );
   }
@@ -75,18 +122,25 @@ export function TimerWidget({ active }: Props) {
         variant="outline"
         size="sm"
         onClick={() => setPickerOpen(true)}
+        title="Запустить таймер (T)"
       >
         <Play className="h-3 w-3" />
         <span className="hidden sm:inline">{t('start')}</span>
       </Button>
-      {pickerOpen ? (
-        <TaskPicker onClose={() => setPickerOpen(false)} />
-      ) : null}
+      {pickerOpen ? <TaskPicker mode="start" onClose={() => setPickerOpen(false)} /> : null}
     </>
   );
 }
 
-function TaskPicker({ onClose }: { onClose: () => void }) {
+function TaskPicker({
+  onClose,
+  mode,
+  currentTaskId,
+}: {
+  onClose: () => void;
+  mode: 'start' | 'switch';
+  currentTaskId?: string;
+}) {
   const t = useT('time.timer');
   const router = useRouter();
   const [query, setQuery] = useState('');
@@ -131,11 +185,18 @@ function TaskPicker({ onClose }: { onClose: () => void }) {
     });
   }
 
+  // Filter out the currently-running task from switch suggestions —
+  // picking it would just be a no-op restart.
+  const visible = currentTaskId ? results.filter((r) => r.id !== currentTaskId) : results;
+
   return (
     <div
       ref={wrapRef}
       className="absolute right-0 top-12 z-50 w-80 rounded-md border border-border bg-background p-3 shadow-md"
     >
+      <div className="mb-2 text-xs text-muted-foreground">
+        {mode === 'switch' ? 'Переключить таймер на:' : 'Запустить таймер:'}
+      </div>
       <Input
         autoFocus
         value={query}
@@ -147,11 +208,11 @@ function TaskPicker({ onClose }: { onClose: () => void }) {
           <p className="px-2 py-3 text-xs text-muted-foreground">
             {t('minSearchLength')}
           </p>
-        ) : results.length === 0 ? (
+        ) : visible.length === 0 ? (
           <p className="px-2 py-3 text-xs text-muted-foreground">{t('noResults')}</p>
         ) : (
           <ul className="flex flex-col">
-            {results.map((r) => (
+            {visible.map((r) => (
               <li key={r.id}>
                 <button
                   type="button"

@@ -94,6 +94,7 @@
   },
   "nav": {
     "dashboard": "Дашборд",
+    "me": "Мой день",
     "projects": "Проекты",
     "time": "Время",
     "team": "Команда",
@@ -356,7 +357,10 @@
         "noTags": "—"
       },
       "statusChange": "{actor} изменил(а) статус: {from} → {to}",
-      "statusChangeInitial": "{actor} установил(а) статус: {to}"
+      "statusChangeInitial": "{actor} установил(а) статус: {to}",
+      "attachments": "Файлы",
+      "noAttachments": "Файлов нет.",
+      "downloadAttachment": "Скачать"
     },
     "errors": {
       "INSUFFICIENT_PERMISSIONS": "Недостаточно прав",

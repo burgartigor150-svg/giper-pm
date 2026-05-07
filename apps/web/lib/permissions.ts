@@ -70,6 +70,24 @@ export function canEditTask(user: SessionUser, task: TaskForPerm): boolean {
   return !!task.project.members?.some((m) => m.userId === user.id && m.role === 'LEAD');
 }
 
+/**
+ * Edit permission for the *internal* track of a task. Unlike canEditTask,
+ * this is allowed on Bitrix-mirrored tasks: internal status, internal
+ * assignments, reviewer, estimate, due, tags, priority, checklists,
+ * dependencies — none of those round-trip to Bitrix, so editing them
+ * on a mirror is safe.
+ *
+ * Permission shape is otherwise identical to canEditTask: the same
+ * roles get the same rights, just without the externalSource veto.
+ */
+export function canEditTaskInternal(user: SessionUser, task: TaskForPerm): boolean {
+  if (user.role === 'ADMIN') return true;
+  if (task.creatorId === user.id) return true;
+  if (task.assigneeId === user.id) return true;
+  if (task.project.ownerId === user.id) return true;
+  return !!task.project.members?.some((m) => m.userId === user.id && m.role === 'LEAD');
+}
+
 /** View task: same as viewing the parent project. */
 export function canViewTask(user: SessionUser, task: TaskForPerm): boolean {
   return canViewProject(user, task.project);

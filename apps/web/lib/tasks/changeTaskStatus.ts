@@ -25,6 +25,7 @@ export async function changeTaskStatus(
       completedAt: true,
       creatorId: true,
       assigneeId: true,
+      reviewerId: true,
       externalSource: true,
       project: {
         select: { ownerId: true, members: { select: { userId: true, role: true } } },
@@ -35,6 +36,24 @@ export async function changeTaskStatus(
   if (!canEditTask(user, task)) throw new DomainError('INSUFFICIENT_PERMISSIONS', 403);
 
   if (task.status === newStatus) return task;
+
+  // REVIEW gate: if a reviewer is set on the task, REVIEW → DONE must
+  // be performed by either the reviewer themselves or an ADMIN. Other
+  // transitions are unaffected. Without a reviewer the task works the
+  // old way (anyone with edit can close).
+  if (
+    task.reviewerId &&
+    task.status === 'REVIEW' &&
+    newStatus === 'DONE' &&
+    user.role !== 'ADMIN' &&
+    task.reviewerId !== user.id
+  ) {
+    throw new DomainError(
+      'INSUFFICIENT_PERMISSIONS',
+      403,
+      'Только назначенный ревьюер может перевести задачу в DONE',
+    );
+  }
 
   const now = new Date();
   const startedAt =

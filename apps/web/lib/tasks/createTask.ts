@@ -40,6 +40,26 @@ export async function createTask(input: CreateTaskInput, user: SessionUser) {
     }
   }
 
+  // Validate the parent task (if any) belongs to the same project.
+  // Cross-project parents would break project-scoped queries (kanban,
+  // list, status counts) and aren't a real use-case.
+  if (input.parentId) {
+    const parent = await prisma.task.findUnique({
+      where: { id: input.parentId },
+      select: { projectId: true },
+    });
+    if (!parent) {
+      throw new DomainError('VALIDATION', 400, 'Родительская задача не найдена');
+    }
+    if (parent.projectId !== project.id) {
+      throw new DomainError(
+        'VALIDATION',
+        400,
+        'Подзадача должна быть в том же проекте, что и родитель',
+      );
+    }
+  }
+
   let lastErr: unknown;
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     const max = await prisma.task.aggregate({
@@ -62,6 +82,7 @@ export async function createTask(input: CreateTaskInput, user: SessionUser) {
           estimateHours: input.estimateHours ?? null,
           dueDate: input.dueDate ?? null,
           tags: input.tags ?? [],
+          parentId: input.parentId ?? null,
         },
         select: {
           id: true,

@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { AlertCircle, Ban } from 'lucide-react';
 import { Avatar } from '@giper/ui/components/Avatar';
 import { cn } from '@giper/ui/cn';
 import type { BoardTask } from '@/lib/tasks';
@@ -65,7 +66,21 @@ export function KanbanCard({ projectKey, task, isOverlay = false }: Props) {
             >
               {projectKey}-{task.number}
             </Link>
-            {task.estimateHours ? <span>· {task.estimateHours.toString()} ч</span> : null}
+            {task.estimateHours ? (
+              <EstimateBadge
+                estimateHours={task.estimateHours.toString()}
+                spentMinutes={task.spentMinutes}
+              />
+            ) : null}
+            {task.openBlockerCount > 0 ? (
+              <span
+                className="inline-flex items-center gap-0.5 rounded bg-red-100 px-1 py-0.5 text-red-700"
+                title={`Заблокирована ${task.openBlockerCount} задачами`}
+              >
+                <Ban className="h-3 w-3" />
+                {task.openBlockerCount}
+              </span>
+            ) : null}
           </div>
           <Link
             href={`/projects/${projectKey}/tasks/${task.number}`}
@@ -106,5 +121,43 @@ export function KanbanCard({ projectKey, task, isOverlay = false }: Props) {
         </div>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * Compact estimate marker on a kanban card. Shows the estimate in hours
+ * and — when over 80% spent — flips to amber/red with a warning icon
+ * so the PM can spot at-risk cards at a glance without opening them.
+ */
+function EstimateBadge({
+  estimateHours,
+  spentMinutes,
+}: {
+  estimateHours: string;
+  spentMinutes: number;
+}) {
+  const estimateMin = Math.round(Number(estimateHours) * 60);
+  if (estimateMin <= 0) return <span>· {estimateHours} ч</span>;
+  const ratio = spentMinutes / estimateMin;
+  const overrun = ratio > 1;
+  const warning = ratio >= 0.8 && ratio <= 1;
+  if (!overrun && !warning) {
+    return <span>· {estimateHours} ч</span>;
+  }
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center gap-0.5 rounded px-1 py-0.5',
+        overrun ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700',
+      )}
+      title={
+        overrun
+          ? `Перерасход: ${Math.round((ratio - 1) * 100)}% сверх оценки`
+          : `Близко к оценке: ${Math.round(ratio * 100)}%`
+      }
+    >
+      <AlertCircle className="h-3 w-3" />
+      {estimateHours} ч
+    </span>
   );
 }

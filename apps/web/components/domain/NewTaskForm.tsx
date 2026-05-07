@@ -17,9 +17,12 @@ type Member = { id: string; name: string };
 type Props = {
   projectKey: string;
   members: Member[];
+  /** True when the parent project is mirrored to Bitrix24 — only then
+   *  the "publish to Bitrix" affordance has anywhere to go. */
+  projectMirrored?: boolean;
 };
 
-export function NewTaskForm({ projectKey, members }: Props) {
+export function NewTaskForm({ projectKey, members, projectMirrored = false }: Props) {
   const tForm = useT('tasks.form');
   const tPrio = useT('tasks.priority');
   const tType = useT('tasks.type');
@@ -112,6 +115,24 @@ export function NewTaskForm({ projectKey, members }: Props) {
         <label className="text-sm font-medium" htmlFor="tags">{tForm('tags')}</label>
         <Input id="tags" name="tags" placeholder={tForm('tagsPlaceholder')} />
       </div>
+
+      {projectMirrored ? (
+        <label className="flex cursor-pointer items-start gap-2 rounded-md border border-input bg-muted/30 p-3 text-sm">
+          <input
+            type="checkbox"
+            name="publishToBitrix"
+            defaultChecked
+            className="mt-0.5 h-4 w-4 rounded border-input"
+          />
+          <span className="flex flex-col gap-0.5">
+            <span className="font-medium">Опубликовать в Bitrix24</span>
+            <span className="text-xs text-muted-foreground">
+              Создать соответствующую задачу в рабочей группе Bitrix24.
+              Для внутренних задач (черновики, тех-долг) — снимите галку.
+            </span>
+          </span>
+        </label>
+      ) : null}
 
       {state && !state.ok ? (
         <p className="text-sm text-destructive">

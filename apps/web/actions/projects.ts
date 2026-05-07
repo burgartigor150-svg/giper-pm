@@ -10,6 +10,7 @@ import {
   type UpdateProjectInput,
   type AddMemberInput,
 } from '@giper/shared';
+import { prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
 import {
   addProjectMember,
@@ -18,7 +19,9 @@ import {
   removeProjectMember,
   updateProject,
 } from '@/lib/projects';
+import { canEditProject } from '@/lib/permissions';
 import { DomainError } from '@/lib/errors';
+import { publishProjectToBitrix } from '@/lib/integrations/bitrix24Outbound';
 
 export type ActionResult<T = unknown> =
   | { ok: true; data?: T }
@@ -53,18 +56,81 @@ export async function createProjectAction(_prev: unknown, formData: FormData): P
       },
     };
   }
+  // Optional opt-in: publish to Bitrix24 right after create.
+  const publishToBitrix = formData.get('publishToBitrix') === 'on';
+
   let createdKey: string;
+  let createdId: string;
   try {
     const project = await createProject(parsed.data as CreateProjectInput, {
       id: user.id,
       role: user.role,
     });
     createdKey = project.key;
+    createdId = project.id;
   } catch (e) {
     return toErr(e);
   }
+
+  if (publishToBitrix) {
+    const res = await publishProjectToBitrix(createdId);
+    if (!res.ok) {
+      // Project is created but publish failed — surface the error
+      // without losing the row. The user can retry from the project
+      // page via the "Опубликовать в Bitrix" button.
+      revalidatePath('/projects');
+      return {
+        ok: false,
+        error: {
+          code: 'PUBLISH_FAILED',
+          message: `Проект создан, но не опубликован в Bitrix: ${res.error}`,
+        },
+      };
+    }
+  }
+
   revalidatePath('/projects');
   redirect(`/projects/${createdKey}`);
+}
+
+/**
+ * Manually publish an already-created local project to Bitrix24.
+ * Used by the "Опубликовать в Bitrix" button on the project page —
+ * either when the user didn't tick the checkbox at create time, or
+ * when an earlier auto-publish failed and they're retrying.
+ *
+ * Idempotent: if the project is already linked to Bitrix24, returns
+ * success without doing anything.
+ */
+export async function publishProjectAction(
+  projectId: string,
+): Promise<ActionResult<{ bitrixId: string }>> {
+  const user = await requireAuth();
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: {
+      id: true,
+      key: true,
+      ownerId: true,
+      members: { select: { userId: true, role: true } },
+    },
+  });
+  if (!project) {
+    return { ok: false, error: { code: 'NOT_FOUND', message: 'Проект не найден' } };
+  }
+  if (!canEditProject({ id: user.id, role: user.role }, project)) {
+    return {
+      ok: false,
+      error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' },
+    };
+  }
+  const res = await publishProjectToBitrix(projectId);
+  if (!res.ok) {
+    return { ok: false, error: { code: 'PUBLISH_FAILED', message: res.error } };
+  }
+  revalidatePath(`/projects/${project.key}`);
+  revalidatePath(`/projects/${project.key}/settings`);
+  return { ok: true, data: { bitrixId: res.bitrixId } };
 }
 
 export async function updateProjectAction(
@@ -136,5 +202,69 @@ export async function removeProjectMemberAction(
     return toErr(e);
   }
   revalidatePath('/projects');
+  return { ok: true };
+}
+
+// ----- WIP limits ------------------------------------------------------
+
+const VALID_STATUSES = [
+  'BACKLOG',
+  'TODO',
+  'IN_PROGRESS',
+  'REVIEW',
+  'BLOCKED',
+  'DONE',
+  'CANCELED',
+] as const;
+
+/**
+ * Set or clear WIP-limits for a project's kanban columns. Soft-limits:
+ * we never block status transitions, just paint the column header red
+ * when its task count exceeds the value. `null` for any status removes
+ * the limit.
+ *
+ * Permissions: ADMIN, project owner, or project LEAD — same gate as
+ * other project-meta edits.
+ */
+export async function setWipLimitsAction(
+  projectId: string,
+  limits: Record<string, number | null>,
+): Promise<ActionResult> {
+  const me = await requireAuth();
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: {
+      ownerId: true,
+      key: true,
+      members: { select: { userId: true, role: true } },
+    },
+  });
+  if (!project) {
+    return { ok: false, error: { code: 'NOT_FOUND', message: 'Проект не найден' } };
+  }
+  if (!canEditProject({ id: me.id, role: me.role }, project)) {
+    return {
+      ok: false,
+      error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' },
+    };
+  }
+
+  // Sanitize: drop unknown keys and coerce values to positive ints (or null).
+  const clean: Record<string, number> = {};
+  for (const status of VALID_STATUSES) {
+    const v = limits[status];
+    if (v == null) continue;
+    const n = Math.floor(Number(v));
+    if (Number.isFinite(n) && n > 0 && n < 1000) {
+      clean[status] = n;
+    }
+  }
+  await prisma.project.update({
+    where: { id: projectId },
+    data: { wipLimits: Object.keys(clean).length > 0 ? clean : null },
+  });
+  revalidatePath(`/projects/${project.key}`);
+  revalidatePath(`/projects/${project.key}/board`);
+  revalidatePath(`/projects/${project.key}/settings`);
   return { ok: true };
 }

@@ -5,6 +5,8 @@ import { getUserById } from '@/lib/users';
 import { DomainError } from '@/lib/errors';
 import { getT } from '@/lib/i18n';
 import { EditUserForm } from '@/components/domain/EditUserForm';
+import { UserPositionsForm } from '@/components/domain/UserPositionsForm';
+import { SyncUserFromBitrixButton } from '@/components/domain/SyncUserFromBitrixButton';
 
 export default async function UserDetailPage({
   params,
@@ -25,7 +27,7 @@ export default async function UserDetailPage({
   }
 
   return (
-    <div className="mx-auto max-w-md">
+    <div className="mx-auto max-w-md space-y-4">
       <Card>
         <CardHeader>
           <CardTitle>{t('actions.edit')}</CardTitle>
@@ -42,6 +44,47 @@ export default async function UserDetailPage({
               timezone: user.timezone,
             }}
             isSelf={user.id === me.id}
+          />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Должности</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <UserPositionsForm
+            userId={user.id}
+            initial={user.positions.map((p) => ({
+              position: p.position,
+              primary: p.primary,
+            }))}
+          />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Bitrix24</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          <div className="text-xs text-muted-foreground">
+            {user.bitrixUserId ? (
+              <>
+                Связан с Bitrix24 ID:{' '}
+                <span className="font-mono">{user.bitrixUserId}</span>
+              </>
+            ) : (
+              <>
+                Не связан с Bitrix24. Нажмите кнопку ниже — система найдёт по
+                email <span className="font-mono">{user.email}</span> и подтянет
+                ID, имя, аватар, часовой пояс.
+              </>
+            )}
+          </div>
+          <SyncUserFromBitrixButton
+            userId={user.id}
+            alreadyLinked={!!user.bitrixUserId}
           />
         </CardContent>
       </Card>

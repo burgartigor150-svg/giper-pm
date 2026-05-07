@@ -9,6 +9,12 @@ import { AddManualToggle } from '@/components/domain/AddManualToggle';
 import { TimeRangeTabs } from '@/components/domain/TimeRangeTabs';
 import { TimeProjectPie, colorForIndex } from '@/components/domain/TimeProjectPie';
 import { DeleteTimeEntryButton } from '@/components/domain/DeleteTimeEntryButton';
+import {
+  TimeSelectionProvider,
+  HeaderCheckbox,
+  RowCheckbox,
+  BulkActionBar,
+} from '@/components/domain/TimeBulkActions';
 
 export default async function TimePage({
   searchParams,
@@ -52,7 +58,13 @@ export default async function TimePage({
     .sort((a, b) => b.minutes - a.minutes)
     .map((p, i) => ({ label: p.name, minutes: p.minutes, color: colorForIndex(i) }));
 
+  // Only closed entries are eligible for bulk-reassign — moving a live
+  // timer would need a stop+start. UI keeps it simple by hiding the
+  // checkbox on open rows.
+  const selectableIds = entries.filter((e) => e.endedAt != null).map((e) => e.id);
+
   return (
+    <TimeSelectionProvider>
     <div className="mx-auto max-w-6xl space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-semibold">{t('title')}</h1>
@@ -71,6 +83,9 @@ export default async function TimePage({
             <table className="w-full text-sm">
               <thead className="bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
                 <tr>
+                  <th className="px-3 py-2 w-8">
+                    <HeaderCheckbox entryIds={selectableIds} />
+                  </th>
                   <th className="px-3 py-2 font-medium">{tTable('when')}</th>
                   <th className="px-3 py-2 font-medium">{tTable('task')}</th>
                   <th className="px-3 py-2 font-medium">{tTable('duration')}</th>
@@ -82,6 +97,9 @@ export default async function TimePage({
               <tbody>
                 {entries.map((e) => (
                   <tr key={e.id} className="border-t border-border align-top">
+                    <td className="px-3 py-2">
+                      {e.endedAt ? <RowCheckbox entryId={e.id} /> : null}
+                    </td>
                     <td className="px-3 py-2 whitespace-nowrap text-xs text-muted-foreground">
                       <div>{new Date(e.startedAt).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' })}</div>
                       {e.endedAt ? (
@@ -159,6 +177,8 @@ export default async function TimePage({
           </CardContent>
         </Card>
       </div>
+      <BulkActionBar />
     </div>
+    </TimeSelectionProvider>
   );
 }

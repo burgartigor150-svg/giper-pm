@@ -15,6 +15,11 @@ export async function getUserById(id: string) {
       mustChangePassword: true,
       lastPasswordChangeAt: true,
       createdAt: true,
+      bitrixUserId: true,
+      positions: {
+        orderBy: [{ primary: 'desc' }, { position: 'asc' }],
+        select: { position: true, primary: true },
+      },
     },
   });
   if (!u) throw new DomainError('NOT_FOUND', 404, 'Пользователь не найден');

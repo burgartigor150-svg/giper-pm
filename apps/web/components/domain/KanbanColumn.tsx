@@ -17,6 +17,8 @@ type Props = {
   tasks: BoardTask[];
   /** When provided, only first `cap` tasks render until the user expands. */
   cap?: number;
+  /** Soft WIP limit for this column. Exceeding it paints the header red. */
+  wipLimit?: number | null;
 };
 
 const COLUMN_BG: Record<Exclude<Status, 'CANCELED'>, string> = {
@@ -28,13 +30,14 @@ const COLUMN_BG: Record<Exclude<Status, 'CANCELED'>, string> = {
   DONE: 'border-green-200',
 };
 
-export function KanbanColumn({ projectKey, status, tasks, cap }: Props) {
+export function KanbanColumn({ projectKey, status, tasks, cap, wipLimit }: Props) {
   const tStatus = useT('tasks.status');
   const tBoard = useT('tasks.board');
 
   const [showAll, setShowAll] = useState(false);
   const visible = cap && !showAll ? tasks.slice(0, cap) : tasks;
   const hidden = tasks.length - visible.length;
+  const overLimit = wipLimit != null && tasks.length > wipLimit;
 
   const { setNodeRef, isOver } = useDroppable({
     id: `column-${status}`,
@@ -50,10 +53,29 @@ export function KanbanColumn({ projectKey, status, tasks, cap }: Props) {
         isOver ? 'bg-muted/60' : '',
       )}
     >
-      <div className="flex items-center justify-between border-b border-border px-3 py-2 text-sm">
-        <span className="font-medium">{tStatus(status)}</span>
-        <span className="rounded-full bg-background px-2 py-0.5 text-xs text-muted-foreground">
-          {tasks.length}
+      <div
+        className={cn(
+          'flex items-center justify-between border-b px-3 py-2 text-sm',
+          overLimit ? 'border-red-300 bg-red-50' : 'border-border',
+        )}
+      >
+        <span className={cn('font-medium', overLimit ? 'text-red-900' : '')}>
+          {tStatus(status)}
+        </span>
+        <span
+          className={cn(
+            'rounded-full px-2 py-0.5 text-xs tabular-nums',
+            overLimit
+              ? 'bg-red-200 text-red-900'
+              : 'bg-background text-muted-foreground',
+          )}
+          title={
+            wipLimit != null
+              ? `WIP-лимит: ${wipLimit}${overLimit ? ` — превышен на ${tasks.length - wipLimit}` : ''}`
+              : undefined
+          }
+        >
+          {wipLimit != null ? `${tasks.length}/${wipLimit}` : tasks.length}
         </span>
       </div>
 

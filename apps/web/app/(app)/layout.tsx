@@ -1,14 +1,16 @@
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
+import { prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
 import { canSeeReports, canSeeSettings, type SessionUser } from '@/lib/permissions';
-import { getActiveTimer } from '@/lib/time';
+import { getActiveTimerWithHealth } from '@/lib/time';
 import { AppShell } from '@/components/domain/AppShell';
 import type { NavItem } from '@/components/domain/Sidebar';
 
 function buildNav(user: SessionUser): NavItem[] {
   const items: NavItem[] = [
     { key: 'dashboard', href: '/dashboard' },
+    { key: 'me', href: '/me' },
     { key: 'projects', href: '/projects' },
     { key: 'time', href: '/time' },
   ];
@@ -30,17 +32,26 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   }
 
   const navItems = buildNav({ id: sessionUser.id, role: sessionUser.role });
-  const activeTimer = await getActiveTimer(sessionUser.id);
+  const [{ timer: activeTimer, health: timerHealth }, inboxUnread] = await Promise.all([
+    getActiveTimerWithHealth(sessionUser.id),
+    prisma.notification.count({
+      where: { userId: sessionUser.id, isRead: false },
+    }),
+  ]);
 
   return (
     <AppShell
       user={{
+        id: sessionUser.id,
         name: sessionUser.name ?? sessionUser.email ?? '',
         email: sessionUser.email,
         image: sessionUser.image,
       }}
       navItems={navItems}
       activeTimer={activeTimer}
+      timerHealth={timerHealth}
+      wsUrl={process.env.NEXT_PUBLIC_WS_URL ?? null}
+      inboxUnread={inboxUnread}
     >
       {children}
     </AppShell>

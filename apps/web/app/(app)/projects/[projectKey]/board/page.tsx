@@ -8,6 +8,8 @@ import { DomainError } from '@/lib/errors';
 import { getT } from '@/lib/i18n';
 import { KanbanBoard } from '@/components/domain/KanbanBoard';
 import { KanbanFilters } from '@/components/domain/KanbanFilters';
+import { RevalidateOnEvent } from '@/components/domain/RevalidateOnEvent';
+import { channelForProject } from '@giper/realtime';
 
 export default async function ProjectBoardPage({
   params,
@@ -54,6 +56,10 @@ export default async function ProjectBoardPage({
 
   return (
     <div className="mx-auto max-w-[1400px] space-y-4">
+      <RevalidateOnEvent
+        channel={channelForProject(project.id)}
+        eventTypes={['task:status-changed', 'task:assigned', 'task:created']}
+      />
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <Link
@@ -76,7 +82,24 @@ export default async function ProjectBoardPage({
         />
       </Card>
 
-      <KanbanBoard projectKey={project.key} initialTasks={tasks} />
+      <KanbanBoard
+        projectKey={project.key}
+        initialTasks={tasks}
+        wipLimits={
+          (project.wipLimits ?? null) as Partial<
+            Record<
+              | 'BACKLOG'
+              | 'TODO'
+              | 'IN_PROGRESS'
+              | 'REVIEW'
+              | 'BLOCKED'
+              | 'DONE'
+              | 'CANCELED',
+              number
+            >
+          > | null
+        }
+      />
     </div>
   );
 }

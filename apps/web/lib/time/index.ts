@@ -7,3 +7,4 @@ export * from './editTimeEntry';
 export * from './deleteTimeEntry';
 export * from './listTimeEntries';
 export * from './getTimeEntry';
+export * from './getTaskSpent';

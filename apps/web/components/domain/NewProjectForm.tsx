@@ -94,6 +94,21 @@ export function NewProjectForm() {
         </div>
       </div>
 
+      <label className="flex cursor-pointer items-start gap-2 rounded-md border border-input bg-muted/30 p-3 text-sm">
+        <input
+          type="checkbox"
+          name="publishToBitrix"
+          className="mt-0.5 h-4 w-4 rounded border-input"
+        />
+        <span className="flex flex-col gap-0.5">
+          <span className="font-medium">Опубликовать в Bitrix24</span>
+          <span className="text-xs text-muted-foreground">
+            Создаст рабочую группу в Bitrix24 и свяжет её с этим проектом.
+            Если не отметить — можно будет опубликовать позже из настроек проекта.
+          </span>
+        </span>
+      </label>
+
       {state && !state.ok ? (
         <p className="text-sm text-destructive">
           {state.error.code in { CONFLICT: 1, INSUFFICIENT_PERMISSIONS: 1, VALIDATION: 1 }

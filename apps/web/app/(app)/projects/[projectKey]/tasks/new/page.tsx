@@ -42,7 +42,13 @@ export default async function NewTaskPage({
           <CardTitle>{t('create')}</CardTitle>
         </CardHeader>
         <CardContent>
-          <NewTaskForm projectKey={project.key} members={members} />
+          <NewTaskForm
+            projectKey={project.key}
+            members={members}
+            projectMirrored={
+              project.externalSource === 'bitrix24' && !!project.externalId
+            }
+          />
         </CardContent>
       </Card>
     </div>

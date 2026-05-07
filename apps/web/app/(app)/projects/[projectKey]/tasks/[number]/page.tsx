@@ -1,22 +1,37 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { Avatar } from '@giper/ui/components/Avatar';
 import { Card, CardContent, CardHeader, CardTitle } from '@giper/ui/components/Card';
 import { prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
 import { getTask } from '@/lib/tasks';
-import { getActiveTimer } from '@/lib/time';
-import { canDeleteTask, canEditTask } from '@/lib/permissions';
+import { getActiveTimer, getTaskSpentMinutes } from '@/lib/time';
+import { canDeleteTask, canEditTask, canEditTaskInternal } from '@/lib/permissions';
 import { DomainError } from '@/lib/errors';
 import { getT } from '@/lib/i18n';
 import { InlineTitle } from '@/components/domain/InlineTitle';
 import { InlineDescription } from '@/components/domain/InlineDescription';
 import { TaskSidebar } from '@/components/domain/TaskSidebar';
-import { CommentForm } from '@/components/domain/CommentForm';
+import { TaskTimeline } from '@/components/domain/TaskTimeline';
+import { LogTaskHoursForm } from '@/components/domain/LogTaskHoursForm';
+import { listTaskTimeEntries } from '@/actions/time';
 import { TaskStatusBadge } from '@/components/domain/TaskStatusBadge';
 import { DeleteTaskButton } from '@/components/domain/DeleteTaskButton';
 import { TaskTimerButton } from '@/components/domain/TaskTimerButton';
 import { Bitrix24TaskBadge } from '@/components/domain/Bitrix24Badge';
+import { Bitrix24SyncStatus } from '@/components/domain/Bitrix24SyncStatus';
+import { BitrixMirrorPanel } from '@/components/domain/BitrixMirrorPanel';
+import { PublishToBitrixButton } from '@/components/domain/PublishToBitrixButton';
+import { TaskAttachments } from '@/components/domain/TaskAttachments';
+import { AttachmentUpload } from '@/components/domain/AttachmentUpload';
+import { PullRequestList } from '@/components/domain/PullRequestList';
+import { RevalidateOnEvent } from '@/components/domain/RevalidateOnEvent';
+import { PresenceBar } from '@/components/domain/PresenceBar';
+import { SubtaskList } from '@/components/domain/SubtaskList';
+import { Checklists } from '@/components/domain/Checklists';
+import { Dependencies } from '@/components/domain/Dependencies';
+import { channelForTask } from '@giper/realtime';
+import { WatchToggle } from '@/components/domain/WatchToggle';
+import { isWatchingTask } from '@/lib/watchers/isWatching';
 
 type Params = Promise<{ projectKey: string; number: string }>;
 
@@ -27,7 +42,6 @@ export default async function TaskDetailPage({ params }: { params: Params }) {
 
   const me = await requireAuth();
   const t = await getT('tasks.detail');
-  const tStatus = await getT('tasks.status');
 
   let task;
   try {
@@ -39,19 +53,53 @@ export default async function TaskDetailPage({ params }: { params: Params }) {
     throw e;
   }
 
-  const activeTimer = await getActiveTimer(me.id);
+  const [activeTimer, spentMinutes, watchingExplicit, taskTimeEntries] =
+    await Promise.all([
+      getActiveTimer(me.id),
+      getTaskSpentMinutes(task.id),
+      isWatchingTask(task.id, me.id),
+      listTaskTimeEntries(task.id, 10),
+    ]);
+  // Assignee/creator are always notified — the explicit watch toggle is
+  // disabled with a tooltip in that case.
+  const watchImplicit = task.assigneeId === me.id || task.creatorId === me.id;
 
-  // Resolve actor names for status changes (only IDs are stored on TaskStatusChange).
-  const actorIds = Array.from(new Set(task.statusChanges.map((sc) => sc.changedById)));
-  const actors = actorIds.length
+  // Resolve actor names for status changes (only IDs are stored on
+  // TaskStatusChange) plus any users referenced as @mentions in comments
+  // — we render them as inline name pills, not raw "@<userId>" tokens.
+  const referencedIds = new Set<string>(task.statusChanges.map((sc) => sc.changedById));
+  const mentionRe = /@([a-z0-9]{24,})\b/g;
+  for (const c of task.comments) {
+    let m: RegExpExecArray | null;
+    while ((m = mentionRe.exec(c.body)) !== null) {
+      if (m[1]) referencedIds.add(m[1]);
+    }
+  }
+  const referenced = referencedIds.size
     ? await prisma.user.findMany({
-        where: { id: { in: actorIds } },
+        where: { id: { in: [...referencedIds] } },
         select: { id: true, name: true, image: true },
       })
     : [];
-  const actorById = new Map(actors.map((u) => [u.id, u]));
+  const actorById = new Map(referenced.map((u) => [u.id, u]));
 
-  const canEdit = canEditTask(
+  // Two edit gates:
+  //   - canEditMirror: strict — required to write title/description and
+  //     to mutate the Bitrix-mirror status. Returns false on any task
+  //     where externalSource is set.
+  //   - canEditInternal: relaxed — allows editing the internal status,
+  //     internal assignments, reviewer, estimate, due, tags, priority,
+  //     checklists, dependencies on Bitrix-mirrored tasks too.
+  const canEditMirror = canEditTask(
+    { id: me.id, role: me.role },
+    {
+      creatorId: task.creatorId,
+      assigneeId: task.assigneeId,
+      externalSource: task.externalSource,
+      project: { ownerId: task.project.ownerId, members: task.project.members },
+    },
+  );
+  const canEdit = canEditTaskInternal(
     { id: me.id, role: me.role },
     {
       creatorId: task.creatorId,
@@ -72,7 +120,14 @@ export default async function TaskDetailPage({ params }: { params: Params }) {
 
   // Merge comments + status changes into a single timeline.
   type TLItem =
-    | { kind: 'comment'; at: Date; id: string; author: { id: string; name: string; image: string | null }; body: string }
+    | {
+        kind: 'comment';
+        at: Date;
+        id: string;
+        author: { id: string; name: string; image: string | null };
+        body: string;
+        visibility: 'EXTERNAL' | 'INTERNAL';
+      }
     | {
         kind: 'status';
         at: Date;
@@ -90,6 +145,7 @@ export default async function TaskDetailPage({ params }: { params: Params }) {
         id: c.id,
         author: c.author,
         body: c.body,
+        visibility: c.visibility,
       }),
     ),
     ...task.statusChanges.map(
@@ -106,11 +162,43 @@ export default async function TaskDetailPage({ params }: { params: Params }) {
 
   return (
     <div className="mx-auto max-w-6xl space-y-4">
+      <RevalidateOnEvent
+        channel={channelForTask(task.id)}
+        eventTypes={[
+          'comment:added',
+          'task:status-changed',
+          'task:assigned',
+        ]}
+      />
       <div className="flex items-center justify-between gap-4">
-        <Link href={`/projects/${task.project.key}/list`} className="text-sm text-muted-foreground hover:underline">
-          {t('back')}
-        </Link>
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Link href={`/projects/${task.project.key}/list`} className="hover:underline">
+            {t('back')}
+          </Link>
+          {task.parent ? (
+            <>
+              <span>·</span>
+              <Link
+                href={`/projects/${task.parent.project.key}/tasks/${task.parent.number}`}
+                className="inline-flex items-center gap-1 hover:underline"
+                title={task.parent.title}
+              >
+                <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px]">
+                  {task.parent.project.key}-{task.parent.number}
+                </span>
+                <span className="max-w-[200px] truncate">{task.parent.title}</span>
+              </Link>
+            </>
+          ) : null}
+        </div>
         <div className="flex items-center gap-2">
+          <WatchToggle
+            taskId={task.id}
+            projectKey={task.project.key}
+            taskNumber={task.number}
+            initialWatching={watchingExplicit}
+            implicit={watchImplicit}
+          />
           <TaskTimerButton taskId={task.id} activeTimer={activeTimer} />
           {canDelete ? <DeleteTaskButton taskId={task.id} projectKey={task.project.key} /> : null}
         </div>
@@ -122,16 +210,53 @@ export default async function TaskDetailPage({ params }: { params: Params }) {
         </span>
         <TaskStatusBadge status={task.status} />
         {task.externalSource === 'bitrix24' && task.externalId ? (
-          <Bitrix24TaskBadge externalId={task.externalId} />
-        ) : null}
+          <>
+            <Bitrix24TaskBadge externalId={task.externalId} />
+            {!task.syncConflict ? (
+              <Bitrix24SyncStatus
+                taskId={task.id}
+                projectKey={task.project.key}
+                taskNumber={task.number}
+                syncedAt={task.bitrixSyncedAt}
+                conflict={false}
+              />
+            ) : null}
+          </>
+        ) : (
+          // Local-only task — show "publish to Bitrix" only when the
+          // parent project is mirrored. Otherwise the button is rendered
+          // disabled with a hint explaining "опубликуйте проект сначала".
+          <PublishToBitrixButton
+            kind="task"
+            taskId={task.id}
+            projectKey={task.project.key}
+            taskNumber={task.number}
+            alreadyLinked={false}
+            projectMirrored={
+              task.project.externalSource === 'bitrix24' &&
+              !!task.project.externalId
+            }
+          />
+        )}
+        <PresenceBar taskId={task.id} meId={me.id} />
       </div>
+
+      {task.externalSource === 'bitrix24' && task.syncConflict ? (
+        <Bitrix24SyncStatus
+          taskId={task.id}
+          projectKey={task.project.key}
+          taskNumber={task.number}
+          syncedAt={task.bitrixSyncedAt}
+          conflict={true}
+        />
+      ) : null}
 
       <InlineTitle
         taskId={task.id}
         projectKey={task.project.key}
         taskNumber={task.number}
         initial={task.title}
-        canEdit={canEdit}
+        canEdit={canEditMirror}
       />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_280px]">
@@ -143,7 +268,104 @@ export default async function TaskDetailPage({ params }: { params: Params }) {
                 projectKey={task.project.key}
                 taskNumber={task.number}
                 initial={task.description}
-                canEdit={canEdit}
+                canEdit={canEditMirror}
+              />
+            </CardContent>
+          </Card>
+
+          {task.subtasks.length > 0 || canEdit ? (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Подзадачи</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <SubtaskList
+                  projectKey={task.project.key}
+                  parentTaskId={task.id}
+                  subtasks={task.subtasks}
+                  canAdd={canEdit}
+                />
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {task.checklists.length > 0 || canEdit ? (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Чек-листы</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <Checklists
+                  taskId={task.id}
+                  projectKey={task.project.key}
+                  taskNumber={task.number}
+                  checklists={task.checklists}
+                  canEdit={canEdit}
+                />
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {task.blocks.length > 0 || task.blockedBy.length > 0 || canEdit ? (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Зависимости</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <Dependencies
+                  taskId={task.id}
+                  projectKey={task.project.key}
+                  taskNumber={task.number}
+                  blocks={task.blocks.map((b) => ({ id: b.id, task: b.toTask }))}
+                  blockedBy={task.blockedBy.map((b) => ({ id: b.id, task: b.fromTask }))}
+                  canEdit={canEdit}
+                />
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {task.pullRequests.length > 0 ? (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Pull-requests</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <PullRequestList items={task.pullRequests} />
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {task.attachments.length > 0 || canEdit ? (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">{t('attachments')}</CardTitle>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-4">
+                {task.attachments.length > 0 ? (
+                  <TaskAttachments attachments={task.attachments} />
+                ) : null}
+                {canEdit ? (
+                  <AttachmentUpload
+                    taskId={task.id}
+                    projectKey={task.project.key}
+                    taskNumber={task.number}
+                  />
+                ) : null}
+              </CardContent>
+            </Card>
+          ) : null}
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Время</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <LogTaskHoursForm
+                taskId={task.id}
+                projectKey={task.project.key}
+                taskNumber={task.number}
+                currentUserId={me.id}
+                entries={taskTimeEntries}
               />
             </CardContent>
           </Card>
@@ -152,74 +374,48 @@ export default async function TaskDetailPage({ params }: { params: Params }) {
             <CardHeader>
               <CardTitle className="text-base">{t('timeline')}</CardTitle>
             </CardHeader>
-            <CardContent className="flex flex-col gap-4">
-              {timeline.length === 0 ? (
-                <p className="text-sm text-muted-foreground">{t('noTimeline')}</p>
-              ) : (
-                <ul className="flex flex-col gap-3">
-                  {timeline.map((item) =>
-                    item.kind === 'comment' ? (
-                      <li key={`c-${item.id}`} className="flex gap-3">
-                        <Avatar src={item.author.image} alt={item.author.name} className="h-7 w-7" />
-                        <div className="flex-1">
-                          <div className="flex items-baseline gap-2 text-xs text-muted-foreground">
-                            <span className="font-medium text-foreground">{item.author.name}</span>
-                            <span>{item.at.toLocaleString('ru-RU')}</span>
-                          </div>
-                          <p className="mt-1 whitespace-pre-wrap text-sm">{item.body}</p>
-                        </div>
-                      </li>
-                    ) : (
-                      <li key={`s-${item.id}`} className="flex gap-3 text-xs text-muted-foreground">
-                        <span className="mt-0.5 inline-block h-7 w-7 shrink-0 rounded-full bg-muted text-center leading-7">
-                          ↺
-                        </span>
-                        <div className="flex flex-1 flex-col">
-                          <span>
-                            <span className="font-medium text-foreground">
-                              {item.actor?.name ?? '—'}
-                            </span>{' '}
-                            {item.from
-                              ? `изменил(а) статус: ${tStatus(item.from)} → ${tStatus(item.to)}`
-                              : `установил(а) статус: ${tStatus(item.to)}`}
-                          </span>
-                          <span>{item.at.toLocaleString('ru-RU')}</span>
-                        </div>
-                      </li>
-                    ),
-                  )}
-                </ul>
-              )}
-              <CommentForm
+            <CardContent>
+              <TaskTimeline
                 taskId={task.id}
                 projectKey={task.project.key}
                 taskNumber={task.number}
+                items={timeline}
+                isMirror={task.externalSource === 'bitrix24'}
+                mentions={actorById}
               />
             </CardContent>
           </Card>
         </div>
 
-        <Card>
-          <CardContent className="pt-6">
-            <TaskSidebar
-              taskId={task.id}
-              projectKey={task.project.key}
-              taskNumber={task.number}
-              status={task.status}
-              priority={task.priority}
-              assignee={task.assignee}
-              estimate={task.estimateHours?.toString() ?? null}
-              due={task.dueDate}
-              tags={task.tags}
-              members={members}
-              canEdit={canEdit}
-              creator={task.creator}
-              startedAt={task.startedAt}
-              completedAt={task.completedAt}
-            />
-          </CardContent>
-        </Card>
+        <div className="flex flex-col gap-4">
+          {task.externalSource === 'bitrix24' ? (
+            <BitrixMirrorPanel status={task.status} assignee={task.assignee} />
+          ) : null}
+          <Card>
+            <CardContent className="pt-6">
+              <TaskSidebar
+                taskId={task.id}
+                projectKey={task.project.key}
+                taskNumber={task.number}
+                internalStatus={task.internalStatus}
+                priority={task.priority}
+                reviewer={task.reviewer}
+                assignments={task.assignments}
+                estimate={task.estimateHours?.toString() ?? null}
+                spentMinutes={spentMinutes}
+                due={task.dueDate}
+                tags={task.tags}
+                members={members}
+                canEdit={canEdit}
+                creator={task.creator}
+                startedAt={task.startedAt}
+                completedAt={task.completedAt}
+              />
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </div>
   );
 }
+
