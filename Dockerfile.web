@@ -49,20 +49,15 @@ COPY --from=deps /repo/packages/shared/node_modules ./packages/shared/node_modul
 COPY --from=deps /repo/packages/ui/node_modules ./packages/ui/node_modules
 COPY . .
 
-# Generate the Prisma client. pnpm scopes packages to the workspace
-# that declared them, so @prisma/client lives under packages/db/node_modules
-# (as a symlink into .pnpm/<hash>/...). After generation, materialize
-# everything Prisma-related into a real directory at /opt/prisma-export
-# so the runtime stage can COPY it without chasing pnpm symlinks.
+# Generate Prisma client, then dereference pnpm symlinks into a flat
+# export directory so the runtime stage can COPY real files.
 RUN pnpm --filter @giper/db exec prisma generate && \
-    mkdir -p /opt/prisma-export/.prisma /opt/prisma-export/@prisma && \
-    PNPM_PRISMA="$(readlink -f /repo/packages/db/node_modules/@prisma/client 2>/dev/null)" && \
-    PNPM_PRISMA_DIR="$(dirname $(dirname $PNPM_PRISMA))" && \
-    echo "Prisma artefacts root: $PNPM_PRISMA_DIR" && \
-    cp -RL "$PNPM_PRISMA_DIR/.prisma/." /opt/prisma-export/.prisma/ && \
-    cp -RL "$PNPM_PRISMA_DIR/@prisma/." /opt/prisma-export/@prisma/ && \
-    ls /opt/prisma-export/.prisma/client/ | head -5 && \
-    ls /opt/prisma-export/@prisma/
+    mkdir -p /prisma-out/.prisma /prisma-out/@prisma && \
+    REAL_CLIENT="$(readlink -f /repo/packages/db/node_modules/@prisma/client)" && \
+    REAL_ROOT="$(dirname $(dirname $REAL_CLIENT))" && \
+    cp -RL "$REAL_ROOT/.prisma/." /prisma-out/.prisma/ && \
+    cp -RL "$REAL_ROOT/@prisma/." /prisma-out/@prisma/ && \
+    ls /prisma-out/.prisma/client/ | head -5
 
 # Build with standalone output. NEXT_TELEMETRY_DISABLED keeps logs clean.
 ENV NEXT_TELEMETRY_DISABLED=1
@@ -85,14 +80,14 @@ COPY --from=build /repo/apps/web/.next/standalone ./
 COPY --from=build /repo/apps/web/.next/static ./apps/web/.next/static
 COPY --from=build /repo/apps/web/public ./apps/web/public
 
-# Prisma generated client + Alpine query engine. The build stage
-# materialized pnpm's symlinked Prisma tree at /opt/prisma-export.
-# Mirror it into both root node_modules and Next standalone's server
-# chunks — different runtime code paths look in different places.
-COPY --from=build /opt/prisma-export/.prisma ./node_modules/.prisma
-COPY --from=build /opt/prisma-export/@prisma ./node_modules/@prisma
-COPY --from=build /opt/prisma-export/.prisma ./apps/web/.next/server/node_modules/.prisma
-COPY --from=build /opt/prisma-export/@prisma ./apps/web/.next/server/node_modules/@prisma
+# Prisma generated client + Alpine query engine from the dereferenced
+# export directory. Mirror into both root node_modules and Next
+# standalone's server chunks — different runtime code paths look in
+# different places.
+COPY --from=build /prisma-out/.prisma ./node_modules/.prisma
+COPY --from=build /prisma-out/@prisma ./node_modules/@prisma
+COPY --from=build /prisma-out/.prisma ./apps/web/.next/server/node_modules/.prisma
+COPY --from=build /prisma-out/@prisma ./apps/web/.next/server/node_modules/@prisma
 
 # Schema + migrations on board for `prisma migrate deploy` if we ever
 # run it from inside the web container instead of the dedicated migrate

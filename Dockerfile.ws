@@ -26,13 +26,18 @@ COPY packages/ui/package.json packages/ui/
 RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
     pnpm install --frozen-lockfile --prefer-offline --filter @giper/ws...
 
+# pnpm uses symlinks into a content-addressable store. Docker COPY --from
+# cannot follow them, so dereference into flat directories.
+RUN cp -rL /repo/node_modules /repo/node_modules_flat && \
+    cp -rL /repo/apps/ws/node_modules /repo/ws_node_modules_flat
+
 # Runtime — same image, just trim and copy source over.
 FROM node:${NODE_VERSION}-alpine AS runtime
 RUN apk add --no-cache libc6-compat tini
 WORKDIR /app
 
-COPY --from=deps /repo/node_modules ./node_modules
-COPY --from=deps /repo/apps/ws/node_modules ./apps/ws/node_modules
+COPY --from=deps /repo/node_modules_flat ./node_modules
+COPY --from=deps /repo/ws_node_modules_flat ./apps/ws/node_modules
 COPY apps/ws ./apps/ws
 COPY tsconfig.base.json ./tsconfig.base.json
 
