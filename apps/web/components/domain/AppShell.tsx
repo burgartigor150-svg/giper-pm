@@ -63,10 +63,11 @@ export function AppShell({
   const tree = (
     <div className="flex min-h-screen bg-muted/30">
       <Sidebar items={navItems} open={open} onClose={() => setOpen(false)} />
-      {/* min-w-0 lets the main column shrink below its intrinsic content
-          width — without it, a long unbroken URL or wide table would
-          force the whole layout to scroll horizontally. */}
-      <div className="flex min-h-screen w-full min-w-0 flex-col md:pl-0">
+      {/* min-w-0 is the standard flex-shrink unlock so the main column
+          can collapse below its intrinsic content width when a child has
+          a long unbroken token. Without it, the whole layout would scroll
+          horizontally (and clip the sidebar's contents on desktop). */}
+      <div className="flex min-h-screen w-full min-w-0 flex-col">
         <Topbar
           user={user}
           onOpenMenu={() => setOpen(true)}
@@ -74,7 +75,7 @@ export function AppShell({
           timerHealth={timerHealth}
           inboxUnread={inboxUnread}
         />
-        <main className="min-w-0 flex-1 overflow-x-hidden px-4 py-6 md:px-8">{children}</main>
+        <main className="min-w-0 flex-1 px-4 py-6 md:px-8">{children}</main>
       </div>
       <CommandPalette />
       <KeyboardShortcuts />

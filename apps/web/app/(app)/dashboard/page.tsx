@@ -34,8 +34,8 @@ export default async function DashboardPage() {
         <HeroSection userId={me.id} />
       </Suspense>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_320px]">
-        <div className="flex flex-col gap-4">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="flex min-w-0 flex-col gap-4">
           <Suspense fallback={<TaskListSectionSkeleton titleWidth={48} />}>
             <InProgressSection userId={me.id} />
           </Suspense>

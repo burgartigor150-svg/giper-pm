@@ -75,8 +75,8 @@ export default async function TimePage({
         <TimeRangeTabs range={filter.range} from={filter.from} to={filter.to} />
       </Card>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_320px]">
-        <Card className="overflow-hidden">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <Card className="overflow-hidden min-w-0">
           {entries.length === 0 ? (
             <div className="p-6 text-sm text-muted-foreground">{t('noEntries')}</div>
           ) : (
