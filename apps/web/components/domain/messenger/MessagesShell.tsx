@@ -7,12 +7,15 @@ import { Send, Hash, Lock, MessageSquare, Plus } from 'lucide-react';
 import { Avatar } from '@giper/ui/components/Avatar';
 import { Button } from '@giper/ui/components/Button';
 import { cn } from '@giper/ui/cn';
+import { useRealtime } from '@giper/realtime/client';
+import { channelForChat } from '@giper/realtime';
 import {
   postMessageAction,
   markChannelReadAction,
   createChannelAction,
 } from '@/actions/messenger';
 import { renderRichText } from '@/lib/text/renderRichText';
+import { MessageReactions } from './MessageReactions';
 
 type ChannelKind = 'PUBLIC' | 'PRIVATE' | 'DM' | 'GROUP_DM';
 
@@ -74,6 +77,14 @@ export function MessagesShell({
       void markChannelReadAction(activeChannelId);
     }
   }, [activeChannelId]);
+
+  // Live updates from other users: refresh on any chat event for the
+  // current channel. Cheap and correct (router.refresh re-fetches the
+  // RSC tree via Next's server-render); we'll switch to in-place
+  // patches once a virtualized message list is in.
+  useRealtime(activeChannelId ? channelForChat(activeChannelId) : null, () => {
+    router.refresh();
+  });
 
   const memberDms = memberChannels.filter((c) => c.kind === 'DM' || c.kind === 'GROUP_DM');
   const memberRooms = memberChannels.filter((c) => c.kind === 'PUBLIC' || c.kind === 'PRIVATE');
@@ -181,7 +192,7 @@ export function MessagesShell({
               ) : (
                 <ul className="flex flex-col gap-3">
                   {messages.map((m) => (
-                    <MessageRow key={m.id} m={m} />
+                    <MessageRow key={m.id} m={m} meId={meId ?? ''} />
                   ))}
                 </ul>
               )}
@@ -271,9 +282,9 @@ function ChannelLink({
   );
 }
 
-function MessageRow({ m }: { m: MessageRow }) {
+function MessageRow({ m, meId }: { m: MessageRow; meId: string }) {
   return (
-    <li className="flex gap-3">
+    <li className="group flex gap-3">
       <Avatar src={m.author.image} alt={m.author.name} className="h-8 w-8 shrink-0" />
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline gap-2 text-xs">
@@ -291,6 +302,11 @@ function MessageRow({ m }: { m: MessageRow }) {
         <div className="mt-0.5 whitespace-pre-wrap break-words text-sm">
           {renderRichText(m.body)}
         </div>
+        <MessageReactions
+          messageId={m.id}
+          reactions={m.reactions}
+          meId={meId}
+        />
         {m.replyCount > 0 ? (
           <div className="mt-1 text-xs text-blue-600">{m.replyCount} ответов в треде</div>
         ) : null}

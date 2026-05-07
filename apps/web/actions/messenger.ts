@@ -352,6 +352,50 @@ export async function markChannelReadAction(
   return { ok: true };
 }
 
+/**
+ * Load the root + replies of a thread. Used by the thread sidebar.
+ * Returns null when the user can't read the parent channel.
+ */
+export async function loadThreadAction(rootMessageId: string) {
+  const me = await requireAuth();
+  const root = await prisma.message.findUnique({
+    where: { id: rootMessageId },
+    select: {
+      id: true,
+      body: true,
+      authorId: true,
+      author: { select: { id: true, name: true, image: true } },
+      parentId: true,
+      replyCount: true,
+      editedAt: true,
+      createdAt: true,
+      channelId: true,
+      reactions: { select: { userId: true, emoji: true } },
+    },
+  });
+  if (!root) return null;
+  const access = await resolveChannelAccess(root.channelId, me.id);
+  if (!access?.canRead) return null;
+
+  const replies = await prisma.message.findMany({
+    where: { parentId: rootMessageId, deletedAt: null },
+    orderBy: { createdAt: 'asc' },
+    select: {
+      id: true,
+      body: true,
+      authorId: true,
+      author: { select: { id: true, name: true, image: true } },
+      parentId: true,
+      replyCount: true,
+      editedAt: true,
+      createdAt: true,
+      reactions: { select: { userId: true, emoji: true } },
+    },
+  });
+
+  return { root, replies, channelId: root.channelId };
+}
+
 // ---------------------------------------------------------------------------
 // Reactions
 // ---------------------------------------------------------------------------
