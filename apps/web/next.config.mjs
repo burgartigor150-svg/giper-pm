@@ -14,6 +14,11 @@ const nextConfig = {
   // this, `next build` warns about multiple lockfiles and may copy
   // wrong dependencies.
   outputFileTracingRoot: new URL('../..', import.meta.url).pathname,
+  // ESLint is enforced in CI/dev (`pnpm lint`); the production image
+  // installs only runtime deps so the eslint plugin set is incomplete.
+  // Skipping during `next build` keeps the prod image small without
+  // weakening pre-merge checks.
+  eslint: { ignoreDuringBuilds: true },
   experimental: {
     typedRoutes: false,
   },
