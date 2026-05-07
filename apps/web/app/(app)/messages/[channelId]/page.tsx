@@ -23,6 +23,7 @@ export default async function MessagesChannelPage({ params }: { params: Params }
       activeChannelId={channelId}
       // newest-first → reverse for top-to-bottom chronological render.
       initialMessages={[...loaded.messages].reverse()}
+      mentionedUsers={loaded.mentionedUsers}
       meId={me.id}
     />
   );

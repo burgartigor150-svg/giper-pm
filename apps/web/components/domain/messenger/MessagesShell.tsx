@@ -42,11 +42,14 @@ type MessageRow = {
   reactions: Array<{ userId: string; emoji: string }>;
 };
 
+type MentionUser = { id: string; name: string };
+
 type Props = {
   memberChannels: Array<ChannelLite & { _count?: { messages: number } }>;
   publicChannels: ChannelLite[];
   activeChannelId: string | null;
   initialMessages?: MessageRow[];
+  mentionedUsers?: MentionUser[];
   meId?: string;
 };
 
@@ -55,8 +58,10 @@ export function MessagesShell({
   publicChannels,
   activeChannelId,
   initialMessages = [],
+  mentionedUsers = [],
   meId,
 }: Props) {
+  const mentionsMap = new Map(mentionedUsers.map((u) => [u.id, u]));
   const router = useRouter();
   const [messages, setMessages] = useState<MessageRow[]>(initialMessages);
   const [openThreadId, setOpenThreadId] = useState<string | null>(null);
@@ -176,6 +181,7 @@ export function MessagesShell({
                       key={m.id}
                       m={m}
                       meId={meId ?? ''}
+                      mentionsMap={mentionsMap}
                       onOpenThread={() => setOpenThreadId(m.id)}
                     />
                   ))}
@@ -283,10 +289,12 @@ function ChannelLink({
 function MessageRow({
   m,
   meId,
+  mentionsMap,
   onOpenThread,
 }: {
   m: MessageRow;
   meId: string;
+  mentionsMap: Map<string, { id: string; name: string }>;
   onOpenThread: () => void;
 }) {
   return (
@@ -306,7 +314,7 @@ function MessageRow({
           ) : null}
         </div>
         <div className="mt-0.5 whitespace-pre-wrap break-words text-sm">
-          {renderRichText(m.body)}
+          {renderRichText(m.body, { mentions: mentionsMap })}
         </div>
         <MessageReactions
           messageId={m.id}

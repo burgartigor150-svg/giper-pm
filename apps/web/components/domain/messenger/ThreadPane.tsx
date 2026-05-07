@@ -38,6 +38,7 @@ export function ThreadPane({ rootMessageId, meId, onClose }: Props) {
     root: MessageRow;
     replies: MessageRow[];
     channelId: string;
+    mentionedUsers: Array<{ id: string; name: string }>;
   } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -48,6 +49,7 @@ export function ThreadPane({ rootMessageId, meId, onClose }: Props) {
         root: res.root as MessageRow,
         replies: res.replies as MessageRow[],
         channelId: res.channelId,
+        mentionedUsers: res.mentionedUsers,
       });
     } else {
       setData(null);
@@ -89,12 +91,22 @@ export function ThreadPane({ rootMessageId, meId, onClose }: Props) {
           <div className="text-sm text-muted-foreground">Загрузка…</div>
         ) : (
           <ul className="flex flex-col gap-3">
-            <ThreadRow m={data.root} meId={meId} isRoot />
+            <ThreadRow
+              m={data.root}
+              meId={meId}
+              mentionsMap={new Map(data.mentionedUsers.map((u) => [u.id, u]))}
+              isRoot
+            />
             {data.replies.length > 0 ? (
               <li className="my-1 border-t border-border" aria-hidden />
             ) : null}
             {data.replies.map((m) => (
-              <ThreadRow key={m.id} m={m} meId={meId} />
+              <ThreadRow
+                key={m.id}
+                m={m}
+                meId={meId}
+                mentionsMap={new Map(data.mentionedUsers.map((u) => [u.id, u]))}
+              />
             ))}
           </ul>
         )}
@@ -119,7 +131,17 @@ export function ThreadPane({ rootMessageId, meId, onClose }: Props) {
   );
 }
 
-function ThreadRow({ m, meId, isRoot }: { m: MessageRow; meId: string; isRoot?: boolean }) {
+function ThreadRow({
+  m,
+  meId,
+  mentionsMap,
+  isRoot,
+}: {
+  m: MessageRow;
+  meId: string;
+  mentionsMap: Map<string, { id: string; name: string }>;
+  isRoot?: boolean;
+}) {
   return (
     <li className="group flex gap-3">
       <Avatar src={m.author.image} alt={m.author.name} className="h-8 w-8 shrink-0" />
@@ -142,7 +164,7 @@ function ThreadRow({ m, meId, isRoot }: { m: MessageRow; meId: string; isRoot?: 
           ) : null}
         </div>
         <div className="mt-0.5 whitespace-pre-wrap break-words text-sm">
-          {renderRichText(m.body)}
+          {renderRichText(m.body, { mentions: mentionsMap })}
         </div>
         <MessageReactions messageId={m.id} reactions={m.reactions} meId={meId} />
       </div>

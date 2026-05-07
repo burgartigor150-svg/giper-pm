@@ -1,13 +1,26 @@
 import type { ReactNode } from 'react';
 
+export type MentionLookup = Map<string, { id: string; name: string }>;
+
+export type RenderRichTextOptions = {
+  /**
+   * Optional id→user lookup. When passed, `@<userId>` tokens that match
+   * are rendered as a clickable mention pill. Tokens whose id isn't in
+   * the map fall back to the raw "@id" string so we don't silently swallow
+   * the user's input.
+   */
+  mentions?: MentionLookup;
+};
+
 /**
- * Render text that may contain Bitrix24-style BBCode plus bare URLs as
- * React nodes with anchor tags for links.
+ * Render text that may contain Bitrix24-style BBCode, bare URLs, and
+ * @<cuid> mentions as React nodes.
  *
  * Supported tokens:
  *   [URL=https://example.com]label[/URL]   → <a href="https://example.com">label</a>
  *   [URL]https://example.com[/URL]         → <a href="https://example.com">https://example.com</a>
  *   bare https://… or http://…             → <a href="…">…</a>
+ *   @<cuid>                                → mention pill (when in map)
  *
  * Anything else is left as plain text. Newlines must be preserved by the
  * caller via `whitespace-pre-wrap` (we don't insert <br>).
@@ -17,16 +30,19 @@ import type { ReactNode } from 'react';
  * edits; the BBCode unwrap is purely cosmetic and belongs at display
  * time.
  */
-export function renderRichText(input: string | null | undefined): ReactNode {
+export function renderRichText(
+  input: string | null | undefined,
+  options: RenderRichTextOptions = {},
+): ReactNode {
   if (!input) return null;
 
   // Pattern alternation:
   //   1. [URL=link]label[/URL]
   //   2. [URL]link[/URL]
   //   3. bare http(s)://…
-  // Use \S+ for the link to avoid greedy matches across newlines/spaces.
+  //   4. @<cuid>  — id-style mention (rendered iff present in map)
   const re =
-    /\[URL=([^\]]+?)\]([\s\S]*?)\[\/URL\]|\[URL\]([\s\S]*?)\[\/URL\]|(https?:\/\/[^\s<>"']+)/gi;
+    /\[URL=([^\]]+?)\]([\s\S]*?)\[\/URL\]|\[URL\]([\s\S]*?)\[\/URL\]|(https?:\/\/[^\s<>"']+)|@([a-z0-9]{24,})\b/gi;
 
   const out: ReactNode[] = [];
   let lastIndex = 0;
@@ -37,23 +53,40 @@ export function renderRichText(input: string | null | undefined): ReactNode {
     if (match.index > lastIndex) {
       out.push(input.slice(lastIndex, match.index));
     }
-    const [, urlA, labelA, urlB, bareUrl] = match;
-    const href = sanitizeHref(urlA ?? urlB ?? bareUrl ?? '');
-    const label = (labelA ?? urlB ?? bareUrl ?? '').trim();
-    if (href) {
-      out.push(
-        <a
-          key={`l${key++}`}
-          href={href}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-blue-600 underline underline-offset-2 hover:text-blue-700 break-all"
-        >
-          {label || href}
-        </a>,
-      );
+    const [, urlA, labelA, urlB, bareUrl, mentionId] = match;
+    if (mentionId) {
+      const u = options.mentions?.get(mentionId);
+      if (u) {
+        out.push(
+          <a
+            key={`m${key++}`}
+            href={`/team/${u.id}`}
+            className="rounded bg-blue-100 px-1 py-0.5 text-blue-800 hover:bg-blue-200"
+          >
+            @{u.name}
+          </a>,
+        );
+      } else {
+        out.push(match[0]);
+      }
     } else {
-      out.push(match[0]);
+      const href = sanitizeHref(urlA ?? urlB ?? bareUrl ?? '');
+      const label = (labelA ?? urlB ?? bareUrl ?? '').trim();
+      if (href) {
+        out.push(
+          <a
+            key={`l${key++}`}
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-blue-600 underline underline-offset-2 hover:text-blue-700 break-all"
+          >
+            {label || href}
+          </a>,
+        );
+      } else {
+        out.push(match[0]);
+      }
     }
     lastIndex = re.lastIndex;
   }

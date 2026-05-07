@@ -66,8 +66,23 @@ export async function loadChannelMessages(
       reactions: {
         select: { userId: true, emoji: true },
       },
+      mentions: {
+        select: { userId: true },
+      },
     },
   });
 
-  return { access, messages: rows };
+  // Resolve mentioned user ids → name in one query, return as a flat
+  // list so the client can build a Map for renderRichText.
+  const mentionedIds = Array.from(
+    new Set(rows.flatMap((m) => m.mentions.map((x) => x.userId))),
+  );
+  const mentionedUsers = mentionedIds.length
+    ? await prisma.user.findMany({
+        where: { id: { in: mentionedIds } },
+        select: { id: true, name: true, image: true },
+      })
+    : [];
+
+  return { access, messages: rows, mentionedUsers };
 }

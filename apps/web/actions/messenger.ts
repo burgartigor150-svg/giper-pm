@@ -390,10 +390,29 @@ export async function loadThreadAction(rootMessageId: string) {
       editedAt: true,
       createdAt: true,
       reactions: { select: { userId: true, emoji: true } },
+      mentions: { select: { userId: true } },
     },
   });
 
-  return { root, replies, channelId: root.channelId };
+  // Mentioned users across root + replies, resolved in one query.
+  const rootMentions = await prisma.messageMention.findMany({
+    where: { messageId: rootMessageId },
+    select: { userId: true },
+  });
+  const ids = Array.from(
+    new Set([
+      ...rootMentions.map((x) => x.userId),
+      ...replies.flatMap((r) => r.mentions.map((x) => x.userId)),
+    ]),
+  );
+  const mentionedUsers = ids.length
+    ? await prisma.user.findMany({
+        where: { id: { in: ids } },
+        select: { id: true, name: true, image: true },
+      })
+    : [];
+
+  return { root, replies, channelId: root.channelId, mentionedUsers };
 }
 
 /**
