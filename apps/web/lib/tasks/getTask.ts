@@ -182,18 +182,27 @@ export async function getTask(projectKey: string, number: number, user: SessionU
           externalId: true,
         },
       },
+      watchers: {
+        select: { userId: true },
+      },
     },
   });
 
   if (!task) throw new DomainError('NOT_FOUND', 404);
 
-  // Tell the permission gate whether THIS user has any task ownership
-  // in the project — needed for Bitrix-mirror projects that have no
-  // explicit ProjectMember rows.
+  // Build the shape canViewTask needs — flatten nested user{id} on
+  // assignments to {userId} so the permission helper doesn't need to
+  // know about the page's deeper select.
   const taskShape = {
-    ...task,
+    creatorId: task.creatorId,
+    assigneeId: task.assigneeId,
+    reviewerId: task.reviewerId,
+    externalSource: task.externalSource,
+    assignments: task.assignments.map((a) => ({ userId: a.user.id })),
+    watchers: task.watchers.map((w) => ({ userId: w.userId })),
     project: {
-      ...task.project,
+      ownerId: task.project.ownerId,
+      members: task.project.members,
       hasTaskForCurrentUser:
         task.creatorId === user.id ||
         task.assigneeId === user.id ||

@@ -28,9 +28,14 @@ export type ProjectForPerm = {
 export type TaskForPerm = {
   creatorId: string;
   assigneeId: string | null;
+  reviewerId?: string | null;
   project: ProjectForPerm;
   /** When set, this task is a read-only mirror from an external system. */
   externalSource?: string | null;
+  /** Co-assignees (TaskAssignment rows). */
+  assignments?: { userId: string }[];
+  /** Watchers (TaskWatcher rows). */
+  watchers?: { userId: string }[];
 };
 
 // ---- Project ------------------------------------------------------------
@@ -103,9 +108,24 @@ export function canEditTaskInternal(user: SessionUser, task: TaskForPerm): boole
   return !!task.project.members?.some((m) => m.userId === user.id && m.role === 'LEAD');
 }
 
-/** View task: same as viewing the parent project. */
+/**
+ * View task. ADMIN and PM see everything. Project owner / LEAD also
+ * see every task in their project. For everyone else, the user must
+ * have a personal stake in this specific task: assignee, creator,
+ * co-assignee, watcher, or reviewer.
+ */
 export function canViewTask(user: SessionUser, task: TaskForPerm): boolean {
-  return canViewProject(user, task.project);
+  if (user.role === 'ADMIN' || user.role === 'PM') return true;
+  if (task.project.ownerId === user.id) return true;
+  if (task.project.members?.some((m) => m.userId === user.id && m.role === 'LEAD')) {
+    return true;
+  }
+  if (task.creatorId === user.id) return true;
+  if (task.assigneeId === user.id) return true;
+  if (task.reviewerId === user.id) return true;
+  if (task.assignments?.some((a) => a.userId === user.id)) return true;
+  if (task.watchers?.some((w) => w.userId === user.id)) return true;
+  return false;
 }
 
 /**

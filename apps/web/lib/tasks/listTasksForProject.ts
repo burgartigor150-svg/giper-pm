@@ -17,18 +17,64 @@ export async function listTasksForProject(
     },
   });
   if (!project) throw new DomainError('NOT_FOUND', 404);
-  if (!canViewProject(user, project)) throw new DomainError('INSUFFICIENT_PERMISSIONS', 403);
+  // Implicit-membership for Bitrix-mirror groups: user owns at least
+  // one task here. Without this, MEMBER would 403 on the list page
+  // even when they do have stake in the project.
+  const userTaskCount = await prisma.task.count({
+    where: {
+      projectId: project.id,
+      OR: [
+        { creatorId: user.id },
+        { assigneeId: user.id },
+        { reviewerId: user.id },
+        { assignments: { some: { userId: user.id } } },
+        { watchers: { some: { userId: user.id } } },
+      ],
+    },
+  });
+  if (
+    !canViewProject(user, {
+      ...project,
+      hasTaskForCurrentUser: userTaskCount > 0,
+    })
+  ) {
+    throw new DomainError('INSUFFICIENT_PERMISSIONS', 403);
+  }
+
+  // Per-task visibility: ADMIN/PM/owner/LEAD see everything; others only
+  // their own tasks (creator/assignee/reviewer/co-assignee/watcher).
+  const isPrivileged = user.role === 'ADMIN' || user.role === 'PM';
+  const isProjectLead =
+    project.ownerId === user.id ||
+    project.members.some((m) => m.userId === user.id && m.role === 'LEAD');
+  const visibilityClause: Prisma.TaskWhereInput | null =
+    isPrivileged || isProjectLead
+      ? null
+      : {
+          OR: [
+            { creatorId: user.id },
+            { assigneeId: user.id },
+            { reviewerId: user.id },
+            { assignments: { some: { userId: user.id } } },
+            { watchers: { some: { userId: user.id } } },
+          ],
+        };
 
   const where: Prisma.TaskWhereInput = { projectId: project.id };
+  const andClauses: Prisma.TaskWhereInput[] = [];
   if (filter.status) where.status = filter.status;
   if (filter.priority) where.priority = filter.priority;
   if (filter.assigneeId) where.assigneeId = filter.assigneeId;
   if (filter.q) {
-    where.OR = [
-      { title: { contains: filter.q, mode: 'insensitive' } },
-      { description: { contains: filter.q, mode: 'insensitive' } },
-    ];
+    andClauses.push({
+      OR: [
+        { title: { contains: filter.q, mode: 'insensitive' } },
+        { description: { contains: filter.q, mode: 'insensitive' } },
+      ],
+    });
   }
+  if (visibilityClause) andClauses.push(visibilityClause);
+  if (andClauses.length > 0) where.AND = andClauses;
 
   const orderBy: Prisma.TaskOrderByWithRelationInput =
     filter.sort === 'assignee'
