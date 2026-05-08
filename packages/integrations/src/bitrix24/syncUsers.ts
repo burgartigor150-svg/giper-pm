@@ -44,7 +44,12 @@ export async function syncUsers(
   client: Bitrix24Client,
   options: SyncUsersOptions = {},
 ): Promise<SyncUsersResult> {
-  const all: BxUser[] = await client.all<BxUser>('user.get', { ACTIVE: true });
+  // Pull ALL Bitrix users (including ACTIVE=false). We need former
+  // employees / extranet accounts as User rows so that historical
+  // task creator/assignee fields resolve to a real name in the UI —
+  // not a fallback admin. Their isActive in our DB stays false; only
+  // the dept-allowlist promotion (below) can ever flip it to true.
+  const all: BxUser[] = await client.all<BxUser>('user.get', {});
   const stats: SyncUsersResult = {
     totalSeen: all.length,
     matched: 0,
