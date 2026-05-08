@@ -81,25 +81,55 @@ export async function syncProjects(
 
   if (groups.length === 0) return stats;
 
-  // Find a stable owner.
+  // Fallback owner — used only when the workgroup has no OWNER_ID or
+  // its owner isn't in our system yet.
   const admin = await prisma.user.findFirst({
     where: { role: 'ADMIN', isActive: true },
     orderBy: { createdAt: 'asc' },
     select: { id: true },
   });
   if (!admin) {
-    // No admin to own incoming projects — sync would fail. Skip silently
-    // so the rest of the suite can still run; surface in logs upstream.
     return { ...stats, skipped: groups.length };
+  }
+
+  // Resolve every distinct workgroup OWNER_ID → our User.id in one
+  // round-trip so per-row creation doesn't N+1 the user table.
+  const ownerBitrixIds = Array.from(
+    new Set(groups.map((g) => g.OWNER_ID).filter((x): x is string => !!x)),
+  );
+  const ownerUsers = ownerBitrixIds.length
+    ? await prisma.user.findMany({
+        where: { bitrixUserId: { in: ownerBitrixIds } },
+        select: { id: true, bitrixUserId: true },
+      })
+    : [];
+  const ownerByBitrixId = new Map(
+    ownerUsers
+      .filter((u): u is typeof u & { bitrixUserId: string } => !!u.bitrixUserId)
+      .map((u) => [u.bitrixUserId, u.id]),
+  );
+  function resolveOwner(g: BxWorkgroup): string {
+    if (g.OWNER_ID) {
+      const id = ownerByBitrixId.get(g.OWNER_ID);
+      if (id) return id;
+    }
+    return admin!.id;
   }
 
   for (const g of groups) {
     const externalId = String(g.ID);
+    const desiredOwnerId = resolveOwner(g);
     const existing = await prisma.project.findUnique({
       where: {
         externalSource_externalId: { externalSource: 'bitrix24', externalId },
       },
-      select: { id: true, name: true, description: true, status: true },
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        status: true,
+        ownerId: true,
+      },
     });
 
     if (existing) {
@@ -107,10 +137,16 @@ export async function syncProjects(
       const newDesc = g.DESCRIPTION?.slice(0, 2000) ?? null;
       const isClosed = g.CLOSED === 'Y' || g.ACTIVE === 'N';
       const newStatus = isClosed ? 'ARCHIVED' : 'ACTIVE';
+      // Repair ownerId if it's currently the fallback admin and we now
+      // have a real owner mapping (typical after the user backfills
+      // bitrixUserId on more accounts).
+      const ownerNeedsFix =
+        existing.ownerId === admin.id && desiredOwnerId !== admin.id;
       if (
         existing.name !== newName ||
         existing.description !== newDesc ||
-        existing.status !== newStatus
+        existing.status !== newStatus ||
+        ownerNeedsFix
       ) {
         await prisma.project.update({
           where: { id: existing.id },
@@ -119,6 +155,7 @@ export async function syncProjects(
             description: newDesc,
             status: newStatus,
             archivedAt: isClosed ? new Date() : null,
+            ...(ownerNeedsFix ? { ownerId: desiredOwnerId } : {}),
           },
         });
         stats.updated++;
@@ -134,12 +171,14 @@ export async function syncProjects(
         key,
         name: g.NAME.slice(0, 80),
         description: g.DESCRIPTION?.slice(0, 2000) ?? null,
-        ownerId: admin.id,
+        ownerId: desiredOwnerId,
         externalSource: 'bitrix24',
         externalId,
         status: g.CLOSED === 'Y' ? 'ARCHIVED' : 'ACTIVE',
         members: {
-          create: { userId: admin.id, role: 'LEAD' },
+          // Mirror the upstream owner as LEAD so they show up in the
+          // members list straight away.
+          create: { userId: desiredOwnerId, role: 'LEAD' },
         },
       },
     });
