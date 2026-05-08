@@ -102,6 +102,40 @@ export default async function TaskDetailPage({ params }: { params: Params }) {
     : [];
   const actorById = new Map(referenced.map((u) => [u.id, u]));
 
+  // Resolve the REAL upstream Bitrix24 creator/assignee for the read-only
+  // mirror panel. We always look them up by `bitrixUserId`, never by
+  // local `creatorId`/`assigneeId` — those can hold a fallback admin
+  // when the upstream user wasn't linked yet at sync time.
+  const bitrixActorBxIds = [
+    task.bitrixCreatedById,
+    task.bitrixResponsibleId,
+  ].filter((x): x is string => !!x);
+  const bitrixActorRows = bitrixActorBxIds.length
+    ? await prisma.user.findMany({
+        where: { bitrixUserId: { in: bitrixActorBxIds } },
+        select: { id: true, name: true, image: true, bitrixUserId: true },
+      })
+    : [];
+  const bitrixActorByBxId = new Map(
+    bitrixActorRows
+      .filter((u): u is typeof u & { bitrixUserId: string } => !!u.bitrixUserId)
+      .map((u) => [u.bitrixUserId, { id: u.id, name: u.name, image: u.image }]),
+  );
+  const bitrixCreatorPerson = task.bitrixCreatedById
+    ? bitrixActorByBxId.get(task.bitrixCreatedById) ?? {
+        id: `bx:${task.bitrixCreatedById}`,
+        name: `Bitrix #${task.bitrixCreatedById}`,
+        image: null,
+      }
+    : task.creator;
+  const bitrixAssigneePerson = task.bitrixResponsibleId
+    ? bitrixActorByBxId.get(task.bitrixResponsibleId) ?? {
+        id: `bx:${task.bitrixResponsibleId}`,
+        name: `Bitrix #${task.bitrixResponsibleId}`,
+        image: null,
+      }
+    : task.assignee;
+
   // Two edit gates:
   //   - canEditMirror: strict — required to write title/description and
   //     to mutate the Bitrix-mirror status. Returns false on any task
@@ -483,9 +517,9 @@ export default async function TaskDetailPage({ params }: { params: Params }) {
           {task.externalSource === 'bitrix24' ? (
             <BitrixMirrorPanel
               status={task.status}
-              assignee={task.assignee}
+              assignee={bitrixAssigneePerson}
               description={task.description}
-              creator={task.creator}
+              creator={bitrixCreatorPerson}
               priority={task.priority}
               dueDate={task.dueDate}
               startedAt={task.startedAt}

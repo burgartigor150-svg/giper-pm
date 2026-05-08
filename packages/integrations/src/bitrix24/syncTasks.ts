@@ -212,9 +212,13 @@ async function upsertOne(
   const assigneeId = mapped.bitrixResponsibleId
     ? userByBitrixId.get(mapped.bitrixResponsibleId) ?? null
     : null;
-  const creatorId =
-    (mapped.bitrixCreatedById ? userByBitrixId.get(mapped.bitrixCreatedById) : null) ??
-    fallbackCreator;
+  // Resolved local creator from upstream CREATED_BY, or null if we don't
+  // have a matching User row (yet). We use this both for the initial
+  // create AND for re-resolving stale fallback-admin creators on update.
+  const upstreamCreatorId = mapped.bitrixCreatedById
+    ? userByBitrixId.get(mapped.bitrixCreatedById) ?? null
+    : null;
+  const creatorId = upstreamCreatorId ?? fallbackCreator;
   if (!creatorId) {
     stats.errors++;
     return null;
@@ -232,10 +236,19 @@ async function upsertOne(
       completedAt: true,
       assigneeId: true,
       description: true,
+      creatorId: true,
+      bitrixCreatedById: true,
+      bitrixResponsibleId: true,
     },
   });
 
   if (found) {
+    // Re-resolve creator: if upstream maps to a real user that's
+    // different from what we have on the row, prefer upstream. This
+    // self-heals tasks that were imported before their creator's User
+    // row was synced (and got the fallback admin written in).
+    const creatorChanged =
+      upstreamCreatorId != null && upstreamCreatorId !== found.creatorId;
     const dirty =
       found.title !== mapped.title ||
       found.status !== mapped.status ||
@@ -244,7 +257,10 @@ async function upsertOne(
       !sameDate(found.completedAt, mapped.completedAt) ||
       !sameDate(found.startedAt, mapped.startedAt) ||
       (found.description ?? null) !== (mapped.description ?? null) ||
-      (found.assigneeId ?? null) !== (assigneeId ?? null);
+      (found.assigneeId ?? null) !== (assigneeId ?? null) ||
+      (found.bitrixCreatedById ?? null) !== (mapped.bitrixCreatedById ?? null) ||
+      (found.bitrixResponsibleId ?? null) !== (mapped.bitrixResponsibleId ?? null) ||
+      creatorChanged;
     if (dirty) {
       await prisma.task.update({
         where: { id: found.id },
@@ -258,6 +274,9 @@ async function upsertOne(
           completedAt: mapped.completedAt,
           assigneeId,
           tags: mapped.tags,
+          bitrixCreatedById: mapped.bitrixCreatedById ?? null,
+          bitrixResponsibleId: mapped.bitrixResponsibleId ?? null,
+          ...(creatorChanged ? { creatorId: upstreamCreatorId! } : {}),
         },
       });
       stats.updated++;
@@ -288,6 +307,8 @@ async function upsertOne(
       externalSource: 'bitrix24',
       externalId: mapped.externalId,
       tags: mapped.tags,
+      bitrixCreatedById: mapped.bitrixCreatedById ?? null,
+      bitrixResponsibleId: mapped.bitrixResponsibleId ?? null,
     },
     select: { id: true },
   });

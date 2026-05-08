@@ -32,6 +32,8 @@ export async function getTask(projectKey: string, number: number, user: SessionU
       externalSource: true,
       bitrixSyncedAt: true,
       syncConflict: true,
+      bitrixCreatedById: true,
+      bitrixResponsibleId: true,
       reviewerId: true,
       parentId: true,
       internalStatus: true,

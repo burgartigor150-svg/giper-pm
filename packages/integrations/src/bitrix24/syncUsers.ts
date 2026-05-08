@@ -60,12 +60,20 @@ export async function syncUsers(
   }
 
   for (const u of all) {
-    if (!u.EMAIL) continue;
-    const email = u.EMAIL.trim().toLowerCase();
-    const existing = await prisma.user.findUnique({
-      where: { email },
+    if (!u.ID) continue;
+
+    const fullName = [u.NAME, u.LAST_NAME].filter(Boolean).join(' ').trim();
+    const autoActive = shouldAutoActivate(u);
+    const realEmail = u.EMAIL?.trim().toLowerCase() || '';
+
+    // Step 1: try to find an existing local row by bitrixUserId. This
+    // is the durable link — once set on a previous run, email changes
+    // upstream don't break the match.
+    let existing = await prisma.user.findFirst({
+      where: { bitrixUserId: u.ID },
       select: {
         id: true,
+        email: true,
         name: true,
         image: true,
         timezone: true,
@@ -74,19 +82,43 @@ export async function syncUsers(
       },
     });
 
-    const fullName = [u.NAME, u.LAST_NAME].filter(Boolean).join(' ').trim();
-    const autoActive = shouldAutoActivate(u);
+    // Step 2: fallback — first-time linkage by email. Only if the
+    // upstream user actually has one.
+    if (!existing && realEmail) {
+      const byEmail = await prisma.user.findUnique({
+        where: { email: realEmail },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          image: true,
+          timezone: true,
+          bitrixUserId: true,
+          isActive: true,
+        },
+      });
+      if (byEmail) existing = byEmail;
+    }
 
     if (!existing) {
       if (!options.createMissing) continue;
+      // Synthesize a unique placeholder email for users without one
+      // (system bots, deactivated accounts, external contractors).
+      // Stable per Bitrix id so re-runs are idempotent. The
+      // @bitrix.local TLD makes it obvious in the admin UI that this
+      // is a stub — and won't ever clash with a real corporate email.
+      const email = realEmail || `bitrix-${u.ID}@bitrix.local`;
+      const nameSeed = fullName || (realEmail ? realEmail.split('@')[0] : `Bitrix #${u.ID}`);
       await prisma.user.create({
         data: {
           email,
-          name: (fullName || email.split('@')[0] || email).slice(0, 80),
+          name: nameSeed.slice(0, 80),
           role: 'MEMBER',
           // Active immediately if their dept is in the allowlist; else
           // inactive stub (resolves as comment author but can't log in).
-          isActive: autoActive,
+          // Synthetic-email stubs always start inactive — they're
+          // present only so creator/assignee can be displayed.
+          isActive: autoActive && !!realEmail,
           bitrixUserId: u.ID,
           image: u.PERSONAL_PHOTO ?? null,
           avatarUrl: u.PERSONAL_PHOTO ?? null,

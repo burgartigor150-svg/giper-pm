@@ -366,6 +366,13 @@ model Task {
   bitrixSyncedHash String?
   syncConflict     Boolean   @default(false)
 
+  // Upstream Bitrix24 actor ids — preserved verbatim so the read-only
+  // mirror panel can always render the real upstream creator/assignee,
+  // even when the matching local User row hasn't been resolved yet
+  // (e.g. Bitrix users without an EMAIL that syncUsers used to skip).
+  bitrixCreatedById   String?
+  bitrixResponsibleId String?
+
   // Internal track — independent from the Bitrix-mirror status above.
   // The mirrored `status` reflects what the client sees in Bitrix; the
   // internal track is what our team uses day-to-day. Defaults match
