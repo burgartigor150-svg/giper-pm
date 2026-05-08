@@ -8,6 +8,7 @@ import {
   fanoutToTaskAudience,
 } from '@/lib/notifications/createNotifications';
 import { autoUnblockDependents } from '@/lib/tasks/autoTransitions';
+import { canManageAssignments } from '@/lib/permissions';
 
 type ActionResult<T = unknown> =
   | { ok: true; data?: T }
@@ -59,20 +60,12 @@ export async function addTaskAssignmentAction(
     },
   });
   if (!task) return { ok: false, error: { code: 'NOT_FOUND', message: 'Не найдено' } };
-  // Multi-assignment is *internal* — we explicitly allow editing it
-  // even on Bitrix-mirrored tasks (the whole point: Bitrix sees one
-  // assignee, our team sees the real makeup).
-  const allow =
-    me.role === 'ADMIN' ||
-    me.role === 'PM' ||
-    task.creatorId === me.id ||
-    task.assigneeId === me.id ||
-    task.project.ownerId === me.id ||
-    task.project.members.some((m) => m.userId === me.id && m.role === 'LEAD');
-  if (!allow) {
+  // Resource management is a PM concern. Regular contributors (incl.
+  // creator/assignee) cannot put other people on a task.
+  if (!canManageAssignments({ id: me.id, role: me.role }, task.project)) {
     return {
       ok: false,
-      error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' },
+      error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Только PM/лид может назначать соисполнителей' },
     };
   }
 
@@ -143,17 +136,10 @@ export async function removeTaskAssignmentAction(
     },
   });
   if (!a) return { ok: false, error: { code: 'NOT_FOUND', message: 'Не найдено' } };
-  const allow =
-    me.role === 'ADMIN' ||
-    me.role === 'PM' ||
-    a.task.creatorId === me.id ||
-    a.task.assigneeId === me.id ||
-    a.task.project.ownerId === me.id ||
-    a.task.project.members.some((m) => m.userId === me.id && m.role === 'LEAD');
-  if (!allow) {
+  if (!canManageAssignments({ id: me.id, role: me.role }, a.task.project)) {
     return {
       ok: false,
-      error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' },
+      error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Только PM/лид может снимать соисполнителей' },
     };
   }
   await prisma.taskAssignment.delete({ where: { id: assignmentId } });

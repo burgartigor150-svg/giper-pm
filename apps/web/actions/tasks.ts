@@ -34,7 +34,7 @@ import {
 import { autoUnblockDependents } from '@/lib/tasks/autoTransitions';
 import { extractValidMentions } from '@/lib/notifications/parseMentions';
 import { publishTaskEvent } from '@/lib/realtime/publishTask';
-import { canEditTaskInternal } from '@/lib/permissions';
+import { canEditTaskInternal, canManageAssignments } from '@/lib/permissions';
 
 export type ActionResult<T = unknown> =
   | { ok: true; data?: T }
@@ -648,13 +648,15 @@ export async function setReviewerAction(
   if (!task) return { ok: false, error: { code: 'NOT_FOUND', message: 'Не найдено' } };
   const isCurrentReviewerClearing =
     reviewerId === null && task.reviewerId === me.id;
-  // Reviewer is an internal-track concept — fine to set on Bitrix-
-  // mirrored tasks too.
-  const canEdit = canEditTaskInternal({ id: me.id, role: me.role }, task);
-  if (!canEdit && !isCurrentReviewerClearing) {
+  // Reviewer assignment is a resource decision — PM/lead/owner. The
+  // sitting reviewer can step down on their own (clear-to-null).
+  if (
+    !canManageAssignments({ id: me.id, role: me.role }, task.project) &&
+    !isCurrentReviewerClearing
+  ) {
     return {
       ok: false,
-      error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' },
+      error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Только PM/лид может назначить ревьюера' },
     };
   }
 

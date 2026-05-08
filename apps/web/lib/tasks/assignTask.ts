@@ -1,6 +1,6 @@
 import { prisma } from '@giper/db';
 import { DomainError } from '../errors';
-import { canEditTask, type SessionUser } from '../permissions';
+import { canManageAssignments, type SessionUser } from '../permissions';
 import { auditTask } from '../audit';
 
 export async function assignTask(
@@ -24,14 +24,22 @@ export async function assignTask(
     },
   });
   if (!task) throw new DomainError('NOT_FOUND', 404);
-  if (!canEditTask(user, task)) throw new DomainError('INSUFFICIENT_PERMISSIONS', 403);
+  // Resource management belongs to PM/lead/owner — regular contributors
+  // can edit their own tasks but not reassign work.
+  if (!canManageAssignments(user, task.project)) {
+    throw new DomainError('INSUFFICIENT_PERMISSIONS', 403);
+  }
 
   if (assigneeId) {
-    const isMember =
-      assigneeId === task.project.ownerId ||
-      task.project.members.some((m) => m.userId === assigneeId);
-    if (!isMember) {
-      throw new DomainError('VALIDATION', 400, 'Нельзя назначить не-участника');
+    // Confirm the user actually exists; we no longer require formal
+    // project membership because Bitrix-mirror groups have no member
+    // rows for our users.
+    const exists = await prisma.user.findUnique({
+      where: { id: assigneeId },
+      select: { id: true },
+    });
+    if (!exists) {
+      throw new DomainError('VALIDATION', 400, 'Пользователь не найден');
     }
   }
 

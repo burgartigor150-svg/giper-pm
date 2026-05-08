@@ -53,6 +53,23 @@ export function canEditProject(user: SessionUser, project: ProjectForPerm): bool
 }
 
 /**
+ * Decide who staffs a task: change assignee, add/remove co-assignees,
+ * pick a reviewer. Resource management is a PM concern — regular
+ * MEMBERs can comment, watch, and edit their own tasks but they
+ * shouldn't be able to reassign work to others.
+ *
+ * Allowed: ADMIN, PM (global), project owner, project LEAD.
+ */
+export function canManageAssignments(
+  user: SessionUser,
+  project: ProjectForPerm,
+): boolean {
+  if (user.role === 'ADMIN' || user.role === 'PM') return true;
+  if (project.ownerId === user.id) return true;
+  return !!project.members?.some((m) => m.userId === user.id && m.role === 'LEAD');
+}
+
+/**
  * View project: visibility is per-stake for EVERYONE (incl. ADMIN/PM).
  * A user must be the owner, an explicit member, OR own at least one
  * task in the project (the last leg covers Bitrix-mirror groups

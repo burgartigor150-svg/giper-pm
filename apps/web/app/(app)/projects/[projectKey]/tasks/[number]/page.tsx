@@ -5,7 +5,12 @@ import { prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
 import { getTask } from '@/lib/tasks';
 import { getActiveTimer, getTaskSpentMinutes } from '@/lib/time';
-import { canDeleteTask, canEditTask, canEditTaskInternal } from '@/lib/permissions';
+import {
+  canDeleteTask,
+  canEditTask,
+  canEditTaskInternal,
+  canManageAssignments,
+} from '@/lib/permissions';
 import { DomainError } from '@/lib/errors';
 import { getT } from '@/lib/i18n';
 import { InlineTitle } from '@/components/domain/InlineTitle';
@@ -120,6 +125,13 @@ export default async function TaskDetailPage({ params }: { params: Params }) {
       assigneeId: task.assigneeId,
       project: { ownerId: task.project.ownerId, members: task.project.members },
     },
+  );
+  // Resource management: only PM/lead/owner can change reviewer or
+  // co-assignees. Regular contributors can edit task content but not
+  // staff it.
+  const canManage = canManageAssignments(
+    { id: me.id, role: me.role },
+    { ownerId: task.project.ownerId, members: task.project.members },
   );
   const canDelete = canDeleteTask(
     { id: me.id, role: me.role },
@@ -487,6 +499,7 @@ export default async function TaskDetailPage({ params }: { params: Params }) {
                 tags={task.tags}
                 members={members}
                 canEdit={canEdit}
+                canManage={canManage}
                 creator={task.creator}
                 startedAt={task.startedAt}
                 completedAt={task.completedAt}

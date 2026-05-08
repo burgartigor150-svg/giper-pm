@@ -74,6 +74,12 @@ type Props = {
   tags: string[];
   members: Member[];
   canEdit: boolean;
+  /**
+   * Distinct from canEdit: only PM/lead/owner may staff a task —
+   * change reviewer, add/remove co-assignees. Regular contributors
+   * (incl. the assignee) cannot reassign work to others.
+   */
+  canManage: boolean;
   creator: { id: string; name: string; image: string | null };
   startedAt: Date | string | null;
   completedAt: Date | string | null;
@@ -159,7 +165,7 @@ export function TaskSidebar(props: Props) {
           taskNumber={props.taskNumber}
           assignments={props.assignments}
           members={props.members}
-          canEdit={props.canEdit}
+          canEdit={props.canManage}
           onChanged={() => flash('assignments')}
         />
       </Field>
@@ -168,7 +174,7 @@ export function TaskSidebar(props: Props) {
         <UserPicker
           value={props.reviewer ?? null}
           preload={props.members}
-          disabled={!props.canEdit || pending}
+          disabled={!props.canManage || pending}
           placeholder="— без ревьюера —"
           onPick={(user) => {
             startTransition(async () => {
