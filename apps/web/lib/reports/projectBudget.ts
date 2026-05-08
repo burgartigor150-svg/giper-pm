@@ -44,8 +44,10 @@ export async function getProjectBudgetReport(
   const estimatedHours = Number(taskAgg._sum.estimateHours ?? 0);
 
   // Total spent — sum of TimeEntry durations for any task in the project.
-  const totalSpentRows = await prisma.$queryRaw<Array<{ minutes: bigint }>>`
-    SELECT COALESCE(SUM(EXTRACT(EPOCH FROM ("endedAt" - "startedAt")) / 60), 0)::bigint AS minutes
+  // Cast to double so the row carries a JS-native number (raw bigint
+  // serialises poorly through RSC).
+  const totalSpentRows = await prisma.$queryRaw<Array<{ minutes: number | null }>>`
+    SELECT COALESCE(SUM(EXTRACT(EPOCH FROM ("endedAt" - "startedAt")) / 60), 0)::float8 AS minutes
     FROM "TimeEntry" te
     JOIN "Task" t ON t.id = te."taskId"
     WHERE t."projectId" = ${projectId} AND te."endedAt" IS NOT NULL
@@ -55,8 +57,8 @@ export async function getProjectBudgetReport(
 
   // Velocity: hours/day over the trailing window.
   const since = new Date(Date.now() - VELOCITY_WINDOW_DAYS * 24 * 3600_000);
-  const recentRows = await prisma.$queryRaw<Array<{ minutes: bigint }>>`
-    SELECT COALESCE(SUM(EXTRACT(EPOCH FROM ("endedAt" - "startedAt")) / 60), 0)::bigint AS minutes
+  const recentRows = await prisma.$queryRaw<Array<{ minutes: number | null }>>`
+    SELECT COALESCE(SUM(EXTRACT(EPOCH FROM ("endedAt" - "startedAt")) / 60), 0)::float8 AS minutes
     FROM "TimeEntry" te
     JOIN "Task" t ON t.id = te."taskId"
     WHERE t."projectId" = ${projectId}
