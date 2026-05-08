@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LayoutDashboard, FolderKanban, Clock, BarChart3, Settings, Users, User, MessageSquare, X } from 'lucide-react';
+import { LayoutDashboard, FolderKanban, Clock, BarChart3, Settings, Users, User, MessageSquare, Calendar, X } from 'lucide-react';
 import { cn } from '@giper/ui/cn';
 import { Button } from '@giper/ui/components/Button';
 import { useT } from '@/lib/useT';
@@ -13,6 +13,7 @@ export type NavKey =
   | 'me'
   | 'projects'
   | 'time'
+  | 'calendar'
   | 'team'
   | 'messages'
   | 'reports'
@@ -28,6 +29,7 @@ const ICONS: Record<NavKey, React.ComponentType<{ className?: string }>> = {
   me: User,
   projects: FolderKanban,
   time: Clock,
+  calendar: Calendar,
   team: Users,
   messages: MessageSquare,
   reports: BarChart3,

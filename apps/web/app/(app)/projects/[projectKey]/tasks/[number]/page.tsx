@@ -29,6 +29,7 @@ import { PresenceBar } from '@/components/domain/PresenceBar';
 import { SubtaskList } from '@/components/domain/SubtaskList';
 import { Checklists } from '@/components/domain/Checklists';
 import { SendToReviewCTA } from '@/components/domain/SendToReviewCTA';
+import { ReviewerActions } from '@/components/domain/ReviewerActions';
 import { TaskGraph } from '@/components/domain/TaskGraph';
 import { getTaskGraph } from '@/lib/tasks/getTaskGraph';
 import { Dependencies } from '@/components/domain/Dependencies';
@@ -359,6 +360,17 @@ export default async function TaskDetailPage({ params }: { params: Params }) {
                     checklists={task.checklists}
                   />
                 ) : null}
+                <ReviewerActions
+                  taskId={task.id}
+                  projectKey={task.project.key}
+                  taskNumber={task.number}
+                  canReview={
+                    me.role === 'ADMIN' ||
+                    me.role === 'PM' ||
+                    task.reviewerId === me.id
+                  }
+                  internalStatus={task.internalStatus}
+                />
               </CardContent>
             </Card>
           ) : null}

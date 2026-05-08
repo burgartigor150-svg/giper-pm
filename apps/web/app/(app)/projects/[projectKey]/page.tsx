@@ -13,6 +13,8 @@ import { StatusBadge } from '@/components/domain/StatusBadge';
 import { TaskStatusBadge } from '@/components/domain/TaskStatusBadge';
 import { listRecentTasksForProject } from '@/lib/tasks';
 import { ProjectMembersEditor } from '@/components/domain/ProjectMembersEditor';
+import { ProjectBudgetCard } from '@/components/domain/ProjectBudgetCard';
+import { getProjectBudgetReport } from '@/lib/reports/projectBudget';
 
 export default async function ProjectOverviewPage({
   params,
@@ -42,7 +44,10 @@ export default async function ProjectOverviewPage({
     { ownerId: project.ownerId, members: project.members },
   );
 
-  const recent = await listRecentTasksForProject(project.id, 5);
+  const [recent, budgetReport] = await Promise.all([
+    listRecentTasksForProject(project.id, 5),
+    getProjectBudgetReport(project.id),
+  ]);
 
   return (
     <div className="mx-auto max-w-5xl space-y-4">
@@ -113,6 +118,8 @@ export default async function ProjectOverviewPage({
             ) : null}
           </CardContent>
         </Card>
+
+        {budgetReport ? <ProjectBudgetCard report={budgetReport} /> : null}
 
         <Card>
           <CardHeader>

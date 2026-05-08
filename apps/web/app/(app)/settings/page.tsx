@@ -39,6 +39,16 @@ export default async function SettingsPage() {
               </Link>
             </CardContent>
           </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle>Audit log</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Link href="/settings/audit" className="text-sm underline">
+                История действий →
+              </Link>
+            </CardContent>
+          </Card>
         </>
       ) : null}
     </div>

@@ -12,6 +12,7 @@ function buildNav(user: SessionUser): NavItem[] {
     { key: 'dashboard', href: '/dashboard' },
     { key: 'me', href: '/me' },
     { key: 'projects', href: '/projects' },
+    { key: 'calendar', href: '/calendar' },
     { key: 'time', href: '/time' },
     { key: 'messages', href: '/messages' },
   ];
