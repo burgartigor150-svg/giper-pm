@@ -131,10 +131,18 @@ export async function syncUsers(
 
     stats.matched++;
 
+    // "Looks auto-named" — the local name is empty, equals the email,
+    // or equals the local-part of the email. We use existing.email here
+    // (not realEmail) because for users matched by bitrixUserId the
+    // upstream email may have changed and we want to detect old auto-
+    // names against whatever email they were originally created with.
+    const localEmail = existing.email ?? '';
+    const localPart = localEmail.includes('@') ? localEmail.split('@')[0]! : localEmail;
     const looksAutoNamed =
       !existing.name ||
-      existing.name === email ||
-      existing.name === email.split('@')[0];
+      existing.name === localEmail ||
+      existing.name === localPart ||
+      existing.name.startsWith('Bitrix #');
 
     const updates: Record<string, unknown> = {};
     if (existing.bitrixUserId !== u.ID) updates.bitrixUserId = u.ID;
