@@ -67,15 +67,14 @@ export async function listTasksForBoard(
     internalStatus: { not: 'CANCELED' },
   };
 
-  // Per-task visibility: ADMIN/PM see everything; project owner / LEAD
-  // see every task in their project; everyone else sees only tasks
-  // they have a personal stake in. Implemented as an OR-array on the
-  // BD where so we don't ship task rows we'll have to drop in JS.
-  const isPrivileged = user.role === 'ADMIN' || user.role === 'PM';
+  // Per-task visibility: project owner / LEAD see every task in their
+  // project; everyone else (incl. ADMIN/PM) sees only tasks they have
+  // a personal stake in. Implemented as an OR-array on the SQL where
+  // so we don't ship task rows just to filter in JS.
   const isProjectLead =
     project.ownerId === user.id ||
     project.members.some((m) => m.userId === user.id && m.role === 'LEAD');
-  if (!isPrivileged && !isProjectLead) {
+  if (!isProjectLead) {
     where.OR = [
       { creatorId: user.id },
       { assigneeId: user.id },

@@ -27,19 +27,18 @@ export async function getDeadlinesInRange(
   to: Date,
   user: SessionUser,
 ): Promise<DeadlineItem[]> {
-  const isPrivileged = user.role === 'ADMIN' || user.role === 'PM';
   const where: Parameters<typeof prisma.task.findMany>[0]['where'] = {
     dueDate: { gte: from, lt: to },
-  };
-  if (!isPrivileged) {
-    where.OR = [
+    // Always per-stake — ADMIN/PM no longer see the org-wide calendar
+    // by default. To browse cross-org, use settings.
+    OR: [
       { creatorId: user.id },
       { assigneeId: user.id },
       { reviewerId: user.id },
       { assignments: { some: { userId: user.id } } },
       { watchers: { some: { userId: user.id } } },
-    ];
-  }
+    ],
+  };
   const rows = await prisma.task.findMany({
     where,
     orderBy: [{ dueDate: 'asc' }, { priority: 'desc' }],

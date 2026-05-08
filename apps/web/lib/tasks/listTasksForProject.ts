@@ -41,24 +41,23 @@ export async function listTasksForProject(
     throw new DomainError('INSUFFICIENT_PERMISSIONS', 403);
   }
 
-  // Per-task visibility: ADMIN/PM/owner/LEAD see everything; others only
-  // their own tasks (creator/assignee/reviewer/co-assignee/watcher).
-  const isPrivileged = user.role === 'ADMIN' || user.role === 'PM';
+  // Per-task visibility: project owner / LEAD see everything in their
+  // project; everyone else (incl. ADMIN/PM) sees only their own tasks
+  // (creator/assignee/reviewer/co-assignee/watcher).
   const isProjectLead =
     project.ownerId === user.id ||
     project.members.some((m) => m.userId === user.id && m.role === 'LEAD');
-  const visibilityClause: Prisma.TaskWhereInput | null =
-    isPrivileged || isProjectLead
-      ? null
-      : {
-          OR: [
-            { creatorId: user.id },
-            { assigneeId: user.id },
-            { reviewerId: user.id },
-            { assignments: { some: { userId: user.id } } },
-            { watchers: { some: { userId: user.id } } },
-          ],
-        };
+  const visibilityClause: Prisma.TaskWhereInput | null = isProjectLead
+    ? null
+    : {
+        OR: [
+          { creatorId: user.id },
+          { assigneeId: user.id },
+          { reviewerId: user.id },
+          { assignments: { some: { userId: user.id } } },
+          { watchers: { some: { userId: user.id } } },
+        ],
+      };
 
   const where: Prisma.TaskWhereInput = { projectId: project.id };
   const andClauses: Prisma.TaskWhereInput[] = [];

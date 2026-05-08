@@ -53,13 +53,15 @@ export function canEditProject(user: SessionUser, project: ProjectForPerm): bool
 }
 
 /**
- * View project: ADMIN/PM see all; MEMBER/VIEWER see projects they own,
- * are a member of, OR have a task in (assignee/creator/accomplice).
- * The last leg covers Bitrix-mirror groups where members are tracked
- * implicitly via task ownership.
+ * View project: visibility is per-stake for EVERYONE (incl. ADMIN/PM).
+ * A user must be the owner, an explicit member, OR own at least one
+ * task in the project (the last leg covers Bitrix-mirror groups
+ * where membership lives in task assignments rather than ProjectMember).
+ *
+ * Admin-grade access (audit log, user management, global settings)
+ * goes through `canSeeSettings` and friends — not here.
  */
 export function canViewProject(user: SessionUser, project: ProjectForPerm): boolean {
-  if (user.role === 'ADMIN' || user.role === 'PM') return true;
   if (project.ownerId === user.id) return true;
   if (project.members?.some((m) => m.userId === user.id)) return true;
   if (project.hasTaskForCurrentUser) return true;
@@ -109,13 +111,12 @@ export function canEditTaskInternal(user: SessionUser, task: TaskForPerm): boole
 }
 
 /**
- * View task. ADMIN and PM see everything. Project owner / LEAD also
- * see every task in their project. For everyone else, the user must
- * have a personal stake in this specific task: assignee, creator,
- * co-assignee, watcher, or reviewer.
+ * View task. Per-stake visibility for EVERYONE: even ADMIN/PM see only
+ * tasks where they personally are owner/LEAD of the project, creator,
+ * assignee, reviewer, co-assignee, or watcher. Cross-org browsing is
+ * a separate concern (audit log, settings).
  */
 export function canViewTask(user: SessionUser, task: TaskForPerm): boolean {
-  if (user.role === 'ADMIN' || user.role === 'PM') return true;
   if (task.project.ownerId === user.id) return true;
   if (task.project.members?.some((m) => m.userId === user.id && m.role === 'LEAD')) {
     return true;

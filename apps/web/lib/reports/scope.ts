@@ -3,41 +3,48 @@ import type { SessionUser } from '../permissions';
 
 /**
  * Translate a (viewer, filter) pair into Prisma WHERE fragments. Server-side
- * enforcement: regular users cannot pull other people's time data even by
- * crafting a URL — we silently coerce userId back to themselves.
+ * enforcement: users can only pull data from projects they participate
+ * in, and only for themselves — even crafting a URL doesn't bypass it.
  *
- * Project scoping: ADMIN/PM see everything; everyone else sees only
- * projects they own or are a member of. The frontend filter dropdown
- * sends `projectKey`; we resolve to projectId once and reuse it for
- * every section's query.
+ * Visibility is per-stake for everyone (incl. ADMIN/PM): owner, member,
+ * or any task ownership.
  */
 export type ScopedQuery = {
-  /** Effective userId filter, or null = all visible users. */
+  /** Effective userId filter — always set to the viewer for now. */
   userId: string | null;
   /** Effective projectId filter, or null = all visible projects. */
   projectId: string | null;
   /** Project IDs the viewer is allowed to see (used as outer guard). */
   visibleProjectIds: string[];
   /** Set of user IDs whose data the viewer is allowed to see. */
-  visibleUserIds: Set<string> | null; // null = no restriction (ADMIN/PM)
+  visibleUserIds: Set<string> | null;
 };
 
 export async function resolveScope(
   viewer: SessionUser,
   filter: { projectKey?: string; userId?: string },
 ): Promise<ScopedQuery> {
-  const isPrivileged = viewer.role === 'ADMIN' || viewer.role === 'PM';
-
-  // Project visibility.
+  // Per-stake project visibility — same rule as listProjectsForUser.
   const projects = await prisma.project.findMany({
-    where: isPrivileged
-      ? {}
-      : {
-          OR: [
-            { ownerId: viewer.id },
-            { members: { some: { userId: viewer.id } } },
-          ],
+    where: {
+      OR: [
+        { ownerId: viewer.id },
+        { members: { some: { userId: viewer.id } } },
+        {
+          tasks: {
+            some: {
+              OR: [
+                { creatorId: viewer.id },
+                { assigneeId: viewer.id },
+                { reviewerId: viewer.id },
+                { assignments: { some: { userId: viewer.id } } },
+                { watchers: { some: { userId: viewer.id } } },
+              ],
+            },
+          },
         },
+      ],
+    },
     select: { id: true, key: true, members: { select: { userId: true } } },
   });
   const visibleProjectIds = projects.map((p) => p.id);
@@ -47,17 +54,11 @@ export async function resolveScope(
     projectId = p?.id ?? null;
   }
 
-  // User visibility. Privileged users can see anyone; everyone else only
-  // sees themselves regardless of what was requested.
-  let userId: string | null;
-  let visibleUserIds: Set<string> | null;
-  if (isPrivileged) {
-    userId = filter.userId || null;
-    visibleUserIds = null;
-  } else {
-    userId = viewer.id;
-    visibleUserIds = new Set([viewer.id]);
-  }
-
-  return { userId, projectId, visibleProjectIds, visibleUserIds };
+  // Reports show the viewer's own data only — no cross-user lookup.
+  return {
+    userId: viewer.id,
+    projectId,
+    visibleProjectIds,
+    visibleUserIds: new Set([viewer.id]),
+  };
 }

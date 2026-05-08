@@ -14,29 +14,26 @@ export type ListFilter = {
 export async function listProjectsForUser(user: SessionUser, filter: ListFilter = {}) {
   const where: Prisma.ProjectWhereInput = {};
 
-  // Visibility scope
-  const wantsAll = filter.scope === 'all';
-  const canSeeAll = (user.role === 'ADMIN' || user.role === 'PM') && wantsAll;
-  if (!canSeeAll) {
-    // Owner + explicit member + ANY task where the user is creator,
-    // assignee, or co-assignee (Bitrix-mirror projects rely on this
-    // last leg because they don't carry ProjectMember rows).
-    where.OR = [
-      { ownerId: user.id },
-      { members: { some: { userId: user.id } } },
-      {
-        tasks: {
-          some: {
-            OR: [
-              { creatorId: user.id },
-              { assigneeId: user.id },
-              { assignments: { some: { userId: user.id } } },
-            ],
-          },
+  // Visibility: always per-stake. ADMIN/PM no longer get a global
+  // bypass — they only see projects they participate in. Cross-org
+  // browsing happens elsewhere (settings/audit).
+  where.OR = [
+    { ownerId: user.id },
+    { members: { some: { userId: user.id } } },
+    {
+      tasks: {
+        some: {
+          OR: [
+            { creatorId: user.id },
+            { assigneeId: user.id },
+            { reviewerId: user.id },
+            { assignments: { some: { userId: user.id } } },
+            { watchers: { some: { userId: user.id } } },
+          ],
         },
       },
-    ];
-  }
+    },
+  ];
 
   // Status filter
   if (filter.status) {
