@@ -45,7 +45,7 @@ export default async function ProjectOverviewPage({
   );
 
   const [recent, budgetReport] = await Promise.all([
-    listRecentTasksForProject(project.id, 5),
+    listRecentTasksForProject(project.id, user.id, 5),
     // Tolerate budget-report failures (raw SQL surface) — the page is
     // useful without it; we just hide the card.
     getProjectBudgetReport(project.id).catch((e) => {
