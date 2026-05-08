@@ -481,7 +481,17 @@ export default async function TaskDetailPage({ params }: { params: Params }) {
 
         <div className="flex flex-col gap-4">
           {task.externalSource === 'bitrix24' ? (
-            <BitrixMirrorPanel status={task.status} assignee={task.assignee} />
+            <BitrixMirrorPanel
+              status={task.status}
+              assignee={task.assignee}
+              description={task.description}
+              creator={task.creator}
+              priority={task.priority}
+              dueDate={task.dueDate}
+              startedAt={task.startedAt}
+              completedAt={task.completedAt}
+              externalId={task.externalId}
+            />
           ) : null}
           <Card>
             <CardContent className="pt-6">
