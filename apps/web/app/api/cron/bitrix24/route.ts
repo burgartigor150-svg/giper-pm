@@ -22,9 +22,17 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
   }
   try {
-    const result = await runBitrix24SyncNow();
+    // ?force=1 (or =true) bypasses the since-watermark for one run —
+    // useful right after a sync code change when you want every
+    // mirrored task to flow through upsertOne again. Default is the
+    // incremental behaviour driven by lastSuccessfulSyncStart.
+    const url = new URL(req.url);
+    const forceParam = url.searchParams.get('force');
+    const force = forceParam === '1' || forceParam === 'true';
+    const result = await runBitrix24SyncNow({ force });
     return NextResponse.json({
       ok: result.ok,
+      force,
       durationMs: result.durationMs,
       users: result.users,
       projects: result.projects,
