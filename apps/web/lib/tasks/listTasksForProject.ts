@@ -73,6 +73,12 @@ export async function listTasksForProject(
       ],
     });
   }
+  if (filter.tagIds && filter.tagIds.length > 0) {
+    // AND: task must carry every selected tag.
+    for (const tagId of filter.tagIds) {
+      andClauses.push({ taskTags: { some: { tagId } } });
+    }
+  }
   if (visibilityClause) andClauses.push(visibilityClause);
   if (andClauses.length > 0) where.AND = andClauses;
 

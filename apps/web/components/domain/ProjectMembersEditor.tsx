@@ -10,19 +10,28 @@ import {
 } from '@/actions/projects';
 import { UserPicker, type PickerUser } from './UserPicker';
 
-type MemberRole = 'LEAD' | 'MEMBER' | 'VIEWER';
+type MemberRole = 'LEAD' | 'CONTRIBUTOR' | 'REVIEWER' | 'OBSERVER';
 
 const ROLE_LABELS: Record<MemberRole, string> = {
   LEAD: 'Лид',
-  MEMBER: 'Участник',
-  VIEWER: 'Наблюдатель',
+  CONTRIBUTOR: 'Участник',
+  REVIEWER: 'Ревьюер',
+  OBSERVER: 'Наблюдатель',
 };
 
 type Member = {
   id: string;
   role: MemberRole;
   userId: string;
-  user: { id: string; name: string; email: string | null; image: string | null };
+  user: {
+    id: string;
+    name: string;
+    email?: string | null;
+    image: string | null;
+    // page-level select adds `role`; keep it optional so callers can
+    // pass either shape.
+    role?: string;
+  };
 };
 
 type Props = {
@@ -34,7 +43,7 @@ type Props = {
 export function ProjectMembersEditor({ projectId, members, canEdit }: Props) {
   const [list, setList] = useState(members);
   const [pickedUser, setPickedUser] = useState<PickerUser | null>(null);
-  const [pickedRole, setPickedRole] = useState<MemberRole>('MEMBER');
+  const [pickedRole, setPickedRole] = useState<MemberRole>('CONTRIBUTOR');
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -72,7 +81,7 @@ export function ProjectMembersEditor({ projectId, members, canEdit }: Props) {
         ];
       });
       setPickedUser(null);
-      setPickedRole('MEMBER');
+      setPickedRole('CONTRIBUTOR');
     });
   }
 
@@ -147,8 +156,9 @@ export function ProjectMembersEditor({ projectId, members, canEdit }: Props) {
               className="h-9 rounded-md border border-input bg-background px-2 text-sm"
             >
               <option value="LEAD">Лид</option>
-              <option value="MEMBER">Участник</option>
-              <option value="VIEWER">Наблюдатель</option>
+              <option value="CONTRIBUTOR">Участник</option>
+              <option value="REVIEWER">Ревьюер</option>
+              <option value="OBSERVER">Наблюдатель</option>
             </select>
             <Button
               type="button"

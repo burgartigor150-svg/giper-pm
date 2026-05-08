@@ -417,23 +417,29 @@ export async function loadThreadAction(rootMessageId: string) {
 
 /**
  * User search reused by @mention autocomplete and the UserPicker
- * (assignee/reviewer/co-assignee). Returns BOTH active and inactive
- * accounts — the inactive ones are Bitrix24-mirrored stubs that can
- * still be a meaningful @-target. Empty query → alphabetised top-25
- * so the picker has a usable instant list before the user types.
+ * (assignee/reviewer/co-assignee). Default: active users only — that
+ * keeps the 519 Bitrix-mirrored stubs out of assignee dropdowns. Pass
+ * `includeInactive: true` to mention/ping someone who can't log in
+ * yet (they'll still resolve as a comment/task author).
  */
-export async function searchUsersForMention(q: string) {
+export async function searchUsersForMention(
+  q: string,
+  opts: { includeInactive?: boolean } = {},
+) {
   await requireAuth();
   const trimmed = q.trim();
+  const where: Record<string, unknown> = {};
+  if (!opts.includeInactive) {
+    where.isActive = true;
+  }
+  if (trimmed) {
+    where.OR = [
+      { name: { contains: trimmed, mode: 'insensitive' } },
+      { email: { contains: trimmed, mode: 'insensitive' } },
+    ];
+  }
   return prisma.user.findMany({
-    where: trimmed
-      ? {
-          OR: [
-            { name: { contains: trimmed, mode: 'insensitive' } },
-            { email: { contains: trimmed, mode: 'insensitive' } },
-          ],
-        }
-      : {},
+    where,
     take: 25,
     orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
     select: { id: true, name: true, email: true, image: true },

@@ -12,6 +12,8 @@ export type BxUser = {
   WORK_POSITION?: string;
   TIME_ZONE?: string;
   PERSONAL_PHOTO?: string;
+  /** Bitrix24 department ids — used for our active/inactive allowlist. */
+  UF_DEPARTMENT?: Array<string | number> | null;
 };
 
 export type BxWorkgroup = {

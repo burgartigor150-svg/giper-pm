@@ -106,9 +106,9 @@ export async function getTaskGraph(taskId: string): Promise<{
 
   // Ancestor chain (up). Cap at 8 to be safe against cycles in
   // mirrored data.
-  let cursor: TaskRow | null = root;
+  let cursor: TaskRow | null = root as TaskRow;
   for (let i = 0; i < 8 && cursor?.parentId; i++) {
-    const parent = await prisma.task.findUnique({
+    const parent: TaskRow | null = await prisma.task.findUnique({
       where: { id: cursor.parentId },
       select: TASK_SELECT,
     });

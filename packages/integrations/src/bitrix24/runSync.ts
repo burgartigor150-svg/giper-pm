@@ -31,6 +31,12 @@ export type RunSyncOptions = {
    * fallback admin.
    */
   createMissingUsers?: boolean;
+  /**
+   * Bitrix department ids whose members get auto-activated. Forwarded to
+   * syncUsers. Typically read from env (BITRIX24_ACTIVE_DEPARTMENTS) by
+   * the orchestrator and passed in here.
+   */
+  activeDepartmentIds?: string[];
 };
 
 /**
@@ -81,6 +87,7 @@ export async function runBitrix24Sync(
   try {
     users = await syncUsers(prisma, client, {
       createMissing: !!opts.createMissingUsers,
+      activeDepartmentIds: opts.activeDepartmentIds,
     });
 
     if (opts.forBitrixUserId) {

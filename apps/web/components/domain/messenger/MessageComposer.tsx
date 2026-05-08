@@ -55,7 +55,9 @@ export function MessageComposer({ placeholder, disabled, onSend }: Props) {
     }
     const q = mentionState.query;
     const t = setTimeout(async () => {
-      const users = await searchUsersForMention(q || ' ');
+      // Mentions can target anyone in the org (incl. Bitrix-mirrored
+      // stub accounts) — they'll see the ping next time they sign in.
+      const users = await searchUsersForMention(q || ' ', { includeInactive: true });
       setMatches(users);
       setActiveIdx(0);
     }, 100);

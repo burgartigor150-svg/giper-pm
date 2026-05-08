@@ -99,6 +99,8 @@ export const taskListFilterSchema = z.object({
   priority: taskPrioritySchema.optional(),
   assigneeId: z.string().optional(),
   q: z.string().trim().max(200).optional(),
+  /** Tag IDs the task must have (AND-semantics). */
+  tagIds: z.array(z.string()).optional(),
   page: z.coerce.number().int().min(1).default(1),
   sort: z
     .enum(['number', 'title', 'status', 'priority', 'estimateHours', 'dueDate', 'assignee'])

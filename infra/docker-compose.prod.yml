@@ -122,6 +122,9 @@ services:
       # Bitrix24
       BITRIX24_WEBHOOK_URL: ${BITRIX24_WEBHOOK_URL}
       BITRIX24_INBOUND_SECRET: ${BITRIX24_INBOUND_SECRET}
+      # Comma-separated department ids whose members are auto-activated on
+      # every sync. Empty/unset → manual activation only.
+      BITRIX24_ACTIVE_DEPARTMENTS: ${BITRIX24_ACTIVE_DEPARTMENTS:-}
 
       # Realtime
       WS_AUTH_SECRET: ${WS_AUTH_SECRET}

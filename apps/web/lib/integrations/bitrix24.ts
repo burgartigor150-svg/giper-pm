@@ -41,6 +41,13 @@ export async function runBitrix24SyncNow(
     ? null
     : last ?? new Date(Date.now() - 30 * 24 * 3600_000);
 
+  // Comma-separated allowlist of Bitrix department ids whose members
+  // are auto-activated on every sync. Empty/unset → no auto-activation.
+  const activeDepartmentIds = (process.env.BITRIX24_ACTIVE_DEPARTMENTS ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
   // Resolve "me" = first admin's bitrixUserId. The personal mirror
   // requires this link to know what to scope to. On the very first run
   // it isn't there yet — syncUsers (run first inside runBitrix24Sync)
@@ -57,6 +64,7 @@ export async function runBitrix24SyncNow(
         since,
         forBitrixUserId: '__bootstrap__', // any non-empty string nobody owns
         createMissingUsers: true,
+        activeDepartmentIds,
       });
       me = await findLinkedAdmin();
     }
@@ -65,6 +73,7 @@ export async function runBitrix24SyncNow(
         since,
         forBitrixUserId: me.bitrixUserId,
         createMissingUsers: true,
+        activeDepartmentIds,
       });
     }
     // Still not linked — emails don't match. Surface a no-op so the UI
@@ -74,10 +83,15 @@ export async function runBitrix24SyncNow(
       since,
       forBitrixUserId: '__bootstrap__',
       createMissingUsers: true,
+      activeDepartmentIds,
     });
   }
 
-  return runBitrix24Sync(prisma, client, { since, createMissingUsers: true });
+  return runBitrix24Sync(prisma, client, {
+    since,
+    createMissingUsers: true,
+    activeDepartmentIds,
+  });
 }
 
 /**
@@ -101,6 +115,10 @@ export async function runBitrix24TeamSyncNow(
   const since = opts.force
     ? null
     : last ?? new Date(Date.now() - 30 * 24 * 3600_000);
+  const activeDepartmentIds = (process.env.BITRIX24_ACTIVE_DEPARTMENTS ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
 
   // Pull the PM's team plus the PM themselves. Members without a
   // bitrixUserId are skipped — sync needs the upstream id to scope.
@@ -142,6 +160,7 @@ export async function runBitrix24TeamSyncNow(
       since,
       forBitrixUserId: u.bitrixUserId,
       createMissingUsers: true,
+      activeDepartmentIds,
     });
     perMember.push({
       memberId: u.id,

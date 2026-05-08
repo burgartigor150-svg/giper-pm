@@ -5,9 +5,12 @@ import { useState, useTransition } from 'react';
 import { Input } from '@giper/ui/components/Input';
 import { useT } from '@/lib/useT';
 import type { UserSearchHit } from '@/actions/users';
+import { TagPill } from './TagPill';
 
 const STATUSES = ['BACKLOG', 'TODO', 'IN_PROGRESS', 'REVIEW', 'BLOCKED', 'DONE', 'CANCELED'] as const;
 const PRIORITIES = ['LOW', 'MEDIUM', 'HIGH', 'URGENT'] as const;
+
+type TagOption = { id: string; name: string; color: string };
 
 type Props = {
   status: string | undefined;
@@ -15,9 +18,19 @@ type Props = {
   assigneeId: string | undefined;
   q: string | undefined;
   members: UserSearchHit[];
+  availableTags?: TagOption[];
+  activeTagIds?: string[];
 };
 
-export function TaskFilters({ status, priority, assigneeId, q, members }: Props) {
+export function TaskFilters({
+  status,
+  priority,
+  assigneeId,
+  q,
+  members,
+  availableTags = [],
+  activeTagIds = [],
+}: Props) {
   const router = useRouter();
   const params = useSearchParams();
   const [pending, startTransition] = useTransition();
@@ -121,6 +134,49 @@ export function TaskFilters({ status, priority, assigneeId, q, members }: Props)
           </select>
         </label>
       </div>
+
+      {availableTags.length > 0 ? (
+        <div className="mt-3 flex flex-wrap items-center gap-1.5">
+          <span className="text-sm text-muted-foreground">Теги:</span>
+          {availableTags.map((tag) => {
+            const active = activeTagIds.includes(tag.id);
+            return (
+              <button
+                key={tag.id}
+                type="button"
+                onClick={() =>
+                  pushParams((sp) => {
+                    const current = new Set(activeTagIds);
+                    if (active) current.delete(tag.id);
+                    else current.add(tag.id);
+                    sp.delete('tagIds');
+                    if (current.size > 0) {
+                      sp.set('tagIds', Array.from(current).join(','));
+                    }
+                  })
+                }
+                className={
+                  active
+                    ? 'rounded-full ring-2 ring-blue-500 ring-offset-1'
+                    : 'opacity-60 hover:opacity-100'
+                }
+                aria-pressed={active}
+              >
+                <TagPill name={tag.name} color={tag.color} />
+              </button>
+            );
+          })}
+          {activeTagIds.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => pushParams((sp) => sp.delete('tagIds'))}
+              className="ml-1 rounded text-xs text-muted-foreground hover:text-foreground"
+            >
+              сбросить
+            </button>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }

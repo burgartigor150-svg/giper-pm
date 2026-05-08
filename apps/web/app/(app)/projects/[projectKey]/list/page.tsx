@@ -11,6 +11,7 @@ import { canCreateTask } from '@/lib/permissions';
 import { DomainError } from '@/lib/errors';
 import { getT } from '@/lib/i18n';
 import { TaskFilters } from '@/components/domain/TaskFilters';
+import { listTagsForProject } from '@/actions/tags';
 import { SortHeader } from '@/components/domain/SortHeader';
 import { Pagination } from '@/components/domain/Pagination';
 import { TaskStatusBadge } from '@/components/domain/TaskStatusBadge';
@@ -40,20 +41,27 @@ export default async function ProjectTasksListPage({
   }
 
   // Parse filters from URL with safe defaults
-  const filterRaw: Record<string, string> = {};
+  const filterRaw: Record<string, unknown> = {};
   for (const k of ['status', 'priority', 'assigneeId', 'q', 'page', 'sort', 'dir']) {
     const v = sp[k];
     if (typeof v === 'string') filterRaw[k] = v;
+  }
+  // tagIds may arrive comma-joined or as an array depending on form encoding.
+  const rawTagIds = sp.tagIds ?? sp.tagId;
+  if (Array.isArray(rawTagIds)) {
+    filterRaw.tagIds = rawTagIds;
+  } else if (typeof rawTagIds === 'string') {
+    filterRaw.tagIds = rawTagIds.split(',').map((s) => s.trim()).filter(Boolean);
   }
   const parsed = taskListFilterSchema.safeParse(filterRaw);
   const filter = parsed.success
     ? parsed.data
     : taskListFilterSchema.parse({});
 
-  const result = await listTasksForProject(projectKey, filter, {
-    id: me.id,
-    role: me.role,
-  });
+  const [result, availableTags] = await Promise.all([
+    listTasksForProject(projectKey, filter, { id: me.id, role: me.role }),
+    listTagsForProject(project.id),
+  ]);
 
   // Members for assignee dropdown
   const members = [
@@ -96,6 +104,8 @@ export default async function ProjectTasksListPage({
           assigneeId={filter.assigneeId}
           q={filter.q}
           members={members}
+          availableTags={availableTags}
+          activeTagIds={filter.tagIds ?? []}
         />
       </Card>
 
