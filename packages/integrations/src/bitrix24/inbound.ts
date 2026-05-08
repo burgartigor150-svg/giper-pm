@@ -129,6 +129,31 @@ type BxComment = {
 };
 
 /**
+ * Hard-delete a locally mirrored task. Used by ONTASKDELETE.
+ *
+ * Tasks NOT mirrored locally → no-op. Tasks not from Bitrix → refused
+ * (we won't drop locally-authored rows from a webhook payload).
+ *
+ * Side effects: cascade deletes wipe TimeEntry / Comment / Attachment /
+ * TaskStatusChange / Checklist for this task. That's intentional: the
+ * source-of-truth is Bitrix; if it's gone there, our local mirror has
+ * no business keeping orphan history. If you need an audit trail, we
+ * can swap to a `softDelete` field on Task in a follow-up.
+ */
+export async function deleteOneTask(
+  prisma: PrismaClient,
+  bitrixTaskId: string,
+): Promise<InboundResult> {
+  const local = await prisma.task.findFirst({
+    where: { externalSource: 'bitrix24', externalId: bitrixTaskId },
+    select: { id: true },
+  });
+  if (!local) return { action: 'skipped', reason: 'task not mirrored locally' };
+  await prisma.task.delete({ where: { id: local.id } });
+  return { action: 'updated', taskId: local.id, reason: 'deleted upstream' };
+}
+
+/**
  * Pull a single comment from Bitrix and upsert into our Comment table.
  * Used by ONTASKCOMMENTADD.
  *
@@ -200,6 +225,67 @@ export async function syncOneComment(
     select: { id: true },
   });
   return { action: 'created', commentId: created.id };
+}
+
+/**
+ * Update an existing locally mirrored comment from Bitrix.
+ * Used by ONTASKCOMMENTUPDATE.
+ *
+ * If we have no local row for that externalId yet, fall back to the
+ * add path so we don't drop the change on the floor (Bitrix may
+ * UPDATE without a preceding ADD if the prior ADD was missed).
+ */
+export async function updateOneComment(
+  prisma: PrismaClient,
+  client: Bitrix24Client,
+  bitrixTaskId: string,
+  bitrixCommentId: string,
+): Promise<InboundResult> {
+  const local = await prisma.comment.findUnique({
+    where: {
+      externalSource_externalId: {
+        externalSource: 'bitrix24',
+        externalId: bitrixCommentId,
+      },
+    },
+    select: { id: true, taskId: true },
+  });
+  if (!local) {
+    return syncOneComment(prisma, client, bitrixTaskId, bitrixCommentId);
+  }
+  const res = await client.call<BxComment>('task.commentitem.get', {
+    TASKID: bitrixTaskId,
+    ITEMID: bitrixCommentId,
+  });
+  const c = res.result;
+  if (!c) return { action: 'skipped', reason: 'comment not found upstream' };
+  await prisma.comment.update({
+    where: { id: local.id },
+    data: { body: stripBitrixCommentMarkup(c.POST_MESSAGE ?? '') },
+  });
+  return { action: 'updated', commentId: local.id };
+}
+
+/**
+ * Hard-delete a locally mirrored comment. Used by ONTASKCOMMENTDELETE.
+ * No-op if we never had it.
+ */
+export async function deleteOneComment(
+  prisma: PrismaClient,
+  bitrixCommentId: string,
+): Promise<InboundResult> {
+  const local = await prisma.comment.findUnique({
+    where: {
+      externalSource_externalId: {
+        externalSource: 'bitrix24',
+        externalId: bitrixCommentId,
+      },
+    },
+    select: { id: true },
+  });
+  if (!local) return { action: 'skipped', reason: 'comment not mirrored' };
+  await prisma.comment.delete({ where: { id: local.id } });
+  return { action: 'updated', commentId: local.id, reason: 'deleted upstream' };
 }
 
 /**

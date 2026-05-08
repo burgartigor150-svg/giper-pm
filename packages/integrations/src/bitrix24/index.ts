@@ -23,6 +23,12 @@ export {
   pushTaskAsBitrix,
   hashTaskState,
 } from './outbound';
-export { syncOneTask, syncOneComment } from './inbound';
+export {
+  syncOneTask,
+  deleteOneTask,
+  syncOneComment,
+  updateOneComment,
+  deleteOneComment,
+} from './inbound';
 export type { InboundResult } from './inbound';
 export type { BxUser, BxWorkgroup, BxTask } from './types';

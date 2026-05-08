@@ -1,7 +1,13 @@
 import { NextResponse } from 'next/server';
 import { revalidatePath } from 'next/cache';
 import { prisma } from '@giper/db';
-import { syncOneTask, syncOneComment } from '@giper/integrations/bitrix24';
+import {
+  syncOneTask,
+  deleteOneTask,
+  syncOneComment,
+  updateOneComment,
+  deleteOneComment,
+} from '@giper/integrations/bitrix24';
 import { getBitrix24Client } from '@/lib/integrations/bitrix24';
 
 /**
@@ -80,10 +86,8 @@ export async function POST(req: Request) {
   }
 
   try {
-    if (
-      (event === 'ONTASKUPDATE' || event === 'ONTASKADD') &&
-      taskId
-    ) {
+    // ----- Task lifecycle -----
+    if ((event === 'ONTASKUPDATE' || event === 'ONTASKADD') && taskId) {
       const result = await syncOneTask(prisma, client, taskId);
       if (result.taskId) {
         await revalidateTaskPath(result.taskId);
@@ -91,10 +95,25 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: true, event, ...result });
     }
 
+    if (event === 'ONTASKDELETE' && taskId) {
+      // Save project key before delete so we can revalidate the list
+      // after the row is gone.
+      const before = await prisma.task.findFirst({
+        where: { externalSource: 'bitrix24', externalId: taskId },
+        select: { project: { select: { key: true } } },
+      });
+      const result = await deleteOneTask(prisma, taskId);
+      if (before) {
+        revalidatePath(`/projects/${before.project.key}/list`);
+        revalidatePath(`/projects/${before.project.key}/board`);
+      }
+      return NextResponse.json({ ok: true, event, ...result });
+    }
+
+    // ----- Comments -----
     if (event === 'ONTASKCOMMENTADD' && taskForComment && commentId) {
       const result = await syncOneComment(prisma, client, taskForComment, commentId);
       if (result.commentId) {
-        // Comments live on the task — revalidate the parent task page.
         const local = await prisma.comment.findUnique({
           where: { id: result.commentId },
           select: { taskId: true },
@@ -104,7 +123,35 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: true, event, ...result });
     }
 
-    // Unknown / not-yet-implemented event — ack so Bitrix doesn't retry.
+    if (event === 'ONTASKCOMMENTUPDATE' && taskForComment && commentId) {
+      const result = await updateOneComment(prisma, client, taskForComment, commentId);
+      if (result.commentId) {
+        const local = await prisma.comment.findUnique({
+          where: { id: result.commentId },
+          select: { taskId: true },
+        });
+        if (local) await revalidateTaskPath(local.taskId);
+      }
+      return NextResponse.json({ ok: true, event, ...result });
+    }
+
+    if (event === 'ONTASKCOMMENTDELETE' && commentId) {
+      // Capture the parent task before delete so we can revalidate.
+      const before = await prisma.comment.findUnique({
+        where: {
+          externalSource_externalId: {
+            externalSource: 'bitrix24',
+            externalId: commentId,
+          },
+        },
+        select: { taskId: true },
+      });
+      const result = await deleteOneComment(prisma, commentId);
+      if (before) await revalidateTaskPath(before.taskId);
+      return NextResponse.json({ ok: true, event, ...result });
+    }
+
+    // Unknown event — ack so Bitrix doesn't retry.
     return NextResponse.json({ ok: true, event, action: 'ignored' });
   } catch (e) {
     // eslint-disable-next-line no-console
