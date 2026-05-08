@@ -94,20 +94,101 @@ export function mapBitrixTask(t: BxTask): DomainTaskFromBitrix {
 }
 
 /**
- * Bitrix descriptions ship with a tiny HTML/BBCode subset. We strip just the
- * common tags so the description is readable in plain-text form. A full
- * markdown renderer is overkill for a read-only mirror.
+ * Bitrix descriptions/comments ship with a HTML+BBCode mix. We convert
+ * the readable subset into Markdown so the UI's renderRichText keeps
+ * lists, mentions, quotes, links, and bold/italic visible — instead
+ * of stripping them and showing a wall of run-on text.
+ *
+ * Order matters: we process BBCode tags before the generic HTML
+ * stripper because Bitrix sometimes nests bbcode inside <p>.
  */
 export function stripBitrixHtml(s: string): string {
-  return s
-    .replace(/<br\s*\/?>(\r?\n)?/gi, '\n')
-    .replace(/<\/p>/gi, '\n')
-    .replace(/<[^>]+>/g, '')
+  return convertBitrixMarkup(s).slice(0, 50_000);
+}
+
+export function convertBitrixMarkup(s: string): string {
+  let out = s;
+
+  // ---------- BBCode → Markdown ----------
+
+  // [USER=123]Иван Иванов[/USER] → @Иван Иванов  (drop the id, keep the
+  // human name; matches how mentions render in Bitrix UI).
+  out = out.replace(
+    /\[USER=\d+\]([\s\S]*?)\[\/USER\]/gi,
+    (_m, name) => `@${name.trim()}`,
+  );
+
+  // [URL=https://...]label[/URL] → [label](url) ; bare [URL]url[/URL] → url
+  out = out.replace(
+    /\[URL=([^\]]+)\]([\s\S]*?)\[\/URL\]/gi,
+    (_m, url, label) => `[${label.trim()}](${url.trim()})`,
+  );
+  out = out.replace(/\[URL\]([\s\S]*?)\[\/URL\]/gi, (_m, url) => url.trim());
+
+  // Inline emphasis.
+  out = out.replace(/\[B\]([\s\S]*?)\[\/B\]/gi, (_m, t) => `**${t}**`);
+  out = out.replace(/\[I\]([\s\S]*?)\[\/I\]/gi, (_m, t) => `*${t}*`);
+  out = out.replace(/\[U\]([\s\S]*?)\[\/U\]/gi, (_m, t) => `_${t}_`);
+  out = out.replace(/\[S\]([\s\S]*?)\[\/S\]/gi, (_m, t) => `~~${t}~~`);
+
+  // Code: [CODE]...[/CODE] → fenced triple-backtick.
+  out = out.replace(
+    /\[CODE\]([\s\S]*?)\[\/CODE\]/gi,
+    (_m, t) => `\n\`\`\`\n${t}\n\`\`\`\n`,
+  );
+
+  // Quote: [QUOTE]...[/QUOTE] → > line (one-level only; nested quotes
+  // get the same prefix and look fine in the renderer).
+  out = out.replace(/\[QUOTE\]([\s\S]*?)\[\/QUOTE\]/gi, (_m, t) =>
+    t
+      .split('\n')
+      .map((line: string) => `> ${line}`)
+      .join('\n'),
+  );
+
+  // Lists: [LIST]…[*]item…[/LIST]  → bullet markdown.
+  out = out.replace(/\[LIST\]([\s\S]*?)\[\/LIST\]/gi, (_m, body: string) =>
+    body
+      .split('[*]')
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map((s) => `- ${s}`)
+      .join('\n'),
+  );
+
+  // Color tag carries no markdown equivalent — strip it but keep
+  // the inner text so we don't lose content.
+  out = out.replace(/\[COLOR(?:=[^\]]+)?\]([\s\S]*?)\[\/COLOR\]/gi, (_m, t) => t);
+
+  // Catch-all for any leftover BBCode pair we didn't model.
+  out = out.replace(/\[\/?[A-Z]+(?:=[^\]]*)?\]/gi, '');
+
+  // ---------- HTML cleanup ----------
+
+  // Convert links and emphasis tags before stripping the rest.
+  out = out.replace(
+    /<a\s+[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi,
+    (_m, url, label) => `[${label.trim()}](${url.trim()})`,
+  );
+  out = out.replace(/<\/?(?:b|strong)>/gi, '**');
+  out = out.replace(/<\/?(?:i|em)>/gi, '*');
+  out = out.replace(/<br\s*\/?>(\r?\n)?/gi, '\n');
+  out = out.replace(/<\/p>/gi, '\n\n');
+  out = out.replace(/<li[^>]*>/gi, '\n- ');
+  out = out.replace(/<\/li>/gi, '');
+  out = out.replace(/<\/?(?:ul|ol)[^>]*>/gi, '');
+  out = out.replace(/<[^>]+>/g, '');
+
+  // ---------- entities & whitespace ----------
+  out = out
     .replace(/&nbsp;/g, ' ')
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
-    .trim()
-    .slice(0, 20000);
+    .replace(/\r\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
+  return out;
 }

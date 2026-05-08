@@ -20,17 +20,21 @@ export function getBitrix24Client(): Bitrix24Client {
 }
 
 /**
- * Run a full read-only sync. Pulls users, projects, tasks.
+ * Run a read-only sync. Pulls users, projects, tasks.
  *
- * Scope: by default we mirror only data tied to the first ADMIN user — i.e.
- * the workgroups they're a member of and the tasks where they're either
- * RESPONSIBLE_ID or CREATED_BY. This matches the "personal mirror" use-case;
- * pass `mineOnly: false` to mirror everything visible to the webhook user.
+ * Default scope: every active local user with a bitrixUserId set —
+ * iterates per user with the same MEMBER-scoped logic as the legacy
+ * single-admin path. This catches dev-team tasks that don't have the
+ * admin on them. Closed (DONE/CANCELED) tasks are filtered out at the
+ * Bitrix-list level (see syncTasks) so the volume stays sane.
  *
- * Window: on the first run (no prior successful log) we cap the task fetch
- * to the last 30 days to keep the initial pass fast on portals with tens
- * of thousands of historical tasks. Subsequent runs go incremental from
- * the previous successful start.
+ * Window: on the first run (no prior successful log) we cap the task
+ * fetch to the last 30 days. Subsequent runs go incremental from the
+ * previous successful start.
+ *
+ * Pass `mineOnly: true` for the legacy "first ADMIN only" behaviour
+ * (single-admin / personal-mirror installs). `mineOnly: false` does
+ * the same per-user iteration described above.
  */
 export async function runBitrix24SyncNow(
   opts: { force?: boolean; mineOnly?: boolean } = {},
@@ -48,50 +52,123 @@ export async function runBitrix24SyncNow(
     .map((s) => s.trim())
     .filter(Boolean);
 
-  // Resolve "me" = first admin's bitrixUserId. The personal mirror
-  // requires this link to know what to scope to. On the very first run
-  // it isn't there yet — syncUsers (run first inside runBitrix24Sync)
-  // will populate it by matching emails. To keep the first pass scoped
-  // and not accidentally pull the entire portal, we run sync twice when
-  // the link isn't yet established: first to match users, then a second
-  // scoped sync. Both calls are cheap because empty.
-  if (opts.mineOnly !== false) {
-    let me = await findLinkedAdmin();
-    if (!me?.bitrixUserId) {
-      // Run a "users-only" pass: temporarily scope to a non-existent id
-      // so projects+tasks return nothing, then re-resolve.
-      await runBitrix24Sync(prisma, client, {
-        since,
-        forBitrixUserId: '__bootstrap__', // any non-empty string nobody owns
-        createMissingUsers: true,
-        activeDepartmentIds,
-      });
-      me = await findLinkedAdmin();
-    }
-    if (me?.bitrixUserId) {
-      return runBitrix24Sync(prisma, client, {
-        since,
-        forBitrixUserId: me.bitrixUserId,
-        createMissingUsers: true,
-        activeDepartmentIds,
-      });
-    }
-    // Still not linked — emails don't match. Surface a no-op so the UI
-    // can show a clear "set up user mapping" message instead of silently
-    // dumping the whole portal.
-    return runBitrix24Sync(prisma, client, {
+  if (opts.mineOnly === true) {
+    // Legacy single-admin path — kept for parity. Used by the
+    // personal-mirror install where only the admin's tasks matter.
+    return runForAdmin(client, since, activeDepartmentIds);
+  }
+
+  // Default: aggregate sync over every active linked user. Always run
+  // syncUsers first (no scope) so newly created people land before
+  // their tasks try to resolve assignees.
+  const bootstrap = await runBitrix24Sync(prisma, client, {
+    since,
+    forBitrixUserId: '__bootstrap__',
+    createMissingUsers: true,
+    activeDepartmentIds,
+  });
+
+  const linkedUsers = await prisma.user.findMany({
+    where: { bitrixUserId: { not: null }, isActive: true },
+    select: { id: true, name: true, bitrixUserId: true },
+  });
+  if (linkedUsers.length === 0) {
+    return bootstrap;
+  }
+
+  // Aggregate counters across per-user passes.
+  const agg = freshAggregate();
+  for (const u of linkedUsers) {
+    if (!u.bitrixUserId) continue;
+    const r = await runBitrix24Sync(prisma, client, {
+      since,
+      forBitrixUserId: u.bitrixUserId,
+      createMissingUsers: false, // already done in bootstrap
+      activeDepartmentIds,
+    });
+    addInto(agg, r);
+  }
+  // Carry the bootstrap users summary so callers see them counted.
+  agg.users = bootstrap.users;
+  agg.finishedAt = new Date();
+  agg.durationMs = agg.finishedAt.getTime() - agg.startedAt.getTime();
+  return agg;
+}
+
+async function runForAdmin(
+  client: ReturnType<typeof getBitrix24Client>,
+  since: Date | null,
+  activeDepartmentIds: string[],
+) {
+  let me = await findLinkedAdmin();
+  if (!me?.bitrixUserId) {
+    await runBitrix24Sync(prisma, client, {
       since,
       forBitrixUserId: '__bootstrap__',
       createMissingUsers: true,
       activeDepartmentIds,
     });
+    me = await findLinkedAdmin();
   }
-
+  if (me?.bitrixUserId) {
+    return runBitrix24Sync(prisma, client, {
+      since,
+      forBitrixUserId: me.bitrixUserId,
+      createMissingUsers: true,
+      activeDepartmentIds,
+    });
+  }
   return runBitrix24Sync(prisma, client, {
     since,
+    forBitrixUserId: '__bootstrap__',
     createMissingUsers: true,
     activeDepartmentIds,
   });
+}
+
+function freshAggregate() {
+  const startedAt = new Date();
+  return {
+    startedAt,
+    finishedAt: startedAt,
+    durationMs: 0,
+    ok: true,
+    error: undefined as string | undefined,
+    users: { totalSeen: 0, matched: 0, updated: 0, created: 0 },
+    projects: { totalSeen: 0, created: 0, updated: 0, skipped: 0 },
+    tasks: {
+      totalSeen: 0,
+      created: 0,
+      updated: 0,
+      skippedNoProject: 0,
+      errors: 0,
+      files: { totalSeen: 0, created: 0, updated: 0, deleted: 0, errors: 0 },
+      comments: { totalSeen: 0, created: 0, updated: 0, deleted: 0, errors: 0 },
+    },
+  };
+}
+
+function addInto(
+  agg: ReturnType<typeof freshAggregate>,
+  r: Awaited<ReturnType<typeof runBitrix24Sync>>,
+) {
+  if (!r.ok) {
+    agg.ok = false;
+    agg.error = r.error ?? agg.error;
+  }
+  agg.projects.totalSeen += r.projects.totalSeen;
+  agg.projects.created += r.projects.created;
+  agg.projects.updated += r.projects.updated;
+  agg.projects.skipped += r.projects.skipped;
+  agg.tasks.totalSeen += r.tasks.totalSeen;
+  agg.tasks.created += r.tasks.created;
+  agg.tasks.updated += r.tasks.updated;
+  agg.tasks.skippedNoProject += r.tasks.skippedNoProject;
+  agg.tasks.errors += r.tasks.errors;
+  for (const k of ['totalSeen', 'created', 'updated', 'deleted', 'errors'] as const) {
+    agg.tasks.files[k] += r.tasks.files[k];
+    agg.tasks.comments[k] += r.tasks.comments[k];
+  }
 }
 
 /**

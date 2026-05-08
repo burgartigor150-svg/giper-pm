@@ -180,7 +180,10 @@ async function collectMyGroupIds(
   bitrixUserId: string,
   since: Date | null,
 ): Promise<string[]> {
-  const filter: Record<string, unknown> = { MEMBER: bitrixUserId };
+  const filter: Record<string, unknown> = {
+    MEMBER: bitrixUserId,
+    '!STATUS': ['5', '7'],
+  };
   if (since) filter['>=CHANGED_DATE'] = since.toISOString();
 
   const ids = new Set<string>();

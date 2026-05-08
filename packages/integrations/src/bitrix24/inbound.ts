@@ -1,6 +1,6 @@
 import type { PrismaClient } from '@giper/db';
 import type { Bitrix24Client } from './client';
-import { mapBitrixTask } from './mappers';
+import { mapBitrixTask, convertBitrixMarkup } from './mappers';
 import type { BxTask } from './types';
 import { hashTaskState } from './outbound';
 
@@ -57,6 +57,14 @@ export async function syncOneTask(
   if (!raw) return { action: 'skipped', reason: 'task not found in Bitrix' };
 
   const mapped = mapBitrixTask(raw);
+
+  // If the upstream task transitioned to DONE or CANCELED, drop our
+  // local mirror — same policy as syncTasks's '!STATUS': [5,7] filter.
+  // We don't keep "completed" tasks on the giper-pm side because the
+  // team uses Bitrix as the system-of-record for closed work and a
+  // mirrored DONE row just bloats the boards.
+  const isClosedUpstream = mapped.status === 'DONE' || mapped.status === 'CANCELED';
+
   const local = await prisma.task.findFirst({
     where: { externalSource: 'bitrix24', externalId: mapped.externalId },
     select: {
@@ -68,9 +76,23 @@ export async function syncOneTask(
     },
   });
   if (!local) {
+    if (isClosedUpstream) {
+      return {
+        action: 'skipped',
+        reason: 'task closed upstream and not mirrored — nothing to do',
+      };
+    }
     return {
       action: 'skipped',
       reason: 'task not mirrored locally yet — let the next bulk run create it',
+    };
+  }
+  if (isClosedUpstream) {
+    await prisma.task.delete({ where: { id: local.id } });
+    return {
+      action: 'updated',
+      taskId: local.id,
+      reason: `closed upstream (status=${mapped.status}) — local mirror dropped`,
     };
   }
 
@@ -215,7 +237,7 @@ export async function syncOneComment(
     data: {
       taskId: task.id,
       authorId,
-      body: stripBitrixCommentMarkup(c.POST_MESSAGE ?? ''),
+      body: convertBitrixMarkup(c.POST_MESSAGE ?? '').slice(0, 50_000),
       source: 'WEB',
       visibility: 'EXTERNAL',
       externalSource: 'bitrix24',
@@ -261,7 +283,7 @@ export async function updateOneComment(
   if (!c) return { action: 'skipped', reason: 'comment not found upstream' };
   await prisma.comment.update({
     where: { id: local.id },
-    data: { body: stripBitrixCommentMarkup(c.POST_MESSAGE ?? '') },
+    data: { body: convertBitrixMarkup(c.POST_MESSAGE ?? '').slice(0, 50_000) },
   });
   return { action: 'updated', commentId: local.id };
 }
@@ -288,22 +310,5 @@ export async function deleteOneComment(
   return { action: 'updated', commentId: local.id, reason: 'deleted upstream' };
 }
 
-/**
- * Bitrix comments may include BBCode-ish wrapping. Strip the most common
- * tags so the body is readable plain text — same approach as task
- * descriptions in the bulk syncTasks pass.
- */
-function stripBitrixCommentMarkup(s: string): string {
-  return s
-    .replace(/\[\/?[A-Z]+(?:=[^\]]*)?\]/gi, '')
-    .replace(/<br\s*\/?>(\r?\n)?/gi, '\n')
-    .replace(/<\/p>/gi, '\n')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .trim()
-    .slice(0, 10_000);
-}
+// stripBitrixCommentMarkup → moved into mappers.convertBitrixMarkup so
+// task descriptions and comments share one BBCode→Markdown renderer.

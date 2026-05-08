@@ -1,5 +1,6 @@
 import type { PrismaClient } from '@giper/db';
 import { Bitrix24Client } from './client';
+import { convertBitrixMarkup } from './mappers';
 
 export type SyncCommentsResult = {
   /** Comments seen across all tasks during this run. */
@@ -104,7 +105,7 @@ export async function syncTaskComments(
         select: { id: true },
       });
       const authorId = author?.id ?? adminFallback.id;
-      const body = stripBitrixCommentMarkup(c.POST_MESSAGE ?? '');
+      const body = convertBitrixMarkup(c.POST_MESSAGE ?? '').slice(0, 50_000);
       const createdAt = c.POST_DATE ? new Date(c.POST_DATE) : new Date();
 
       const existing = await prisma.comment.findUnique({
@@ -151,22 +152,5 @@ export async function syncTaskComments(
   }
 }
 
-/**
- * Bitrix comments may include BBCode-ish wrapping. Strip the most
- * common tags so the body renders as readable plain text — same
- * approach as task descriptions.
- */
-function stripBitrixCommentMarkup(s: string): string {
-  return s
-    .replace(/\[\/?[A-Z]+(?:=[^\]]*)?\]/gi, '')
-    .replace(/<br\s*\/?>(\r?\n)?/gi, '\n')
-    .replace(/<\/p>/gi, '\n')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .trim()
-    .slice(0, 10_000);
-}
+// stripBitrixCommentMarkup → moved into mappers.convertBitrixMarkup so
+// task descriptions and comments share one renderer.

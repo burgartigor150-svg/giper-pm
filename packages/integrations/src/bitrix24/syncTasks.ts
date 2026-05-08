@@ -92,7 +92,13 @@ export async function syncTasks(
   // role on a task — RESPONSIBLE_ID, CREATED_BY, ACCOMPLICES, or AUDITORS —
   // in a single call. That's "all my tasks including collabs": personal
   // todos plus tasks I'm watching or co-working on. One pass, no dedupe.
-  const baseFilter: Record<string, unknown> = {};
+  //
+  // Status filter: skip 5 (Завершена / DONE) and 7 (Отказано / CANCELED).
+  // The team uses giper-pm to see what's *currently* in flight; closed
+  // tasks live in Bitrix and would just bloat the list/board here.
+  const baseFilter: Record<string, unknown> = {
+    '!STATUS': ['5', '7'],
+  };
   if (opts.since) baseFilter['>=CHANGED_DATE'] = opts.since.toISOString();
   if (opts.forBitrixUserId) baseFilter.MEMBER = opts.forBitrixUserId;
 
