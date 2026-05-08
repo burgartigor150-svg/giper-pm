@@ -66,15 +66,25 @@ export async function syncTasks(
 
   const fallbackCreator = await firstAdminId(prisma);
 
-  // Personal-mirror runs land tasks without a workgroup (groupId='0') in
-  // a virtual MINE project. We allocate it lazily — only the first time
-  // we actually see a personal task, so global mirrors don't grow stray
-  // empty projects.
+  // Personal-mirror runs land tasks without a workgroup (groupId='0')
+  // in a virtual MINE project — one PER USER, owned by that user (not
+  // by some shared admin). Allocated lazily on first personal task we
+  // actually see, so global mirrors don't grow stray empty projects.
   let personalProjectId: string | null = null;
   const ensurePersonal = async (): Promise<string | null> => {
     if (!opts.forBitrixUserId) return null;
     if (personalProjectId) return personalProjectId;
-    personalProjectId = await ensurePersonalProject(prisma, fallbackCreator);
+    // Resolve "this user" — sync runs scoped to a Bitrix uid, so we
+    // know whose MINE this is. The owner of the MINE row is the
+    // resolved user; falls back to admin only if the user isn't in
+    // our DB yet (rare — earlier syncUsers pass populates it).
+    const ownerId =
+      userByBitrixId.get(opts.forBitrixUserId) ?? fallbackCreator;
+    personalProjectId = await ensurePersonalProject(
+      prisma,
+      ownerId,
+      opts.forBitrixUserId,
+    );
     return personalProjectId;
   };
 
@@ -391,18 +401,18 @@ async function firstAdminId(prisma: PrismaClient): Promise<string | null> {
 }
 
 /**
- * Ensure a MINE project exists for personal tasks. Marked synthetic via
- * (externalSource='bitrix24', externalId='__personal__') so it dedupes
- * across runs and can't collide with a real workgroup id (workgroup ids
- * in Bitrix are numeric, this one isn't). The owner is the first ADMIN.
+ * Ensure a MINE project exists for personal tasks of one Bitrix user.
+ * Marked synthetic via (externalSource='bitrix24', externalId='__personal__<bxId>')
+ * so each user gets their own MINE row, owned by them — not collapsed
+ * onto a single shared admin-owned bucket.
  */
 async function ensurePersonalProject(
   prisma: PrismaClient,
-  fallbackOwnerId: string | null,
+  ownerId: string | null,
+  bitrixUserId: string,
 ): Promise<string | null> {
-  if (!fallbackOwnerId) return null;
-  const PERSONAL_KEY = 'MINE';
-  const PERSONAL_EXT_ID = '__personal__';
+  if (!ownerId) return null;
+  const PERSONAL_EXT_ID = `__personal__${bitrixUserId}`;
   const existing = await prisma.project.findUnique({
     where: {
       externalSource_externalId: {
@@ -410,14 +420,24 @@ async function ensurePersonalProject(
         externalId: PERSONAL_EXT_ID,
       },
     },
-    select: { id: true },
+    select: { id: true, ownerId: true },
   });
-  if (existing) return existing.id;
+  if (existing) {
+    // Repair ownership if a stale row from the legacy single-MINE era
+    // points at someone else.
+    if (existing.ownerId !== ownerId) {
+      await prisma.project.update({
+        where: { id: existing.id },
+        data: { ownerId },
+      });
+    }
+    return existing.id;
+  }
 
-  // Find a free key. Most installations won't have a manual MINE; fall
-  // back to MINE2..MINE9 if needed. We never overwrite a hand-made one.
-  let key = PERSONAL_KEY;
-  for (let i = 2; i < 10; i++) {
+  // Need a unique key. Try MINE first, then MINE2..MINE99 — keeps
+  // legacy hand-made MINE projects untouched.
+  let key = 'MINE';
+  for (let i = 2; i < 100; i++) {
     if (!(await prisma.project.findUnique({ where: { key }, select: { id: true } }))) break;
     key = `MINE${i}`;
   }
@@ -426,11 +446,11 @@ async function ensurePersonalProject(
       key,
       name: 'Личные задачи (Bitrix24)',
       description: 'Задачи без рабочей группы — синхронизируются из Bitrix24.',
-      ownerId: fallbackOwnerId,
+      ownerId,
       externalSource: 'bitrix24',
       externalId: PERSONAL_EXT_ID,
       members: {
-        create: { userId: fallbackOwnerId, role: 'LEAD' },
+        create: { userId: ownerId, role: 'LEAD' },
       },
     },
     select: { id: true },
