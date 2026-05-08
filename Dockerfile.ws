@@ -49,8 +49,10 @@ ENV NODE_ENV=production \
     WS_PORT=3001 \
     WS_HOST=0.0.0.0
 
+# Same IPv6/IPv4 dual-stack gotcha as the web image — pin to 127.0.0.1
+# so the healthcheck doesn't hit ::1 and get ECONNREFUSED.
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-  CMD wget -qO- http://localhost:3001/health > /dev/null || exit 1
+  CMD wget -qO- http://127.0.0.1:3001/health > /dev/null || exit 1
 
 EXPOSE 3001
 ENTRYPOINT ["/sbin/tini", "--"]
