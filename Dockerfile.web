@@ -97,13 +97,12 @@ COPY --from=build /prisma-out/.prisma ./apps/web/.prisma
 # image.
 COPY --from=build /repo/packages/db/prisma ./packages/db/prisma
 
-# Healthcheck pings Next's default 200 page, GET /api/health is even
-# better when we add one — for now the homepage redirect works.
-# 127.0.0.1 (not `localhost`): /etc/hosts puts ::1 first, but Next
-# binds IPv4 only on 0.0.0.0:3000, so `localhost` resolves to ::1 and
-# wget gets ECONNREFUSED. Pin to v4 to avoid the dual-stack ambiguity.
+# Lightweight liveness probe. /api/health is whitelisted in middleware,
+# returns {ok:true} synchronously without touching the DB or session.
+# 127.0.0.1 (not `localhost`): /etc/hosts puts ::1 first but Next binds
+# IPv4 only on 0.0.0.0:3000.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD wget -qO- http://127.0.0.1:3000/ > /dev/null || exit 1
+  CMD wget -qO- http://127.0.0.1:3000/api/health > /dev/null || exit 1
 
 EXPOSE 3000
 ENTRYPOINT ["/sbin/tini", "--"]
