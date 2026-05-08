@@ -41,23 +41,20 @@ export async function listTasksForProject(
     throw new DomainError('INSUFFICIENT_PERMISSIONS', 403);
   }
 
-  // Per-task visibility: project owner / LEAD see everything in their
-  // project; everyone else (incl. ADMIN/PM) sees only their own tasks
-  // (creator/assignee/reviewer/co-assignee/watcher).
-  const isProjectLead =
-    project.ownerId === user.id ||
-    project.members.some((m) => m.userId === user.id && m.role === 'LEAD');
-  const visibilityClause: Prisma.TaskWhereInput | null = isProjectLead
-    ? null
-    : {
-        OR: [
-          { creatorId: user.id },
-          { assigneeId: user.id },
-          { reviewerId: user.id },
-          { assignments: { some: { userId: user.id } } },
-          { watchers: { some: { userId: user.id } } },
-        ],
-      };
+  // Strictly per-stake — even project owner / LEAD don't get a global
+  // bypass within their own project. The reason: in Bitrix mirror
+  // groups, an upstream task can land in a project you "lead" without
+  // your name actually appearing on it. We want to mirror Bitrix's
+  // truth, not paint everything yours.
+  const visibilityClause: Prisma.TaskWhereInput = {
+    OR: [
+      { creatorId: user.id },
+      { assigneeId: user.id },
+      { reviewerId: user.id },
+      { assignments: { some: { userId: user.id } } },
+      { watchers: { some: { userId: user.id } } },
+    ],
+  };
 
   const where: Prisma.TaskWhereInput = { projectId: project.id };
   const andClauses: Prisma.TaskWhereInput[] = [];

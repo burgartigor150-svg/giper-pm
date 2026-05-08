@@ -128,16 +128,13 @@ export function canEditTaskInternal(user: SessionUser, task: TaskForPerm): boole
 }
 
 /**
- * View task. Per-stake visibility for EVERYONE: even ADMIN/PM see only
- * tasks where they personally are owner/LEAD of the project, creator,
- * assignee, reviewer, co-assignee, or watcher. Cross-org browsing is
- * a separate concern (audit log, settings).
+ * View task. Strictly per-stake: a user must personally be on the task
+ * (creator, assignee, reviewer, co-assignee, watcher). Project-level
+ * shortcuts (owner / LEAD) are intentionally NOT here — for Bitrix-
+ * mirror groups they would make a PM see every task they didn't
+ * actually participate in upstream.
  */
 export function canViewTask(user: SessionUser, task: TaskForPerm): boolean {
-  if (task.project.ownerId === user.id) return true;
-  if (task.project.members?.some((m) => m.userId === user.id && m.role === 'LEAD')) {
-    return true;
-  }
   if (task.creatorId === user.id) return true;
   if (task.assigneeId === user.id) return true;
   if (task.reviewerId === user.id) return true;

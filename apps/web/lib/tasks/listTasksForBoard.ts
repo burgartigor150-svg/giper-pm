@@ -67,22 +67,17 @@ export async function listTasksForBoard(
     internalStatus: { not: 'CANCELED' },
   };
 
-  // Per-task visibility: project owner / LEAD see every task in their
-  // project; everyone else (incl. ADMIN/PM) sees only tasks they have
-  // a personal stake in. Implemented as an OR-array on the SQL where
-  // so we don't ship task rows just to filter in JS.
-  const isProjectLead =
-    project.ownerId === user.id ||
-    project.members.some((m) => m.userId === user.id && m.role === 'LEAD');
-  if (!isProjectLead) {
-    where.OR = [
-      { creatorId: user.id },
-      { assigneeId: user.id },
-      { reviewerId: user.id },
-      { assignments: { some: { userId: user.id } } },
-      { watchers: { some: { userId: user.id } } },
-    ];
-  }
+  // Strictly per-stake. Project owner / LEAD no longer get every
+  // task — for Bitrix-mirror groups that would surface upstream tasks
+  // they're not part of. Everyone (ADMIN, PM, owner, LEAD, MEMBER)
+  // sees only tasks they personally are on.
+  where.OR = [
+    { creatorId: user.id },
+    { assigneeId: user.id },
+    { reviewerId: user.id },
+    { assignments: { some: { userId: user.id } } },
+    { watchers: { some: { userId: user.id } } },
+  ];
 
   // onlyMine wins over explicit assigneeId
   if (filter.onlyMine) {
