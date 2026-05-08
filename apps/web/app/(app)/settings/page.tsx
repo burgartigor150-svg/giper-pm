@@ -30,12 +30,18 @@ export default async function SettingsPage() {
             <CardHeader>
               <CardTitle>Интеграции</CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className="flex flex-col gap-2">
               <Link
                 href="/settings/integrations/bitrix24"
                 className="text-sm underline"
               >
                 Bitrix24 →
+              </Link>
+              <Link
+                href="/settings/integrations/telegram"
+                className="text-sm underline"
+              >
+                Telegram (бот ещё не выкатан) →
               </Link>
             </CardContent>
           </Card>

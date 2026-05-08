@@ -1,0 +1,68 @@
+# syntax=docker/dockerfile:1.7
+
+# -----------------------------------------------------------------------
+# Production image for apps/tg-bot — small grammY long-polling bot.
+# Same shape as Dockerfile.ws (tsx runtime, hoisted node_modules).
+# Image stays under ~150 MB.
+#
+# Not built by CI yet. Wire into .github/workflows/deploy.yml and
+# infra/docker-compose.prod.yml when TG_BOT_TOKEN is set in
+# /opt/giper-pm/.env on the deploy host.
+# -----------------------------------------------------------------------
+
+ARG NODE_VERSION=20
+ARG PNPM_VERSION=9.12.3
+
+FROM node:${NODE_VERSION}-alpine AS deps
+RUN apk add --no-cache libc6-compat openssl
+RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate
+WORKDIR /repo
+
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+COPY apps/tg-bot/package.json apps/tg-bot/
+COPY apps/web/package.json apps/web/
+COPY apps/ws/package.json apps/ws/
+COPY packages/db/package.json packages/db/
+COPY packages/db/prisma ./packages/db/prisma
+COPY packages/integrations/package.json packages/integrations/
+COPY packages/realtime/package.json packages/realtime/
+COPY packages/shared/package.json packages/shared/
+COPY packages/ui/package.json packages/ui/
+
+RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
+    pnpm install --frozen-lockfile --prefer-offline --filter @giper/tg-bot...
+
+# Generate the prisma client into a flat dir we can COPY into runtime.
+COPY packages/db ./packages/db
+RUN pnpm --filter @giper/db exec prisma generate && \
+    mkdir -p /prisma-out/.prisma /prisma-out/@prisma && \
+    REAL_CLIENT="$(readlink -f /repo/packages/db/node_modules/@prisma/client)" && \
+    REAL_ROOT="$(dirname $(dirname $REAL_CLIENT))" && \
+    cp -RL "$REAL_ROOT/.prisma/." /prisma-out/.prisma/ && \
+    cp -RL "$REAL_ROOT/@prisma/." /prisma-out/@prisma/
+
+# Hoisted flat tree so node ESM resolves transitive deps without pnpm
+# symlinks at runtime. Same trick as Dockerfile.ws.
+RUN mkdir -p /flat && \
+    cp /repo/apps/tg-bot/package.json /flat/package.json && \
+    cd /flat && \
+    npm install --omit=dev --no-package-lock --prefer-offline 2>&1 | tail -5
+
+FROM node:${NODE_VERSION}-alpine AS runtime
+RUN apk add --no-cache libc6-compat openssl tini
+WORKDIR /app
+
+COPY --from=deps /flat/node_modules ./apps/tg-bot/node_modules
+COPY --from=deps /prisma-out/.prisma ./apps/tg-bot/node_modules/.prisma
+COPY --from=deps /prisma-out/@prisma ./apps/tg-bot/node_modules/@prisma
+COPY apps/tg-bot ./apps/tg-bot
+COPY tsconfig.base.json ./tsconfig.base.json
+
+ENV NODE_ENV=production
+
+# No HTTP healthcheck — the bot is a long-polling client. Liveness is
+# implicit: if the process exits, restart-policy unless-stopped brings
+# it back; if Telegram blocks the token, the logs will scream.
+
+ENTRYPOINT ["/sbin/tini", "--"]
+CMD ["node", "--import", "file:///app/apps/tg-bot/node_modules/tsx/dist/esm/index.mjs", "/app/apps/tg-bot/src/index.ts"]
