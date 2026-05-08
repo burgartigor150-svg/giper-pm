@@ -44,10 +44,12 @@ export async function getProjectBudgetReport(
   const estimatedHours = Number(taskAgg._sum.estimateHours ?? 0);
 
   // Total spent — sum of TimeEntry durations for any task in the project.
-  // Cast to double so the row carries a JS-native number (raw bigint
-  // serialises poorly through RSC).
+  // Both Task and TimeEntry carry a startedAt column, so every column
+  // ref is fully qualified to keep Postgres from complaining about
+  // ambiguity. Cast to float8 so the row arrives as a JS number (raw
+  // bigint doesn't survive RSC serialisation).
   const totalSpentRows = await prisma.$queryRaw<Array<{ minutes: number | null }>>`
-    SELECT COALESCE(SUM(EXTRACT(EPOCH FROM ("endedAt" - "startedAt")) / 60), 0)::float8 AS minutes
+    SELECT COALESCE(SUM(EXTRACT(EPOCH FROM (te."endedAt" - te."startedAt")) / 60), 0)::float8 AS minutes
     FROM "TimeEntry" te
     JOIN "Task" t ON t.id = te."taskId"
     WHERE t."projectId" = ${projectId} AND te."endedAt" IS NOT NULL
@@ -58,7 +60,7 @@ export async function getProjectBudgetReport(
   // Velocity: hours/day over the trailing window.
   const since = new Date(Date.now() - VELOCITY_WINDOW_DAYS * 24 * 3600_000);
   const recentRows = await prisma.$queryRaw<Array<{ minutes: number | null }>>`
-    SELECT COALESCE(SUM(EXTRACT(EPOCH FROM ("endedAt" - "startedAt")) / 60), 0)::float8 AS minutes
+    SELECT COALESCE(SUM(EXTRACT(EPOCH FROM (te."endedAt" - te."startedAt")) / 60), 0)::float8 AS minutes
     FROM "TimeEntry" te
     JOIN "Task" t ON t.id = te."taskId"
     WHERE t."projectId" = ${projectId}
