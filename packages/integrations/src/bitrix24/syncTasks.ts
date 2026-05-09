@@ -5,6 +5,7 @@ import { mapBitrixTask } from './mappers';
 import { syncTaskAttachments, type SyncFilesResult } from './syncFiles';
 import { syncTaskComments, type SyncCommentsResult } from './syncComments';
 import { syncTaskHistory, type SyncHistoryResult } from './syncHistory';
+import { syncTaskChat, type SyncChatResult } from './syncChat';
 
 export type SyncTasksResult = {
   totalSeen: number;
@@ -15,6 +16,7 @@ export type SyncTasksResult = {
   files: SyncFilesResult;
   comments: SyncCommentsResult;
   history: SyncHistoryResult;
+  chat: SyncChatResult;
 };
 
 export type SyncTasksOptions = {
@@ -49,6 +51,7 @@ export async function syncTasks(
     files: { totalSeen: 0, created: 0, updated: 0, deleted: 0, errors: 0 },
     comments: { totalSeen: 0, created: 0, updated: 0, deleted: 0, errors: 0 },
     history: { totalSeen: 0, created: 0, updated: 0, errors: 0 },
+    chat: { totalSeen: 0, created: 0, updated: 0, errors: 0 },
   };
 
   const projectByExternalId = new Map<string, string>();
@@ -131,6 +134,9 @@ export async function syncTasks(
           'PARENT_ID',
           'UF_TASK_WEBDAV_FILES',
           'TAGS',
+          // CHAT_ID identifies the new "collab" tasks whose discussion
+          // lives in the IM messenger instead of the legacy task forum.
+          'CHAT_ID',
         ],
         start,
       });
@@ -164,21 +170,37 @@ export async function syncTasks(
             // (the bulk endpoint) doesn't exist; we have to enumerate
             // per task ID. Cheap on incremental syncs because the
             // since-watermark already shrinks the task list.
-            await syncTaskComments(
-              prisma,
-              client,
-              { id: localTaskId, bitrixTaskId: raw.id },
-              stats.comments,
-            );
-            // History (system events: status, deadline, watchers, …)
-            // — separate Bitrix collection from comments. Renders into
-            // the same Comment table with externalId='hist:N'.
-            await syncTaskHistory(
-              prisma,
-              client,
-              { id: localTaskId, bitrixTaskId: raw.id },
-              stats.history,
-            );
+            // Two discussion models live in Bitrix24:
+            //  - legacy tasks (forumId set, chatId null) → classic
+            //    task.commentitem.getlist + tasks.task.history.list
+            //  - new "collab" tasks (chatId set) → im.dialog.messages.get
+            // Pick exactly one per task to avoid duplicating system
+            // events (chat already includes them as author_id=0).
+            const chatId = raw.chatId && raw.chatId !== '0' ? raw.chatId : null;
+            if (chatId) {
+              await syncTaskChat(
+                prisma,
+                client,
+                { id: localTaskId, bitrixTaskId: raw.id, chatId },
+                stats.chat,
+              );
+            } else {
+              await syncTaskComments(
+                prisma,
+                client,
+                { id: localTaskId, bitrixTaskId: raw.id },
+                stats.comments,
+              );
+              // History (system events: status, deadline, watchers, …)
+              // — separate Bitrix collection from comments. Renders into
+              // the same Comment table with externalId='hist:N'.
+              await syncTaskHistory(
+                prisma,
+                client,
+                { id: localTaskId, bitrixTaskId: raw.id },
+                stats.history,
+              );
+            }
           }
         } catch (e) {
           stats.errors++;

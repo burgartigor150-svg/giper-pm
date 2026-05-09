@@ -58,4 +58,12 @@ export type BxTask = {
    * `tags`; older responses use `TAGS`. Both are arrays of strings.
    */
   tags?: string[] | null;
+  /**
+   * Newer Bitrix24 ("collab"-style) tasks store discussion in the IM
+   * messenger instead of the legacy task forum. When present, the
+   * conversation is reachable via `im.dialog.messages.get` with
+   * DIALOG_ID = `chat<chatId>`. Old tasks have `forumId` set instead;
+   * the two are mutually exclusive in practice.
+   */
+  chatId?: string | null;
 };

@@ -241,7 +241,15 @@ export default async function TaskDetailPage({ params }: { params: Params }) {
         author: c.author,
         body: c.body,
         visibility: c.visibility,
-        isHistory: !!c.externalId && c.externalId.startsWith('hist:'),
+        // History bucket = legacy task history events ('hist:*') AND
+        // system chat messages from collab tasks (those carry the
+        // author = first ADMIN since Bitrix returns author_id=0; we
+        // tag them by body markers from im.dialog.messages.get).
+        isHistory:
+          (!!c.externalId && c.externalId.startsWith('hist:')) ||
+          (!!c.externalId &&
+            c.externalId.startsWith('chat:') &&
+            isLikelySystemChat(c.body)),
       }),
     ),
     ...task.statusChanges.map(
@@ -566,6 +574,27 @@ export default async function TaskDetailPage({ params }: { params: Params }) {
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Heuristic: a chat message is a "system" event when it has no human
+ * author or starts with the standard Bitrix templates the messenger
+ * uses for status/membership changes ("X создал задачу", "X изменил
+ * стадию", "X добавил наблюдателя", "X добавил описание", …).
+ *
+ * The bot itself sends these with author_id=0 in the Bitrix payload,
+ * but our sync attributes them to the fallback admin User row, so
+ * by the time they hit Comment.body we have to detect by text.
+ */
+function isLikelySystemChat(body: string): boolean {
+  const trimmed = body.trim();
+  if (!trimmed) return false;
+  // The Bitrix templates always start with @USER, then a verb. We pick
+  // out the verbs that mean "system event" and keep everything else
+  // (real human messages) on the Discussion tab.
+  return /(?:изменил.*?стадию|изменил.*?статус|создал.+(?:задачу|подзадачу)|добавил описание|добавил наблюдател|удалил наблюдател|стал наблюдателем|добавил соисполнител|удалил соисполнител|изменил крайний срок|изменил дедлайн|изменил приоритет|поставил задачу|закрыл задачу|переоткрыл задачу|пометил задачу|изменил исполнител)/iu.test(
+    trimmed.slice(0, 200),
   );
 }
 

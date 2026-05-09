@@ -16,6 +16,8 @@ export { syncTaskComments } from './syncComments';
 export type { SyncCommentsResult } from './syncComments';
 export { syncTaskHistory } from './syncHistory';
 export type { SyncHistoryResult } from './syncHistory';
+export { syncTaskChat } from './syncChat';
+export type { SyncChatResult } from './syncChat';
 export { runBitrix24Sync, lastSuccessfulSyncStart } from './runSync';
 export type { RunSyncResult } from './runSync';
 export {

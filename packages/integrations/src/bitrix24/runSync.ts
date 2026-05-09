@@ -81,6 +81,7 @@ export async function runBitrix24Sync(
     files: { totalSeen: 0, created: 0, updated: 0, deleted: 0, errors: 0 },
     comments: { totalSeen: 0, created: 0, updated: 0, deleted: 0, errors: 0 },
     history: { totalSeen: 0, created: 0, updated: 0, errors: 0 },
+    chat: { totalSeen: 0, created: 0, updated: 0, errors: 0 },
   };
   let ok = true;
   let error: string | undefined;
@@ -124,7 +125,11 @@ export async function runBitrix24Sync(
   const durationMs = finishedAt.getTime() - startedAt.getTime();
 
   const totalErrors =
-    tasks.errors + tasks.files.errors + tasks.comments.errors + tasks.history.errors;
+    tasks.errors +
+    tasks.files.errors +
+    tasks.comments.errors +
+    tasks.history.errors +
+    tasks.chat.errors;
   await prisma.integrationSyncLog.update({
     where: { id: log.id },
     data: {
@@ -144,6 +149,7 @@ export async function runBitrix24Sync(
               fileErrors: tasks.files.errors,
               commentErrors: tasks.comments.errors,
               historyErrors: tasks.history.errors,
+              chatErrors: tasks.chat.errors,
             }
           : undefined,
     },
