@@ -44,6 +44,42 @@ const PER_STAKE = (uid: string) =>
   }) as const;
 
 /**
+ * Resolve "my team" for the calendar's default scope:
+ *   - everyone in MY PmTeamMember list (where I'm the PM)
+ *   - my PM's team (where I'm a member)
+ *   - me
+ *
+ * Used as an extra filter on top of PER_STAKE so a PM doesn't see
+ * tasks they created for an unrelated department (finance, ОК, …)
+ * just because they happen to be the postanovshchik.
+ */
+async function resolveTeammateIds(uid: string): Promise<string[]> {
+  const [asPm, asMember] = await Promise.all([
+    prisma.pmTeamMember.findMany({
+      where: { pmId: uid },
+      select: { memberId: true },
+    }),
+    prisma.pmTeamMember.findMany({
+      where: { memberId: uid },
+      select: { pmId: true },
+    }),
+  ]);
+  const ids = new Set<string>([uid]);
+  for (const r of asPm) ids.add(r.memberId);
+  for (const r of asMember) ids.add(r.pmId);
+  // Also include teammates of my PM (so peers see each other's work).
+  if (asMember.length) {
+    const pmIds = asMember.map((r) => r.pmId);
+    const peers = await prisma.pmTeamMember.findMany({
+      where: { pmId: { in: pmIds } },
+      select: { memberId: true },
+    });
+    for (const r of peers) ids.add(r.memberId);
+  }
+  return [...ids];
+}
+
+/**
  * Tasks with `dueDate` in [from, to). Filtered by the caller's role
  * AND any of the optional filters.
  *
@@ -59,19 +95,44 @@ export async function getDeadlinesInRange(
 ): Promise<DeadlineItem[]> {
   const isPrivileged = user.role === 'ADMIN' || user.role === 'PM';
   const teamWide = filters.scope === 'team' && isPrivileged;
-  const visibilityClause = teamWide ? {} : PER_STAKE(user.id);
 
-  const where: Parameters<typeof prisma.task.findMany>[0]['where'] = {
-    dueDate: { gte: from, lt: to },
-    ...visibilityClause,
-    ...(filters.projectKey
-      ? { project: { key: filters.projectKey.toUpperCase() } }
-      : {}),
-    ...(filters.assigneeId ? { assigneeId: filters.assigneeId } : {}),
-    ...(filters.status && filters.status.length
-      ? { internalStatus: { in: filters.status as never } }
-      : {}),
-  };
+  // Visibility:
+  //   - 'team' (privileged opt-in)  → no filter, see everything.
+  //   - 'mine' (default for all)    → PER_STAKE on the task AND
+  //     assignee belongs to "my team" (PmTeamMember relations).
+  //     The team gate is what stops a PM from seeing the finance/HR
+  //     tasks they happen to be the postanovshchik on.
+  let where: Parameters<typeof prisma.task.findMany>[0]['where'];
+  if (teamWide) {
+    where = { dueDate: { gte: from, lt: to } };
+  } else {
+    const teammateIds = await resolveTeammateIds(user.id);
+    where = {
+      dueDate: { gte: from, lt: to },
+      AND: [
+        PER_STAKE(user.id),
+        {
+          OR: [
+            // Unassigned tasks I created — keep them visible.
+            { assigneeId: null, creatorId: user.id },
+            // Tasks assigned to me or to a teammate.
+            { assigneeId: { in: teammateIds } },
+          ],
+        },
+      ],
+    };
+  }
+
+  // Apply additional UI filters on top of the visibility decision.
+  if (filters.projectKey) {
+    where.project = { key: filters.projectKey.toUpperCase() };
+  }
+  if (filters.assigneeId) {
+    where.assigneeId = filters.assigneeId;
+  }
+  if (filters.status && filters.status.length) {
+    where.internalStatus = { in: filters.status as never };
+  }
 
   const rows = await prisma.task.findMany({
     where,
