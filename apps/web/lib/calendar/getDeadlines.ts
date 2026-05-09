@@ -15,8 +15,15 @@ export type DeadlineItem = {
 };
 
 export type DeadlineFilters = {
-  /** Restrict to tasks the user personally owns (false = team-wide). */
-  myOnly?: boolean;
+  /**
+   * Visibility scope:
+   *   - 'mine' (default) — only tasks the caller is on the hook for
+   *     (creator/assignee/reviewer/co-assignee/watcher).
+   *   - 'team'           — every visible task. Honoured only for
+   *     ADMIN / PM; for everyone else this silently falls back to
+   *     'mine' (their stake is the limit of their visibility).
+   */
+  scope?: 'mine' | 'team';
   /** Project key whitelist (case-insensitive). Empty = no filter. */
   projectKey?: string;
   /** Assignee user id. */
@@ -40,11 +47,9 @@ const PER_STAKE = (uid: string) =>
  * Tasks with `dueDate` in [from, to). Filtered by the caller's role
  * AND any of the optional filters.
  *
- * Visibility rules:
- *   - ADMIN / PM: full team-wide view by default; pass `myOnly:true`
- *     to narrow to their own stake.
- *   - everyone else: always per-stake (the helper's filter is added
- *     unconditionally for them).
+ * Default scope is 'mine' for everyone — including admins/PMs. The
+ * calendar is a personal planning tool; if a PM wants to inspect the
+ * whole team's load they have to opt in explicitly via scope='team'.
  */
 export async function getDeadlinesInRange(
   from: Date,
@@ -53,8 +58,8 @@ export async function getDeadlinesInRange(
   filters: DeadlineFilters = {},
 ): Promise<DeadlineItem[]> {
   const isPrivileged = user.role === 'ADMIN' || user.role === 'PM';
-  const visibilityClause =
-    isPrivileged && !filters.myOnly ? {} : PER_STAKE(user.id);
+  const teamWide = filters.scope === 'team' && isPrivileged;
+  const visibilityClause = teamWide ? {} : PER_STAKE(user.id);
 
   const where: Parameters<typeof prisma.task.findMany>[0]['where'] = {
     dueDate: { gte: from, lt: to },

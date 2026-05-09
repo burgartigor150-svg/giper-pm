@@ -8,7 +8,7 @@ type SearchParams = Promise<{
   d?: string; // YYYY-MM-DD (anchor day for week/day view)
   v?: 'month' | 'week' | 'day';
   // Filters
-  mine?: '1';
+  scope?: 'mine' | 'team';
   proj?: string;
   ass?: string;
   st?: string; // comma-separated status values
@@ -62,7 +62,7 @@ export default async function CalendarPage({
   const lookaheadEnd = new Date(lookaheadStart.getTime() + 14 * 86400_000);
 
   const filters = {
-    myOnly: sp.mine === '1',
+    scope: sp.scope === 'team' ? ('team' as const) : ('mine' as const),
     projectKey: sp.proj || undefined,
     assigneeId: sp.ass || undefined,
     status: sp.st ? sp.st.split(',').filter(Boolean) : undefined,

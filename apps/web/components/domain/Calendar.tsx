@@ -47,7 +47,7 @@ export type DeadlineItem = {
 };
 
 type Filters = {
-  myOnly?: boolean;
+  scope?: 'mine' | 'team';
   projectKey?: string;
   assigneeId?: string;
   status?: string[];
@@ -167,13 +167,15 @@ export function Calendar({
   const todayKey = dayKey(today);
 
   // Filters local state (drives URL on apply).
-  const [filters, setFilters] = useState<Filters>(initialFilters);
+  const [filters] = useState<Filters>(initialFilters);
   const [filtersOpen, setFiltersOpen] = useState(
-    !!(initialFilters.myOnly ||
+    !!(initialFilters.scope === 'team' ||
       initialFilters.projectKey ||
       initialFilters.assigneeId ||
       (initialFilters.status && initialFilters.status.length)),
   );
+  const isPrivileged =
+    currentUserRole === 'ADMIN' || currentUserRole === 'PM';
 
   // ---- Bucket items by day, applying any optimistic moves
   // (a drag-and-drop done on the client before the server roundtrip
@@ -246,8 +248,8 @@ export function Calendar({
   const applyFilters = useCallback(
     (next: Filters) => {
       const sp = new URLSearchParams(params.toString());
-      if (next.myOnly) sp.set('mine', '1');
-      else sp.delete('mine');
+      if (next.scope === 'team') sp.set('scope', 'team');
+      else sp.delete('scope');
       if (next.projectKey) sp.set('proj', next.projectKey);
       else sp.delete('proj');
       if (next.assigneeId) sp.set('ass', next.assigneeId);
@@ -371,16 +373,36 @@ export function Calendar({
         {/* Filters bar */}
         {filtersOpen ? (
           <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-muted/40 p-2 text-xs">
-            <label className="inline-flex items-center gap-1">
-              <input
-                type="checkbox"
-                checked={!!filters.myOnly}
-                onChange={(e) =>
-                  applyFilters({ ...filters, myOnly: e.target.checked })
-                }
-              />
-              Только мои
-            </label>
+            {isPrivileged ? (
+              <div className="inline-flex items-center gap-0.5 rounded-md border border-input bg-background p-0.5">
+                <button
+                  type="button"
+                  onClick={() => applyFilters({ ...filters, scope: 'mine' })}
+                  className={
+                    'rounded px-2 py-0.5 ' +
+                    (filters.scope !== 'team'
+                      ? 'bg-foreground text-background'
+                      : 'text-muted-foreground hover:bg-accent')
+                  }
+                  title="Только мои задачи (по умолчанию)"
+                >
+                  Мои
+                </button>
+                <button
+                  type="button"
+                  onClick={() => applyFilters({ ...filters, scope: 'team' })}
+                  className={
+                    'rounded px-2 py-0.5 ' +
+                    (filters.scope === 'team'
+                      ? 'bg-foreground text-background'
+                      : 'text-muted-foreground hover:bg-accent')
+                  }
+                  title="Все задачи команды (доступно ADMIN / PM)"
+                >
+                  Вся команда
+                </button>
+              </div>
+            ) : null}
             <select
               value={filters.projectKey ?? ''}
               onChange={(e) =>
@@ -435,7 +457,7 @@ export function Calendar({
                 );
               },
             )}
-            {(filters.myOnly ||
+            {(filters.scope === 'team' ||
               filters.projectKey ||
               filters.assigneeId ||
               (filters.status && filters.status.length)) ? (
@@ -443,7 +465,7 @@ export function Calendar({
                 type="button"
                 onClick={() =>
                   applyFilters({
-                    myOnly: false,
+                    scope: 'mine',
                     projectKey: undefined,
                     assigneeId: undefined,
                     status: undefined,
