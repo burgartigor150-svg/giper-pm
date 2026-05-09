@@ -133,10 +133,15 @@ export async function pushComment(
     );
   }
 
+  // Translate our internal mention tokens (`@<userId>`) into Bitrix's
+  // own [USER=<bxId>]Имя[/USER] BBCode so they render as live mention
+  // pills in the Bitrix UI instead of literal cuids.
+  const renderedBody = await renderMentionsForBitrix(prisma, comment.body);
+
   const params: Record<string, unknown> = {
     TASKID: comment.task.externalId,
     FIELDS: {
-      POST_MESSAGE: comment.body,
+      POST_MESSAGE: renderedBody,
       AUTHOR_ID: comment.author.bitrixUserId,
     },
   };
@@ -169,6 +174,36 @@ export async function pushComment(
 export function hashTaskState(state: { status: string }): string {
   const normalized = JSON.stringify({ status: state.status });
   return createHash('sha256').update(normalized).digest('hex').slice(0, 16);
+}
+
+/**
+ * Replace every `@<localUserId>` mention token in a comment body with
+ * `[USER=<bitrixUserId>]Имя Фамилия[/USER]` so Bitrix renders it as a
+ * native mention chip. Tokens whose target user has no bitrixUserId
+ * (yet) collapse to a plain "@Имя" — better than leaking the cuid.
+ *
+ * cuid format: starts with 'c', 24 chars total, lowercase alnum.
+ */
+async function renderMentionsForBitrix(
+  prisma: PrismaClient,
+  body: string,
+): Promise<string> {
+  const re = /@([a-z0-9]{24,})\b/g;
+  const ids = Array.from(new Set(Array.from(body.matchAll(re), (m) => m[1] as string)));
+  if (ids.length === 0) return body;
+  const rows = await prisma.user.findMany({
+    where: { id: { in: ids } },
+    select: { id: true, name: true, bitrixUserId: true },
+  });
+  const byId = new Map(rows.map((u) => [u.id, u]));
+  return body.replace(re, (match, id: string) => {
+    const u = byId.get(id);
+    if (!u) return match; // leave token untouched if we can't resolve
+    if (u.bitrixUserId) {
+      return `[USER=${u.bitrixUserId}]${u.name}[/USER]`;
+    }
+    return `@${u.name}`;
+  });
 }
 
 /**
