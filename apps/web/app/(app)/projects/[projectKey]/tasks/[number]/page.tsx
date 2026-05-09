@@ -46,6 +46,13 @@ import { isWatchingTask } from '@/lib/watchers/isWatching';
 
 type Params = Promise<{ projectKey: string; number: string }>;
 
+// Always re-render the task page on each request. The Bitrix sync
+// (cron + webhooks) writes to the DB without going through Next's
+// revalidatePath, so a cached SSR result would lag behind the real
+// state of comments/history events. Page is per-user-authed anyway,
+// so static caching never made sense here.
+export const dynamic = 'force-dynamic';
+
 export default async function TaskDetailPage({ params }: { params: Params }) {
   const { projectKey, number: numberStr } = await params;
   const number = Number.parseInt(numberStr, 10);
