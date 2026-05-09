@@ -68,6 +68,39 @@ export default async function CalendarPage({
     status: sp.st ? sp.st.split(',').filter(Boolean) : undefined,
   };
 
+  // Scope the project picker the same way the visibility scope works:
+  //   - 'mine' (default for everyone) → only projects where the user
+  //     actually has tasks (creator/assignee/reviewer/coassignee/watcher).
+  //     Otherwise the dropdown lists the whole org (200+ items) and
+  //     nothing in it is relevant to the caller.
+  //   - 'team' (ADMIN/PM opt-in) → all active projects.
+  const projectsPromise =
+    filters.scope === 'team' && (me.role === 'ADMIN' || me.role === 'PM')
+      ? prisma.project.findMany({
+          where: { status: 'ACTIVE' },
+          select: { key: true, name: true },
+          orderBy: { key: 'asc' },
+          take: 500,
+        })
+      : prisma.project.findMany({
+          where: {
+            status: 'ACTIVE',
+            tasks: {
+              some: {
+                OR: [
+                  { creatorId: me.id },
+                  { assigneeId: me.id },
+                  { reviewerId: me.id },
+                  { assignments: { some: { userId: me.id } } },
+                  { watchers: { some: { userId: me.id } } },
+                ],
+              },
+            },
+          },
+          select: { key: true, name: true },
+          orderBy: { key: 'asc' },
+        });
+
   const [items, lookaheadItems, projects] = await Promise.all([
     getDeadlinesInRange(rangeStart, rangeEnd, { id: me.id, role: me.role }, filters),
     getDeadlinesInRange(
@@ -76,12 +109,7 @@ export default async function CalendarPage({
       { id: me.id, role: me.role },
       { ...filters, status: ['BACKLOG', 'TODO', 'IN_PROGRESS', 'REVIEW'] },
     ),
-    prisma.project.findMany({
-      where: { status: 'ACTIVE' },
-      select: { key: true, name: true },
-      orderBy: { key: 'asc' },
-      take: 200,
-    }),
+    projectsPromise,
   ]);
 
   // Assignees seen across both ranges → quick picker for the Filter
