@@ -112,11 +112,35 @@ export default async function CalendarPage({
     projectsPromise,
   ]);
 
-  // Assignees seen across both ranges → quick picker for the Filter
-  // bar (no need for full-org search just to filter the calendar).
+  // Assignee picker = strictly my team (PmTeamMember rows + me).
+  // Used to be derived from items in range, which leaked everyone
+  // visible org-wide into the dropdown. The calendar's whole point
+  // is "my team" — restrict the picker to that.
+  const teamRows = await prisma.pmTeamMember.findMany({
+    where: { OR: [{ pmId: me.id }, { memberId: me.id }] },
+    select: {
+      pm: { select: { id: true, name: true } },
+      member: { select: { id: true, name: true } },
+    },
+  });
+  const peerRows = teamRows.length
+    ? await prisma.pmTeamMember.findMany({
+        where: { pmId: { in: teamRows.map((t) => t.pm.id) } },
+        select: { member: { select: { id: true, name: true } } },
+      })
+    : [];
+  const meRow = await prisma.user.findUnique({
+    where: { id: me.id },
+    select: { id: true, name: true },
+  });
   const assigneeMap = new Map<string, { id: string; name: string }>();
-  for (const it of [...items, ...lookaheadItems]) {
-    if (it.assignee) assigneeMap.set(it.assignee.id, it.assignee);
+  if (meRow) assigneeMap.set(meRow.id, meRow);
+  for (const t of teamRows) {
+    assigneeMap.set(t.member.id, t.member);
+    assigneeMap.set(t.pm.id, t.pm);
+  }
+  for (const p of peerRows) {
+    assigneeMap.set(p.member.id, p.member);
   }
   const assignees = Array.from(assigneeMap.values()).sort((a, b) =>
     a.name.localeCompare(b.name),

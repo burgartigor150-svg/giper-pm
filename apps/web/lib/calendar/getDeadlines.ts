@@ -95,33 +95,30 @@ export async function getDeadlinesInRange(
 ): Promise<DeadlineItem[]> {
   const isPrivileged = user.role === 'ADMIN' || user.role === 'PM';
   const teamWide = filters.scope === 'team' && isPrivileged;
+  const teammateIds = await resolveTeammateIds(user.id);
 
-  // Visibility:
-  //   - 'team' (privileged opt-in)  → no filter, see everything.
+  // Visibility (both scopes filter to "my team" — the calendar is a
+  // PM tool, never the org-wide view):
   //   - 'mine' (default for all)    → PER_STAKE on the task AND
-  //     assignee belongs to "my team" (PmTeamMember relations).
-  //     The team gate is what stops a PM from seeing the finance/HR
-  //     tasks they happen to be the postanovshchik on.
-  let where: Parameters<typeof prisma.task.findMany>[0]['where'];
-  if (teamWide) {
-    where = { dueDate: { gte: from, lt: to } };
-  } else {
-    const teammateIds = await resolveTeammateIds(user.id);
-    where = {
-      dueDate: { gte: from, lt: to },
-      AND: [
-        PER_STAKE(user.id),
-        {
-          OR: [
-            // Unassigned tasks I created — keep them visible.
-            { assigneeId: null, creatorId: user.id },
-            // Tasks assigned to me or to a teammate.
-            { assigneeId: { in: teammateIds } },
-          ],
-        },
-      ],
-    };
-  }
+  //     assignee belongs to my team. Stops a PM from seeing finance/
+  //     HR tasks they happen to be the postanovshchik on.
+  //   - 'team' (privileged opt-in)  → drops PER_STAKE, but the team
+  //     gate stays: shows EVERY task assigned to my teammates,
+  //     regardless of whether I'm personally on it.
+  const teamGate = {
+    OR: [
+      // Unassigned tasks I created — keep them visible.
+      { assigneeId: null, creatorId: user.id },
+      // Tasks assigned to me or to a teammate.
+      { assigneeId: { in: teammateIds } },
+    ],
+  };
+  const where: Parameters<typeof prisma.task.findMany>[0]['where'] = teamWide
+    ? { dueDate: { gte: from, lt: to }, ...teamGate }
+    : {
+        dueDate: { gte: from, lt: to },
+        AND: [PER_STAKE(user.id), teamGate],
+      };
 
   // Apply additional UI filters on top of the visibility decision.
   if (filters.projectKey) {
