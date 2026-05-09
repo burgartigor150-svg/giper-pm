@@ -87,6 +87,45 @@ export async function pushTaskStatus(
 }
 
 /**
+ * Push the local task's deadline to Bitrix. No-op for non-mirrored tasks.
+ * Used when a user drags a task to a different day in the calendar
+ * (or otherwise edits the dueDate on a Bitrix-mirrored row).
+ *
+ * Bitrix accepts ISO timestamps in DEADLINE; sending an empty string
+ * clears the deadline.
+ */
+export async function pushTaskDeadline(
+  prisma: PrismaClient,
+  client: Bitrix24Client,
+  taskId: string,
+): Promise<{ pushed: boolean }> {
+  const task = await prisma.task.findUnique({
+    where: { id: taskId },
+    select: {
+      id: true,
+      dueDate: true,
+      externalId: true,
+      externalSource: true,
+    },
+  });
+  if (!task) throw new Error(`task ${taskId} not found`);
+  if (task.externalSource !== 'bitrix24' || !task.externalId) {
+    return { pushed: false };
+  }
+  await client.call('tasks.task.update', {
+    taskId: task.externalId,
+    fields: {
+      DEADLINE: task.dueDate ? task.dueDate.toISOString() : '',
+    },
+  });
+  await prisma.task.update({
+    where: { id: task.id },
+    data: { bitrixSyncedAt: new Date() },
+  });
+  return { pushed: true };
+}
+
+/**
  * Push an EXTERNAL comment to Bitrix. Stores the returned comment id back
  * on the local row so future edits or the inbound dedupe path can match.
  */

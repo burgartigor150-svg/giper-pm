@@ -22,6 +22,7 @@ export { runBitrix24Sync, lastSuccessfulSyncStart } from './runSync';
 export type { RunSyncResult } from './runSync';
 export {
   pushTaskStatus,
+  pushTaskDeadline,
   pushComment,
   pushProjectAsWorkgroup,
   pushTaskAsBitrix,

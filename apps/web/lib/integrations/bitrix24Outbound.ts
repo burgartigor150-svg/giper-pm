@@ -1,6 +1,7 @@
 import { prisma } from '@giper/db';
 import {
   pushTaskStatus,
+  pushTaskDeadline,
   pushComment,
   pushProjectAsWorkgroup,
   pushTaskAsBitrix,
@@ -40,6 +41,17 @@ export async function pushBitrixStatusBestEffort(taskId: string): Promise<void> 
   } catch (e) {
     // eslint-disable-next-line no-console
     console.error('bitrix24 outbound: pushTaskStatus failed', taskId, e);
+  }
+}
+
+export async function pushBitrixDeadlineBestEffort(taskId: string): Promise<void> {
+  const client = tryClient();
+  if (!client) return;
+  try {
+    await pushTaskDeadline(prisma, client, taskId);
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error('bitrix24 outbound: pushTaskDeadline failed', taskId, e);
   }
 }
 
