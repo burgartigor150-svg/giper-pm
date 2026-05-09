@@ -5,8 +5,15 @@ import { Lock, Globe } from 'lucide-react';
 import { Avatar } from '@giper/ui/components/Avatar';
 import { Button } from '@giper/ui/components/Button';
 import { addCommentAction, type ActionResult } from '@/actions/tasks';
-import { searchUsers, type UserSearchHit } from '@/actions/users';
+import { searchUsersForMention } from '@/actions/messenger';
 import { useT } from '@/lib/useT';
+
+type MentionUser = {
+  id: string;
+  name: string;
+  email: string | null;
+  image: string | null;
+};
 
 const initial: ActionResult = { ok: true };
 
@@ -48,7 +55,7 @@ export function CommentForm({
   // Mention popup state.
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionStart, setMentionStart] = useState<number | null>(null);
-  const [mentionResults, setMentionResults] = useState<UserSearchHit[]>([]);
+  const [mentionResults, setMentionResults] = useState<MentionUser[]>([]);
   const [mentionIndex, setMentionIndex] = useState(0);
 
   useEffect(() => {
@@ -58,36 +65,40 @@ export function CommentForm({
     }
   }, [state]);
 
-  // Fetch users for the popup whenever the query changes — debounced
-  // lightly to keep the search action cheap. < 1 char shows nothing.
+  // Fetch mention candidates whenever the query changes. Empty query
+  // is supported — server returns the top alphabetised users so the
+  // popup pops immediately on `@` / `+` (Slack/Discord/Bitrix style).
+  // includeInactive=true so Bitrix-mirrored stubs (no login) can be
+  // pinged — they'll see it next time they sign in.
   useEffect(() => {
-    if (mentionQuery === null || mentionQuery.length < 1) {
+    if (mentionQuery === null) {
       setMentionResults([]);
       return;
     }
     const id = setTimeout(async () => {
-      const list = await searchUsers(mentionQuery);
+      const q = mentionQuery.trim();
+      const list = await searchUsersForMention(q || ' ', { includeInactive: true });
       setMentionResults(list);
       setMentionIndex(0);
-    }, 120);
+    }, 100);
     return () => clearTimeout(id);
   }, [mentionQuery]);
 
   // Recompute mention popup state from the textarea's current state.
-  // Pattern: an `@` at the start of a word, followed by [a-zA-Z0-9 ]
-  // characters (we accept partial names with spaces — popup query stops
-  // at the next non-letter or two consecutive spaces).
+  // Triggers: `@` or `+` (mirrors the Bitrix UI hint "@ или +"),
+  // followed by partial name letters. The trigger must follow
+  // whitespace or be at the start of the input.
   function recomputeMention(value: string, caret: number) {
-    // Walk backwards from caret to find '@' start.
+    // Walk backwards from caret over name-like characters to find the
+    // trigger character.
     let i = caret - 1;
     while (i >= 0 && /[\p{L}\p{N}_.-]/u.test(value[i] ?? '')) i--;
-    if (i < 0 || value[i] !== '@') {
+    const trigger = value[i] ?? '';
+    if (i < 0 || (trigger !== '@' && trigger !== '+')) {
       setMentionQuery(null);
       setMentionStart(null);
       return;
     }
-    // The `@` must follow whitespace or be at start of input — otherwise
-    // it's an email or random text.
     if (i > 0 && !/\s/.test(value[i - 1] ?? '')) {
       setMentionQuery(null);
       setMentionStart(null);
@@ -103,7 +114,12 @@ export function CommentForm({
     recomputeMention(value, e.target.selectionStart ?? value.length);
   }
 
-  function pickMention(user: UserSearchHit) {
+  function onSelectCaret(e: React.SyntheticEvent<HTMLTextAreaElement>) {
+    const target = e.currentTarget;
+    recomputeMention(target.value, target.selectionStart ?? 0);
+  }
+
+  function pickMention(user: MentionUser) {
     if (mentionStart === null || !taRef.current) return;
     const ta = taRef.current;
     const before = text.slice(0, mentionStart);
@@ -112,7 +128,6 @@ export function CommentForm({
     const next = before + insert + after;
     setText(next);
     ta.value = next;
-    // Place caret right after the inserted token.
     requestAnimationFrame(() => {
       const pos = before.length + insert.length;
       ta.setSelectionRange(pos, pos);
@@ -123,36 +138,40 @@ export function CommentForm({
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (mentionQuery !== null && mentionResults.length > 0) {
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        setMentionIndex((i) => (i + 1) % mentionResults.length);
-        return;
-      }
-      if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        setMentionIndex((i) => (i - 1 + mentionResults.length) % mentionResults.length);
-        return;
-      }
-      if (e.key === 'Enter' || e.key === 'Tab') {
-        const pick = mentionResults[mentionIndex];
-        if (pick) {
-          e.preventDefault();
-          pickMention(pick);
-          return;
-        }
-      }
+    if (mentionQuery !== null) {
       if (e.key === 'Escape') {
         e.preventDefault();
         setMentionQuery(null);
         setMentionStart(null);
         return;
       }
+      if (mentionResults.length > 0) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          setMentionIndex((i) => (i + 1) % mentionResults.length);
+          return;
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          setMentionIndex(
+            (i) => (i - 1 + mentionResults.length) % mentionResults.length,
+          );
+          return;
+        }
+        if (e.key === 'Enter' || e.key === 'Tab') {
+          const pick = mentionResults[mentionIndex];
+          if (pick) {
+            e.preventDefault();
+            pickMention(pick);
+            return;
+          }
+        }
+      }
     }
   }
 
   const isInternal = visibility === 'INTERNAL';
-  const showPopup = mentionQuery !== null && mentionResults.length > 0;
+  const showPopup = mentionQuery !== null;
 
   return (
     <form action={formAction} className="relative flex flex-col gap-2">
@@ -163,7 +182,8 @@ export function CommentForm({
         value={text}
         onChange={onChange}
         onKeyDown={onKeyDown}
-        placeholder={t('commentPlaceholder')}
+        onSelect={onSelectCaret}
+        placeholder="Нажмите @ или + чтобы упомянуть человека"
         required
         className={
           'min-h-[80px] rounded-md border bg-background px-3 py-2 text-sm transition-colors ' +
@@ -173,32 +193,42 @@ export function CommentForm({
         }
       />
       {showPopup ? (
-        <div className="absolute left-2 top-full z-30 mt-1 w-72 overflow-hidden rounded-md border border-border bg-popover text-popover-foreground shadow-lg">
-          <ul>
-            {mentionResults.map((u, i) => (
-              <li key={u.id}>
-                <button
-                  type="button"
-                  // Pointer-down rather than click — click fires after blur,
-                  // and blur would reset the popup state before pickMention runs.
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    pickMention(u);
-                  }}
-                  className={
-                    'flex w-full items-center gap-2 px-2 py-1.5 text-left text-sm ' +
-                    (i === mentionIndex ? 'bg-accent text-accent-foreground' : '')
-                  }
-                >
-                  <Avatar src={u.image} alt={u.name} className="h-6 w-6" />
-                  <span className="flex-1 truncate">{u.name}</span>
-                  <span className="text-[11px] text-muted-foreground truncate">
-                    {u.email}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
+        <div className="absolute left-2 top-full z-30 mt-1 max-h-72 w-80 overflow-y-auto rounded-md border border-border bg-popover text-popover-foreground shadow-lg">
+          {mentionResults.length === 0 ? (
+            <div className="px-3 py-2 text-xs text-muted-foreground">
+              {mentionQuery
+                ? `Никого не найдено по «${mentionQuery}»`
+                : 'Загрузка…'}
+            </div>
+          ) : (
+            <ul>
+              {mentionResults.map((u, i) => (
+                <li key={u.id}>
+                  <button
+                    type="button"
+                    // Pointer-down rather than click — click fires after blur,
+                    // and blur would reset the popup state before pickMention runs.
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      pickMention(u);
+                    }}
+                    className={
+                      'flex w-full items-center gap-2 px-2 py-1.5 text-left text-sm ' +
+                      (i === mentionIndex ? 'bg-accent text-accent-foreground' : '')
+                    }
+                  >
+                    <Avatar src={u.image} alt={u.name} className="h-6 w-6" />
+                    <span className="flex-1 truncate">{u.name}</span>
+                    {u.email ? (
+                      <span className="text-[11px] text-muted-foreground truncate">
+                        {u.email}
+                      </span>
+                    ) : null}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       ) : null}
       {state && !state.ok ? (
