@@ -232,28 +232,37 @@ export function Calendar({
     router.push(sp.toString() ? `?${sp.toString()}` : '?');
   }, [params, router]);
 
-  // Jump to an arbitrary date picked in the filter bar. For month
-  // view we still anchor on `m=YYYY-MM`; for week/day on `d=YYYY-MM-DD`.
+  // Jump to an arbitrary date picked in the toolbar. We always store
+  // the picked day in `?d=YYYY-MM-DD` (so the day cell can render a
+  // selection ring inside the current month) and additionally pin the
+  // month anchor for month view via `?m`. For week/day view the `d`
+  // param IS the anchor — same shape as the manual ←/→ navigation.
   const goToDate = useCallback(
     (iso: string) => {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return;
       const sp = new URLSearchParams(params.toString());
-      if (view === 'month') {
-        sp.set('m', iso.slice(0, 7));
-        sp.delete('d');
-      } else {
-        sp.set('d', iso);
-        sp.delete('m');
-      }
+      sp.set('d', iso);
+      if (view === 'month') sp.set('m', iso.slice(0, 7));
+      else sp.delete('m');
       router.push(`?${sp.toString()}`);
     },
     [view, params, router],
   );
 
-  // Current anchor as YYYY-MM-DD (input[type=date] needs a full date,
-  // even in month view where we only care about year-month).
-  const anchorIso =
-    anchor.length === 7 ? `${anchor}-01` : anchor;
+  // Current anchor as YYYY-MM-DD for the <input type="date">. In
+  // month view the server gives us YYYY-MM-01; pull the explicit
+  // selected day from the URL `d=` if present so the picker reflects
+  // the user's last choice instead of the 1st.
+  const explicitDay = params.get('d') ?? '';
+  const anchorIso = explicitDay && /^\d{4}-\d{2}-\d{2}$/.test(explicitDay)
+    ? explicitDay
+    : anchor;
+  const selectedDayKey = explicitDay
+    ? (() => {
+        const d = new Date(explicitDay);
+        return Number.isNaN(d.getTime()) ? null : dayKey(d);
+      })()
+    : null;
   const setView = useCallback(
     (next: View) => {
       const sp = new URLSearchParams(params.toString());
@@ -365,6 +374,13 @@ export function Calendar({
             >
               <Filter className="h-3 w-3" /> Фильтры
             </button>
+            <input
+              type="date"
+              value={anchorIso}
+              onChange={(e) => goToDate(e.target.value)}
+              title="Перейти к дате"
+              className="rounded-md border border-input bg-background px-2 py-1 text-xs"
+            />
             <span className="ml-1 inline-flex items-center gap-0.5">
               <button
                 type="button"
@@ -396,16 +412,6 @@ export function Calendar({
         {/* Filters bar */}
         {filtersOpen ? (
           <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-muted/40 p-2 text-xs">
-            <label className="inline-flex items-center gap-1 text-muted-foreground">
-              <CalendarIcon className="h-3 w-3" />
-              Перейти к дате:
-              <input
-                type="date"
-                value={anchorIso}
-                onChange={(e) => goToDate(e.target.value)}
-                className="rounded border border-input bg-background px-1.5 py-0.5"
-              />
-            </label>
             {isPrivileged ? (
               <div className="inline-flex items-center gap-0.5 rounded-md border border-input bg-background p-0.5">
                 <button
@@ -519,6 +525,7 @@ export function Calendar({
               <MonthGrid
                 anchor={anchor}
                 today={today}
+                selectedDayKey={selectedDayKey}
                 buckets={buckets}
                 onDayClick={(date) => setPopover({ key: dayKey(date), date })}
               />
@@ -526,6 +533,7 @@ export function Calendar({
               <WeekGrid
                 anchor={anchor}
                 today={today}
+                selectedDayKey={selectedDayKey}
                 buckets={buckets}
                 onDayClick={(date) => setPopover({ key: dayKey(date), date })}
               />
@@ -588,11 +596,13 @@ function ViewBtn({
 function MonthGrid({
   anchor,
   today,
+  selectedDayKey,
   buckets,
   onDayClick,
 }: {
   anchor: string;
   today: Date;
+  selectedDayKey: string | null;
   buckets: Map<string, DeadlineItem[]>;
   onDayClick: (d: Date) => void;
 }) {
@@ -625,6 +635,7 @@ function MonthGrid({
             key={ymd(day)}
             day={day}
             today={today}
+            isSelected={dayKey(day) === selectedDayKey}
             inMonth={day.getMonth() === monthIdx}
             items={buckets.get(dayKey(day)) ?? []}
             onClick={onDayClick}
@@ -638,11 +649,13 @@ function MonthGrid({
 function WeekGrid({
   anchor,
   today,
+  selectedDayKey,
   buckets,
   onDayClick,
 }: {
   anchor: string;
   today: Date;
+  selectedDayKey: string | null;
   buckets: Map<string, DeadlineItem[]>;
   onDayClick: (d: Date) => void;
 }) {
@@ -666,6 +679,7 @@ function WeekGrid({
           key={ymd(d)}
           day={d}
           today={today}
+          isSelected={dayKey(d) === selectedDayKey}
           inMonth={true}
           items={buckets.get(dayKey(d)) ?? []}
           onClick={onDayClick}
@@ -713,6 +727,7 @@ function DayList({
 function DayCell({
   day,
   today,
+  isSelected,
   inMonth,
   items,
   onClick,
@@ -720,6 +735,7 @@ function DayCell({
 }: {
   day: Date;
   today: Date;
+  isSelected: boolean;
   inMonth: boolean;
   items: DeadlineItem[];
   onClick: (d: Date) => void;
@@ -743,6 +759,7 @@ function DayCell({
           isWeekend ? 'bg-muted/40' : '',
           overdueOpen ? 'bg-red-50' : '',
           isToday ? 'ring-2 ring-blue-500 ring-inset' : '',
+          isSelected && !isToday ? 'ring-2 ring-purple-500 ring-inset' : '',
         ].join(' ')}
       >
         <button
