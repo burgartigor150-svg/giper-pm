@@ -14,6 +14,8 @@ export { syncTaskAttachments, bitrix24DownloadUrl } from './syncFiles';
 export type { SyncFilesResult } from './syncFiles';
 export { syncTaskComments } from './syncComments';
 export type { SyncCommentsResult } from './syncComments';
+export { syncTaskHistory } from './syncHistory';
+export type { SyncHistoryResult } from './syncHistory';
 export { runBitrix24Sync, lastSuccessfulSyncStart } from './runSync';
 export type { RunSyncResult } from './runSync';
 export {

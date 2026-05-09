@@ -4,6 +4,7 @@ import type { BxTask } from './types';
 import { mapBitrixTask } from './mappers';
 import { syncTaskAttachments, type SyncFilesResult } from './syncFiles';
 import { syncTaskComments, type SyncCommentsResult } from './syncComments';
+import { syncTaskHistory, type SyncHistoryResult } from './syncHistory';
 
 export type SyncTasksResult = {
   totalSeen: number;
@@ -13,6 +14,7 @@ export type SyncTasksResult = {
   errors: number;
   files: SyncFilesResult;
   comments: SyncCommentsResult;
+  history: SyncHistoryResult;
 };
 
 export type SyncTasksOptions = {
@@ -46,6 +48,7 @@ export async function syncTasks(
     errors: 0,
     files: { totalSeen: 0, created: 0, updated: 0, deleted: 0, errors: 0 },
     comments: { totalSeen: 0, created: 0, updated: 0, deleted: 0, errors: 0 },
+    history: { totalSeen: 0, created: 0, updated: 0, errors: 0 },
   };
 
   const projectByExternalId = new Map<string, string>();
@@ -166,6 +169,15 @@ export async function syncTasks(
               client,
               { id: localTaskId, bitrixTaskId: raw.id },
               stats.comments,
+            );
+            // History (system events: status, deadline, watchers, …)
+            // — separate Bitrix collection from comments. Renders into
+            // the same Comment table with externalId='hist:N'.
+            await syncTaskHistory(
+              prisma,
+              client,
+              { id: localTaskId, bitrixTaskId: raw.id },
+              stats.history,
             );
           }
         } catch (e) {

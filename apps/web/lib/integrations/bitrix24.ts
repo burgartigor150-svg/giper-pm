@@ -144,6 +144,7 @@ function freshAggregate() {
       errors: 0,
       files: { totalSeen: 0, created: 0, updated: 0, deleted: 0, errors: 0 },
       comments: { totalSeen: 0, created: 0, updated: 0, deleted: 0, errors: 0 },
+      history: { totalSeen: 0, created: 0, updated: 0, errors: 0 },
     },
   };
 }
@@ -168,6 +169,9 @@ function addInto(
   for (const k of ['totalSeen', 'created', 'updated', 'deleted', 'errors'] as const) {
     agg.tasks.files[k] += r.tasks.files[k];
     agg.tasks.comments[k] += r.tasks.comments[k];
+  }
+  for (const k of ['totalSeen', 'created', 'updated', 'errors'] as const) {
+    agg.tasks.history[k] += r.tasks.history[k];
   }
 }
 
