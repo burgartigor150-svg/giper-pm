@@ -231,6 +231,29 @@ export function Calendar({
     sp.delete('d');
     router.push(sp.toString() ? `?${sp.toString()}` : '?');
   }, [params, router]);
+
+  // Jump to an arbitrary date picked in the filter bar. For month
+  // view we still anchor on `m=YYYY-MM`; for week/day on `d=YYYY-MM-DD`.
+  const goToDate = useCallback(
+    (iso: string) => {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return;
+      const sp = new URLSearchParams(params.toString());
+      if (view === 'month') {
+        sp.set('m', iso.slice(0, 7));
+        sp.delete('d');
+      } else {
+        sp.set('d', iso);
+        sp.delete('m');
+      }
+      router.push(`?${sp.toString()}`);
+    },
+    [view, params, router],
+  );
+
+  // Current anchor as YYYY-MM-DD (input[type=date] needs a full date,
+  // even in month view where we only care about year-month).
+  const anchorIso =
+    anchor.length === 7 ? `${anchor}-01` : anchor;
   const setView = useCallback(
     (next: View) => {
       const sp = new URLSearchParams(params.toString());
@@ -373,6 +396,16 @@ export function Calendar({
         {/* Filters bar */}
         {filtersOpen ? (
           <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-muted/40 p-2 text-xs">
+            <label className="inline-flex items-center gap-1 text-muted-foreground">
+              <CalendarIcon className="h-3 w-3" />
+              Перейти к дате:
+              <input
+                type="date"
+                value={anchorIso}
+                onChange={(e) => goToDate(e.target.value)}
+                className="rounded border border-input bg-background px-1.5 py-0.5"
+              />
+            </label>
             {isPrivileged ? (
               <div className="inline-flex items-center gap-0.5 rounded-md border border-input bg-background p-0.5">
                 <button
