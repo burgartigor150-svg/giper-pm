@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState, useEffect, useRef, useState } from 'react';
+import { useActionState, useEffect, useMemo, useRef, useState } from 'react';
 import { Lock, Globe } from 'lucide-react';
 import { Avatar } from '@giper/ui/components/Avatar';
 import { Button } from '@giper/ui/components/Button';
@@ -58,12 +58,45 @@ export function CommentForm({
   const [mentionResults, setMentionResults] = useState<MentionUser[]>([]);
   const [mentionIndex, setMentionIndex] = useState(0);
 
+  // Resolved mentions for the current draft. We display "@Имя" inline
+  // in the textarea (much friendlier than a raw cuid like
+  // "@cmovi9mz3009yr4mfvwhtunhf") and keep this map so we can rewrite
+  // each "@Имя" back to "@<userId>" right before the form submits —
+  // that's the canonical token the server-side parser expects.
+  const [mentions, setMentions] = useState<
+    Array<{ userId: string; label: string }>
+  >([]);
+
   useEffect(() => {
     if (state && state.ok) {
       setText('');
+      setMentions([]);
       if (taRef.current) taRef.current.value = '';
     }
   }, [state]);
+
+  // Drop mentions whose label was edited away from the draft. Keeps
+  // the resolution map honest as the user backspaces / rewrites the
+  // text. Order is preserved.
+  useEffect(() => {
+    setMentions((prev) => prev.filter((m) => text.includes(m.label)));
+  }, [text]);
+
+  // Body that actually goes over the wire on submit. Replace each
+  // "@Имя" pill text with "@<userId>" once. Sort by label length desc
+  // so a long name ("@Иван Иванов") is replaced before the shorter
+  // prefix ("@Иван") of another mention — avoids partial overwrites.
+  const submittedBody = useMemo(() => {
+    if (mentions.length === 0) return text;
+    let out = text;
+    const ordered = [...mentions].sort(
+      (a, b) => b.label.length - a.label.length,
+    );
+    for (const m of ordered) {
+      out = out.split(m.label).join(`@${m.userId}`);
+    }
+    return out;
+  }, [text, mentions]);
 
   // Fetch mention candidates whenever the query changes. Empty query
   // is supported — server returns the top alphabetised users so the
@@ -124,10 +157,21 @@ export function CommentForm({
     const ta = taRef.current;
     const before = text.slice(0, mentionStart);
     const after = text.slice(ta.selectionStart ?? text.length);
-    const insert = `@${user.id} `;
+    // Show the human name, not the cuid. The map above rewrites the
+    // label back to the id token at submit time.
+    const label = `@${user.name}`;
+    const insert = `${label} `;
     const next = before + insert + after;
     setText(next);
     ta.value = next;
+    setMentions((prev) => {
+      // De-dupe per label — a 2nd insertion of the same name reuses
+      // the existing entry.
+      if (prev.some((m) => m.userId === user.id && m.label === label)) {
+        return prev;
+      }
+      return [...prev, { userId: user.id, label }];
+    });
     requestAnimationFrame(() => {
       const pos = before.length + insert.length;
       ta.setSelectionRange(pos, pos);
@@ -176,9 +220,15 @@ export function CommentForm({
   return (
     <form action={formAction} className="relative flex flex-col gap-2">
       {showVisibilityToggle ? <input type="hidden" name="visibility" value={visibility} /> : null}
+      {/*
+        Wire the body field via a hidden input so the value the server
+        sees is the mention-resolved one ("@<userId>"), not the
+        human-friendly text shown in the textarea ("@Имя").
+        The textarea has no `name` so it isn't included in FormData.
+      */}
+      <input type="hidden" name="body" value={submittedBody} />
       <textarea
         ref={taRef}
-        name="body"
         value={text}
         onChange={onChange}
         onKeyDown={onKeyDown}
