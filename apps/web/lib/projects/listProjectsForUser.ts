@@ -51,26 +51,18 @@ export async function listProjectsForUser(user: SessionUser, filter: ListFilter 
     // No visibility filter — admin/PM browsing the whole org.
   } else {
     const teammateIds = await resolveTeammateIds(user.id);
-    where.OR = [
-      // I personally lead/own the project.
-      { ownerId: user.id },
-      // I'm an explicit project member with one of the LEAD/CONTRIBUTOR roles.
-      { members: { some: { userId: user.id } } },
-      // Project has at least one task whose ASSIGNEE is in my team.
-      // This is the gate that drops finance/HR/IT-support projects
-      // I'm only the postanovshchik on — those are someone else's work.
-      {
-        tasks: {
-          some: {
-            OR: [
-              { assigneeId: { in: teammateIds } },
-              // Unassigned tasks I created — keep their projects visible.
-              { assigneeId: null, creatorId: user.id },
-            ],
-          },
-        },
+    // Project must have at least one task whose assignee is on my
+    // team. Empty Bitrix-mirrored workgroups (owner=me but no tasks)
+    // are intentionally HIDDEN — "если в проекте 0 задач, мне нечего
+    // там делать". Owning the project alone isn't enough.
+    where.tasks = {
+      some: {
+        OR: [
+          { assigneeId: { in: teammateIds } },
+          { assigneeId: null, creatorId: user.id },
+        ],
       },
-    ];
+    };
   }
 
   // Status filter
