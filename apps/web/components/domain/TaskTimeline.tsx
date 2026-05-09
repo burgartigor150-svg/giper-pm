@@ -1,8 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Avatar } from '@giper/ui/components/Avatar';
-import { Globe, Lock } from 'lucide-react';
+import { Globe, Lock, MessageSquare, History } from 'lucide-react';
 import type { TaskStatus } from '@giper/db';
 import { useT } from '@/lib/useT';
 import { CommentForm } from './CommentForm';
@@ -16,6 +16,13 @@ type CommentItem = {
   author: Author;
   body: string;
   visibility: 'EXTERNAL' | 'INTERNAL';
+  /**
+   * `true` for Bitrix-mirrored history events (deadline pushes,
+   * watcher edits, status flips, …) — always rendered as system
+   * lines and routed to a separate tab so real discussion isn't
+   * buried under deadline noise.
+   */
+  isHistory: boolean;
 };
 type StatusItem = {
   kind: 'status';
@@ -31,7 +38,7 @@ type Props = {
   taskId: string;
   projectKey: string;
   taskNumber: number;
-  /** Single full timeline. We split by visibility on the client per tab. */
+  /** Single full timeline. We split per tab on the client. */
   items: TLItem[];
   /** Bitrix-mirror? Drives which tabs are shown and the form's visibility toggle. */
   isMirror: boolean;
@@ -39,18 +46,27 @@ type Props = {
   mentions: Map<string, Author>;
 };
 
+type Tab = 'discussion' | 'events' | 'internal';
+
+const PAGE_SIZE = 50;
+
 /**
- * Two-tab timeline:
- *   - For mirror tasks: «Bitrix» (external comments + status events) is
- *     the default; «Внутренний» (internal comments + status events) is
- *     the second tab. Comments posted in the Bitrix tab push to Bitrix
- *     under the author's name; comments in Внутренний stay local.
- *   - For local tasks: a single «Чат» tab — there's no client-facing
- *     channel to split into.
+ * Tabbed timeline:
  *
- * Status changes appear in both tabs because they're context, not
- * messages. Removing them from one tab would make it harder to read
- * the conversation in chronological order.
+ *   Mirror tasks (3 tabs):
+ *     • Обсуждение  — real human comments from Bitrix (EXTERNAL,
+ *                     non-history) + local status changes for context.
+ *                     Default — that's where the conversation happens.
+ *     • События     — Bitrix-mirrored history (deadline/watcher/etc).
+ *     • Внутренний  — local-only INTERNAL comments + status events.
+ *
+ *   Local tasks (1 tab):
+ *     • Чат         — internal comments + status changes.
+ *
+ * Newest entries float to the bottom (chronological feed). The list is
+ * lazily rendered: we show the latest PAGE_SIZE rows by default with a
+ * "Показать ещё" button to load older pages on click — keeps tasks
+ * with thousands of history events fast to open.
  */
 export function TaskTimeline({
   taskId,
@@ -62,69 +78,120 @@ export function TaskTimeline({
 }: Props) {
   const t = useT('tasks.detail');
   const tStatus = useT('tasks.status');
-  const [tab, setTab] = useState<'external' | 'internal'>(
-    isMirror ? 'external' : 'internal',
-  );
+  const [tab, setTab] = useState<Tab>(isMirror ? 'discussion' : 'internal');
+  const [shown, setShown] = useState(PAGE_SIZE);
 
-  const filtered = items.filter((it) => {
-    if (it.kind === 'status') return true; // status events are context, in both
-    return tab === 'external'
-      ? it.visibility === 'EXTERNAL'
-      : it.visibility === 'INTERNAL';
-  });
+  const filtered = useMemo(() => {
+    return items.filter((it) => {
+      if (it.kind === 'status') {
+        // Status events are useful context — show in Discussion and
+        // Internal, hide from Events (which is Bitrix history-only).
+        return tab !== 'events';
+      }
+      if (tab === 'events') return it.isHistory;
+      if (tab === 'discussion')
+        return !it.isHistory && it.visibility === 'EXTERNAL';
+      // internal
+      return !it.isHistory && it.visibility === 'INTERNAL';
+    });
+  }, [items, tab]);
+
+  // Lazy paging: render only the LATEST `shown` items. Older rows live
+  // behind a "Показать ещё" button so a 70-event task isn't 70 React
+  // nodes on every render.
+  const visible = useMemo(() => {
+    if (filtered.length <= shown) return filtered;
+    return filtered.slice(filtered.length - shown);
+  }, [filtered, shown]);
+
+  const switchTab = (next: Tab) => {
+    setTab(next);
+    setShown(PAGE_SIZE);
+  };
 
   return (
     <div className="flex flex-col gap-3">
       {isMirror ? (
-        <div className="flex gap-1 rounded-md border border-input bg-background p-0.5 self-start">
-          <TabBtn active={tab === 'external'} onClick={() => setTab('external')}>
-            <Globe className="h-3.5 w-3.5" />
-            Bitrix
+        <div className="flex flex-wrap gap-1 rounded-md border border-input bg-background p-0.5 self-start">
+          <TabBtn
+            active={tab === 'discussion'}
+            onClick={() => switchTab('discussion')}
+          >
+            <MessageSquare className="h-3.5 w-3.5" />
+            Обсуждение
+            <Badge>{items.filter((it) => it.kind === 'comment' && !it.isHistory && it.visibility === 'EXTERNAL').length}</Badge>
           </TabBtn>
-          <TabBtn active={tab === 'internal'} onClick={() => setTab('internal')}>
+          <TabBtn active={tab === 'events'} onClick={() => switchTab('events')}>
+            <History className="h-3.5 w-3.5" />
+            События
+            <Badge>{items.filter((it) => it.kind === 'comment' && it.isHistory).length}</Badge>
+          </TabBtn>
+          <TabBtn
+            active={tab === 'internal'}
+            onClick={() => switchTab('internal')}
+          >
             <Lock className="h-3.5 w-3.5" />
             Внутренний
+            <Badge>{items.filter((it) => it.kind === 'comment' && !it.isHistory && it.visibility === 'INTERNAL').length}</Badge>
           </TabBtn>
         </div>
       ) : null}
 
       {filtered.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          {tab === 'external'
-            ? 'В чате с Bitrix24 пока пусто.'
-            : 'Внутренних сообщений пока нет.'}
-        </p>
+        <p className="text-sm text-muted-foreground">{emptyLabel(tab, isMirror)}</p>
       ) : (
-        <ul className="flex flex-col gap-3">
-          {filtered.map((item) =>
-            item.kind === 'comment' ? (
-              <CommentRow key={`c-${item.id}`} item={item} mentions={mentions} />
-            ) : (
-              <StatusRow
-                key={`s-${item.id}`}
-                item={item}
-                fromLabel={item.from ? tStatus(item.from) : null}
-                toLabel={tStatus(item.to)}
-              />
-            ),
-          )}
-        </ul>
+        <>
+          {filtered.length > visible.length ? (
+            <button
+              type="button"
+              onClick={() => setShown((s) => s + PAGE_SIZE)}
+              className="self-start rounded border border-input bg-background px-3 py-1 text-xs text-muted-foreground hover:bg-accent"
+            >
+              Показать ещё ({filtered.length - visible.length} старше)
+            </button>
+          ) : null}
+
+          <ul className="flex flex-col gap-3">
+            {visible.map((item) =>
+              item.kind === 'status' ? (
+                <StatusRow
+                  key={`s-${item.id}`}
+                  item={item}
+                  fromLabel={item.from ? tStatus(item.from) : null}
+                  toLabel={tStatus(item.to)}
+                />
+              ) : item.isHistory ? (
+                <HistoryRow key={`h-${item.id}`} item={item} mentions={mentions} />
+              ) : (
+                <CommentRow key={`c-${item.id}`} item={item} mentions={mentions} />
+              ),
+            )}
+          </ul>
+        </>
       )}
 
       <CommentForm
         taskId={taskId}
         projectKey={projectKey}
         taskNumber={taskNumber}
-        // The form decides visibility:
-        //  - on a mirror task: shows the toggle (default = the
-        //    currently-active tab's visibility), letting the author
-        //    flip if they meant the other channel.
-        //  - on a local task: hidden, always INTERNAL by default.
+        // Form visibility toggle behaves the same as before:
+        //   - mirror task: toggle visible, default = current tab maps
+        //     onto the matching channel (discussion → EXTERNAL→Bitrix,
+        //     internal → INTERNAL→stays local). Events tab ⇒ EXTERNAL
+        //     (you'd usually be commenting on what just changed).
+        //   - local task: hidden, INTERNAL by default.
         showVisibilityToggle={isMirror}
-        defaultVisibility={tab === 'external' ? 'EXTERNAL' : 'INTERNAL'}
+        defaultVisibility={tab === 'internal' ? 'INTERNAL' : 'EXTERNAL'}
       />
     </div>
   );
+}
+
+function emptyLabel(tab: Tab, isMirror: boolean): string {
+  if (!isMirror) return 'Сообщений пока нет.';
+  if (tab === 'discussion') return 'В обсуждении из Bitrix24 пока пусто.';
+  if (tab === 'events') return 'Системных событий ещё не было.';
+  return 'Внутренних сообщений пока нет.';
 }
 
 function TabBtn({
@@ -152,6 +219,14 @@ function TabBtn({
   );
 }
 
+function Badge({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="rounded bg-black/10 px-1 text-[10px] leading-4 text-current">
+      {children}
+    </span>
+  );
+}
+
 function CommentRow({
   item,
   mentions,
@@ -169,7 +244,7 @@ function CommentRow({
       }
     >
       <Avatar src={item.author.image} alt={item.author.name} className="h-7 w-7" />
-      <div className="flex-1">
+      <div className="flex-1 min-w-0">
         <div className="flex items-baseline gap-2 text-xs text-muted-foreground">
           <span className="font-medium text-foreground">{item.author.name}</span>
           <span>{item.at.toLocaleString('ru-RU')}</span>
@@ -180,6 +255,31 @@ function CommentRow({
           ) : null}
         </div>
         <p className="mt-1 whitespace-pre-wrap break-words text-sm">
+          {renderMentions(item.body, mentions)}
+        </p>
+      </div>
+    </li>
+  );
+}
+
+function HistoryRow({
+  item,
+  mentions,
+}: {
+  item: CommentItem;
+  mentions: Map<string, Author>;
+}) {
+  return (
+    <li className="flex gap-3 text-xs text-muted-foreground">
+      <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-foreground/60">
+        <History className="h-3.5 w-3.5" />
+      </span>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-baseline gap-2">
+          <span className="font-medium text-foreground">{item.author.name}</span>
+          <span>{item.at.toLocaleString('ru-RU')}</span>
+        </div>
+        <p className="mt-0.5 whitespace-pre-wrap break-words">
           {renderMentions(item.body, mentions)}
         </p>
       </div>
@@ -203,7 +303,9 @@ function StatusRow({
       </span>
       <div className="flex flex-1 flex-col">
         <span>
-          <span className="font-medium text-foreground">{item.actor?.name ?? '—'}</span>{' '}
+          <span className="font-medium text-foreground">
+            {item.actor?.name ?? '—'}
+          </span>{' '}
           {fromLabel
             ? `изменил(а) статус: ${fromLabel} → ${toLabel}`
             : `установил(а) статус: ${toLabel}`}
@@ -214,11 +316,6 @@ function StatusRow({
   );
 }
 
-/**
- * Replace `@<userId>` tokens in a comment body with inline mention
- * pills. Same logic as the server-side renderer that lived directly
- * on the page — moved here so the tabbed timeline can use it.
- */
 function renderMentions(body: string, users: Map<string, Author>): React.ReactNode {
   const re = /@([a-z0-9]{24,})\b/g;
   const out: React.ReactNode[] = [];

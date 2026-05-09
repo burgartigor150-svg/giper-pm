@@ -210,6 +210,11 @@ export default async function TaskDetailPage({ params }: { params: Params }) {
         author: { id: string; name: string; image: string | null };
         body: string;
         visibility: 'EXTERNAL' | 'INTERNAL';
+        // Bitrix-mirrored history events live in the same Comment table
+        // (externalId starts with 'hist:'). The timeline splits them
+        // into a separate tab so real conversation isn't drowned out
+        // by deadline/watcher edit noise.
+        isHistory: boolean;
       }
     | {
         kind: 'status';
@@ -229,6 +234,7 @@ export default async function TaskDetailPage({ params }: { params: Params }) {
         author: c.author,
         body: c.body,
         visibility: c.visibility,
+        isHistory: !!c.externalId && c.externalId.startsWith('hist:'),
       }),
     ),
     ...task.statusChanges.map(

@@ -159,6 +159,9 @@ export async function getTask(projectKey: string, number: number, user: SessionU
           source: true,
           visibility: true,
           createdAt: true,
+          // externalId carries our 'hist:<bxId>' marker for Bitrix history
+          // events that the timeline tabs split out from regular comments.
+          externalId: true,
           author: { select: { id: true, name: true, image: true } },
         },
       },
