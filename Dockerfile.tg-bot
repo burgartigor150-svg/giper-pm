@@ -65,4 +65,7 @@ ENV NODE_ENV=production
 # it back; if any token is rejected, the row's lastError column updates
 # and admins can see it in the UI.
 ENTRYPOINT ["/sbin/tini", "--"]
-CMD ["node", "--import", "file:///app/apps/tg-bot/node_modules/tsx/dist/esm/index.mjs", "/app/apps/tg-bot/src/index.ts"]
+# Run via tsx CJS entry — its loader hooks transparently transpile every
+# imported .ts file (apps/tg-bot/src/* AND workspace packages reached via
+# pnpm symlinks like @giper/db, @giper/shared, @giper/integrations).
+CMD ["node", "/app/apps/tg-bot/node_modules/tsx/dist/cli.mjs", "/app/apps/tg-bot/src/index.ts"]
