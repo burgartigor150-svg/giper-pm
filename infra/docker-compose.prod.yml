@@ -41,6 +41,13 @@ services:
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis_data:/data
+    # Bind to host loopback on a non-default port so that host-network
+    # services (livekit, livekit-egress) can reach this exact instance.
+    # The host already runs another Redis on :6379 — using :6380 keeps
+    # both alive without conflict and prevents the egress split-brain
+    # where livekit and egress point at different Redis databases.
+    ports:
+      - "127.0.0.1:6380:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -267,8 +274,11 @@ services:
           stun_servers:
             - stun.l.google.com:19302
             - stun1.l.google.com:19302
+        # MUST match the egress redis (compose service `redis` exposed
+        # as 127.0.0.1:6380 on host). Otherwise PSRPC has split-brain
+        # and StartEgress hangs with "no response from servers".
         redis:
-          address: 127.0.0.1:6379
+          address: 127.0.0.1:6380
         webhook:
           api_key: ${LIVEKIT_API_KEY}
           urls:
