@@ -84,6 +84,7 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
         serverUrl={join.serverUrl}
         token={join.token}
         title={meeting.title}
+        defaultName={join.displayName}
       />
     );
   }

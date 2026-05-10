@@ -1,33 +1,48 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useState, useTransition } from 'react';
+import { useMemo, useState, useTransition } from 'react';
 import {
   ControlBar,
   GridLayout,
   LiveKitRoom,
   ParticipantTile,
+  PreJoin,
   RoomAudioRenderer,
   useTracks,
 } from '@livekit/components-react';
 import '@livekit/components-styles';
-import { Track } from 'livekit-client';
+import { Track, type LocalUserChoices } from 'livekit-client';
 import { endMeetingAction } from '@/actions/meetings';
 
+/**
+ * Two stages:
+ *
+ *   1. PreJoin — standard LiveKit form: device pickers + camera/mic
+ *      preview. This is also where the browser raises the
+ *      getUserMedia permission prompt — failing to do this BEFORE
+ *      connecting is the #1 cause of "mic doesn't work" reports.
+ *      Safari in particular needs an explicit user gesture per device.
+ *
+ *   2. Connected — room UI (grid + control bar + audio mixer).
+ */
 export function MeetingRoom({
   meetingId,
   serverUrl,
   token,
   title,
+  defaultName,
 }: {
   meetingId: string;
   serverUrl: string;
   token: string;
   title: string;
+  defaultName: string;
 }) {
   const router = useRouter();
   const [, startTransition] = useTransition();
   const [leaving, setLeaving] = useState(false);
+  const [choices, setChoices] = useState<LocalUserChoices | null>(null);
 
   function leaveAndEnd() {
     setLeaving(true);
@@ -36,6 +51,46 @@ export function MeetingRoom({
       router.push(`/meetings/${meetingId}`);
       router.refresh();
     });
+  }
+
+  // Aggressive defaults: 720p HD camera, echo cancellation + noise
+  // suppression on for the mic. Browser will lower resolution
+  // automatically if bandwidth doesn't keep up.
+  const connectOptions = useMemo(
+    () => ({
+      autoSubscribe: true,
+    }),
+    [],
+  );
+
+  if (!choices) {
+    return (
+      <div className="mx-auto max-w-3xl space-y-4 p-4">
+        <div>
+          <h1 className="text-xl font-semibold">{title}</h1>
+          <p className="text-xs text-muted-foreground">
+            Проверьте микрофон и камеру, потом нажмите «Join» снизу. Браузер запросит разрешения —
+            обязательно дайте, иначе встреча будет немой.
+          </p>
+        </div>
+        <div className="overflow-hidden rounded-lg border border-border bg-background">
+          <div data-lk-theme="default" style={{ height: '70vh' }}>
+            <PreJoin
+              defaults={{
+                username: defaultName,
+                videoEnabled: true,
+                audioEnabled: true,
+              }}
+              onSubmit={(c) => setChoices(c)}
+              onError={(e) => {
+                // eslint-disable-next-line no-console
+                console.warn('[meetings] PreJoin error', e);
+              }}
+            />
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -59,14 +114,11 @@ export function MeetingRoom({
           serverUrl={serverUrl}
           token={token}
           connect
-          audio
-          video
+          audio={choices.audioEnabled}
+          video={choices.videoEnabled}
+          connectOptions={connectOptions}
           data-lk-theme="default"
           onDisconnected={() => {
-            // If user closed the tab or got disconnected, mark the
-            // meeting as ended for them locally — server-side it stays
-            // ACTIVE until egress webhook fires or another PM calls
-            // endMeeting. That's intentional (multi-user sessions).
             router.push(`/meetings/${meetingId}`);
           }}
           style={{ height: '100%' }}
@@ -94,3 +146,4 @@ function ConferenceLayout() {
     </GridLayout>
   );
 }
+
