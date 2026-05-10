@@ -175,10 +175,15 @@ function GenerateCodeForProject({
       try {
         // Snapshot existing links so we only react to NEW ones appearing
         // after this minted code (the user might have linked other chats
-        // earlier in the same session).
-        const before = await pollProjectTelegramLinksAction(projectKey);
-        if (before.ok) {
-          baselineLinkIds.current = new Set(before.links.map((l) => l.id));
+        // earlier in the same session). Failure here is non-fatal — we
+        // just won't filter the baseline.
+        try {
+          const before = await pollProjectTelegramLinksAction(projectKey);
+          if (before && before.ok) {
+            baselineLinkIds.current = new Set(before.links.map((l) => l.id));
+          }
+        } catch {
+          // ignore — polling will still work, just without baseline
         }
         const r = await generateProjectTelegramLinkCodeAction(projectKey);
         setCode({ text: r.code, expiresAt: r.expiresAt });
@@ -189,25 +194,32 @@ function GenerateCodeForProject({
   }
 
   // While we have a fresh code AND no link yet — poll every 4s for up
-  // to 10 minutes (TTL of the code). Stop once we see a new link.
+  // to 10 minutes (TTL of the code). Stop once we see a new link. Any
+  // poll failure (cache miss, network blip, invalid session) is
+  // swallowed so the polling loop keeps trying until the code expires.
   useEffect(() => {
     if (!code || linkedChat) return;
     if (Date.now() > code.expiresAt) return;
     let stopped = false;
+    let timerId = 0;
     const tick = async () => {
       if (stopped) return;
-      const r = await pollProjectTelegramLinksAction(projectKey);
-      if (stopped) return;
-      if (r.ok) {
-        const fresh = r.links.find((l) => !baselineLinkIds.current.has(l.id));
-        if (fresh) {
-          setLinkedChat({ id: fresh.id, chatTitle: fresh.chatTitle });
-          return;
+      try {
+        const r = await pollProjectTelegramLinksAction(projectKey);
+        if (stopped) return;
+        if (r && r.ok) {
+          const fresh = r.links.find((l) => !baselineLinkIds.current.has(l.id));
+          if (fresh) {
+            setLinkedChat({ id: fresh.id, chatTitle: fresh.chatTitle });
+            return;
+          }
         }
+      } catch {
+        // swallow — try again on next tick
       }
-      timerId = window.setTimeout(tick, 4000);
+      if (!stopped) timerId = window.setTimeout(tick, 4000);
     };
-    let timerId = window.setTimeout(tick, 4000);
+    timerId = window.setTimeout(tick, 4000);
     return () => {
       stopped = true;
       window.clearTimeout(timerId);
