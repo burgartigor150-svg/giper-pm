@@ -11,7 +11,6 @@
 import type { Bot, Context } from 'grammy';
 import type { Redis } from 'ioredis';
 import type { PrismaClient } from '@giper/db';
-import { runHarvest } from '@giper/integrations';
 
 type SlimProject = {
   id: string;
@@ -222,39 +221,127 @@ export function registerBotHandlers(
       return;
     }
 
-    const arg = (ctx.match || '').toString().trim();
-    const limit = parseInt(arg, 10) || 25;
-    const result = await runHarvest(prisma, link, owner.id, limit);
-
-    if (result.emptyBuffer) {
+    const bufferCount = await prisma.telegramProjectMessage.count({
+      where: { linkId: link.id, harvestedAt: null },
+    });
+    if (bufferCount === 0) {
       await ctx.reply('В буфере нет неразобранных сообщений (или они уже собраны).');
       return;
     }
-    if (!result.createdTaskNumbers.length) {
-      await ctx.reply('Не удалось создать задачи из буфера (пустой текст?).');
-      return;
-    }
 
-    const created = result.createdTaskNumbers;
-    const preview = created.slice(0, 15).map((n) => `${link.project.key}-${n}`).join(', ');
-    const more = created.length > 15 ? ` … +${created.length - 15}` : '';
-    await ctx.reply(`Создано задач: ${created.length}. ${preview}${more}`);
+    const base = process.env.PUBLIC_BASE_URL?.trim().replace(/\/$/, '') ?? '';
+    const url = base
+      ? `${base}/projects/${link.project.key}/telegram`
+      : '/projects/<KEY>/telegram';
+    await ctx.reply(
+      [
+        `В буфере: ${bufferCount} неразобранных сообщений.`,
+        '',
+        'Откройте giper-pm — там ИИ предложит готовые задачи (с описанием, типом, сроком),',
+        `и вы подтвердите/правите каждую перед созданием:`,
+        url,
+      ].join('\n'),
+      { link_preview_options: { is_disabled: true } },
+    );
   });
 
-  async function ingestText(ctx: Context) {
+  type IngestAttachment = {
+    telegramFileId: string;
+    fileName: string;
+    mimeType: string | null;
+    sizeBytes: number | null;
+  };
+
+  function extractAttachments(msg: unknown): IngestAttachment[] {
+    if (!msg || typeof msg !== 'object') return [];
+    const m = msg as Record<string, unknown>;
+    const out: IngestAttachment[] = [];
+
+    const doc = m.document as
+      | { file_id?: string; file_name?: string; mime_type?: string; file_size?: number }
+      | undefined;
+    if (doc?.file_id) {
+      out.push({
+        telegramFileId: doc.file_id,
+        fileName: doc.file_name ?? `document-${doc.file_id.slice(0, 8)}`,
+        mimeType: doc.mime_type ?? null,
+        sizeBytes: doc.file_size ?? null,
+      });
+    }
+    const photos = m.photo as
+      | { file_id?: string; file_size?: number; width?: number; height?: number }[]
+      | undefined;
+    if (Array.isArray(photos) && photos.length) {
+      // Telegram returns multiple sizes; take the largest.
+      const largest = photos[photos.length - 1]!;
+      if (largest.file_id) {
+        out.push({
+          telegramFileId: largest.file_id,
+          fileName: `photo-${largest.file_id.slice(0, 8)}.jpg`,
+          mimeType: 'image/jpeg',
+          sizeBytes: largest.file_size ?? null,
+        });
+      }
+    }
+    const video = m.video as
+      | { file_id?: string; file_name?: string; mime_type?: string; file_size?: number }
+      | undefined;
+    if (video?.file_id) {
+      out.push({
+        telegramFileId: video.file_id,
+        fileName: video.file_name ?? `video-${video.file_id.slice(0, 8)}.mp4`,
+        mimeType: video.mime_type ?? 'video/mp4',
+        sizeBytes: video.file_size ?? null,
+      });
+    }
+    const voice = m.voice as
+      | { file_id?: string; mime_type?: string; file_size?: number }
+      | undefined;
+    if (voice?.file_id) {
+      out.push({
+        telegramFileId: voice.file_id,
+        fileName: `voice-${voice.file_id.slice(0, 8)}.ogg`,
+        mimeType: voice.mime_type ?? 'audio/ogg',
+        sizeBytes: voice.file_size ?? null,
+      });
+    }
+    const audio = m.audio as
+      | { file_id?: string; file_name?: string; mime_type?: string; file_size?: number }
+      | undefined;
+    if (audio?.file_id) {
+      out.push({
+        telegramFileId: audio.file_id,
+        fileName: audio.file_name ?? `audio-${audio.file_id.slice(0, 8)}.mp3`,
+        mimeType: audio.mime_type ?? 'audio/mpeg',
+        sizeBytes: audio.file_size ?? null,
+      });
+    }
+    return out;
+  }
+
+  async function ingestMessage(ctx: Context) {
     const chat = ctx.chat;
     if (!chat) return;
 
     const msg = ctx.message ?? ctx.channelPost;
-    if (!msg || !('text' in msg) || !msg.text) return;
-
-    const t = msg.text.trim();
-    if (t.startsWith('/')) return;
+    if (!msg) return;
 
     if (ctx.from?.is_bot) return;
 
-    const entities = 'entities' in msg ? msg.entities : undefined;
-    if (entities?.some((e) => e.type === 'bot_command')) return;
+    // Pull text or caption (caption travels with photos/documents/videos).
+    let text: string | null = null;
+    if ('text' in msg && msg.text) text = msg.text;
+    else if ('caption' in msg && msg.caption) text = msg.caption;
+
+    // Skip pure command messages but DO ingest the rest (e.g. document
+    // with no caption is still meaningful for AI harvest).
+    if (text && text.trim().startsWith('/')) return;
+    const entities =
+      ('entities' in msg && msg.entities) || ('caption_entities' in msg && msg.caption_entities) || undefined;
+    if (entities?.some((e: { type: string }) => e.type === 'bot_command')) return;
+
+    const attachments = extractAttachments(msg);
+    if (!text && attachments.length === 0) return;
 
     const telegramChatId = String(chat.id);
     const link = await prisma.projectTelegramChat.findUnique({
@@ -273,6 +360,12 @@ export function registerBotHandlers(
     const fromTgUserId = from ? String(from.id) : null;
     const fromUsername = from?.username ?? null;
 
+    // Synthesize placeholder text if message is file-only so AI prompt
+    // still has a hint about it.
+    const finalText =
+      text ??
+      `[файл] ${attachments.map((a) => a.fileName).join(', ')}`;
+
     try {
       await prisma.telegramProjectMessage.create({
         data: {
@@ -281,7 +374,8 @@ export function registerBotHandlers(
           messageId,
           fromTgUserId,
           fromUsername,
-          text: msg.text,
+          text: finalText,
+          attachments: attachments.length ? attachments : undefined,
         },
       });
     } catch (e: unknown) {
@@ -293,8 +387,11 @@ export function registerBotHandlers(
     }
   }
 
-  bot.on('message:text', ingestText);
-  bot.on('channel_post:text', ingestText);
+  // Cover both plain text AND messages with media attachments. grammY's
+  // 'message' filter (no sub-key) matches every kind so one handler
+  // suffices for documents/photos/videos/voice/audio + captions.
+  bot.on('message', ingestMessage);
+  bot.on('channel_post', ingestMessage);
 
   bot.catch((err) => {
     // eslint-disable-next-line no-console

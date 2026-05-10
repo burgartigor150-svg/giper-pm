@@ -7,7 +7,7 @@ import {
   generateProjectTelegramLinkCodeAction,
   unlinkProjectTelegramChatAction,
 } from '@/actions/projectTelegram';
-import { harvestProjectChatAction } from '@/actions/telegramBots';
+import { AiHarvestProposalsModal } from '@/components/domain/AiHarvestProposalsModal';
 
 type LinkRow = {
   id: string;
@@ -121,7 +121,7 @@ export function ProjectTelegramPanel({
                     </div>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <HarvestButtonInline linkId={l.id} />
+                    <AnalyseButtonInline linkId={l.id} chatTitle={l.chatTitle ?? l.telegramChatId} />
                     <Button type="button" variant="outline" size="sm" disabled={pending} onClick={() => unlink(l.id)}>
                       Отвязать
                     </Button>
@@ -136,37 +136,28 @@ export function ProjectTelegramPanel({
   );
 }
 
-function HarvestButtonInline({ linkId }: { linkId: string }) {
-  const [pending, startTransition] = useTransition();
-  const [result, setResult] = useState<string | null>(null);
-  const [err, setErr] = useState<string | null>(null);
+function AnalyseButtonInline({ linkId, chatTitle }: { linkId: string; chatTitle: string }) {
+  const [open, setOpen] = useState(false);
+  const [token, setToken] = useState(0);
   return (
-    <div className="space-y-1">
+    <>
       <Button
         type="button"
         size="sm"
-        disabled={pending}
         onClick={() => {
-          setResult(null);
-          setErr(null);
-          startTransition(async () => {
-            const r = await harvestProjectChatAction({ linkId, limit: 25 });
-            if (!r.ok) {
-              setErr(r.message);
-              return;
-            }
-            if (r.emptyBuffer) {
-              setResult('Буфер пуст.');
-              return;
-            }
-            setResult(`Создано задач: ${r.created.length}`);
-          });
+          setToken((t) => t + 1);
+          setOpen(true);
         }}
       >
-        {pending ? 'Собираю…' : 'Собрать в задачи'}
+        Анализ ИИ
       </Button>
-      {err ? <p className="text-xs text-red-600">{err}</p> : null}
-      {result ? <p className="text-xs text-emerald-700">{result}</p> : null}
-    </div>
+      <AiHarvestProposalsModal
+        open={open}
+        onClose={() => setOpen(false)}
+        linkId={linkId}
+        chatTitle={chatTitle}
+        triggerToken={token}
+      />
+    </>
   );
 }

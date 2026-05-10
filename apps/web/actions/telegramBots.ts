@@ -3,9 +3,8 @@
 import { revalidatePath } from 'next/cache';
 import { Redis } from 'ioredis';
 import { prisma } from '@giper/db';
-import { runHarvest } from '@giper/integrations';
 import { requireAuth } from '@/lib/auth';
-import { canManageAssignments, canSeeSettings } from '@/lib/permissions';
+import { canSeeSettings } from '@/lib/permissions';
 import { encryptToken } from '@/lib/tgTokenCrypto';
 
 /**
@@ -182,46 +181,7 @@ export async function disconnectTelegramBotAction({
   return { ok: true };
 }
 
-export async function harvestProjectChatAction({
-  linkId,
-  limit,
-}: {
-  linkId: string;
-  limit?: number;
-}): Promise<
-  | { ok: true; created: number[]; emptyBuffer: boolean; projectKey: string }
-  | { ok: false; message: string }
-> {
-  const me = await requireAuth();
-  const link = await prisma.projectTelegramChat.findUnique({
-    where: { id: linkId },
-    include: {
-      bot: { select: { userId: true } },
-      project: {
-        select: {
-          id: true,
-          key: true,
-          ownerId: true,
-          members: { select: { userId: true, role: true } },
-        },
-      },
-    },
-  });
-  if (!link) return { ok: false, message: 'Привязка не найдена' };
-  if (
-    link.bot.userId !== me.id &&
-    !canManageAssignments({ id: me.id, role: me.role }, link.project)
-  ) {
-    return { ok: false, message: 'Недостаточно прав для сбора задач из этого чата' };
-  }
-
-  const result = await runHarvest(prisma, link, me.id, limit ?? 25);
-  revalidatePath(`/projects/${link.project.key}/telegram`);
-  revalidatePath(`/projects/${link.project.key}`);
-  return {
-    ok: true,
-    created: result.createdTaskNumbers,
-    emptyBuffer: result.emptyBuffer,
-    projectKey: link.project.key,
-  };
-}
+// The dumb "одна задача на каждое сообщение" harvest used to live here
+// and is now superseded by AI-powered harvest in actions/aiHarvest.ts.
+// It was removed intentionally — no UI calls it any longer and the bot's
+// /harvest command also routes through the AI flow (see Phase 6).

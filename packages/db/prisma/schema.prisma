@@ -362,6 +362,11 @@ model TelegramProjectMessage {
   fromTgUserId   String?
   fromUsername   String?
   text           String              @db.Text
+  /// Files attached to the original Telegram message. JSON array of
+  /// { telegramFileId, fileName, mimeType, sizeBytes }. Files are NOT
+  /// downloaded at ingest time — only when a PM creates a task that
+  /// references this message via the AI harvest flow.
+  attachments    Json?
   capturedAt     DateTime            @default(now())
   harvestedAt    DateTime?
 

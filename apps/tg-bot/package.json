@@ -11,6 +11,7 @@
     "clean": "rm -rf node_modules dist .turbo"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1044.0",
     "@giper/db": "workspace:*",
     "@giper/integrations": "workspace:*",
     "@giper/shared": "workspace:*",

@@ -13,9 +13,9 @@ import { Input } from '@giper/ui/components/Input';
 import {
   connectTelegramBotAction,
   disconnectTelegramBotAction,
-  harvestProjectChatAction,
 } from '@/actions/telegramBots';
 import { generateProjectTelegramLinkCodeAction } from '@/actions/projectTelegram';
+import { AiHarvestProposalsModal } from '@/components/domain/AiHarvestProposalsModal';
 
 export type WizardProject = {
   key: string;
@@ -201,48 +201,29 @@ function GenerateCodeForProject({
   );
 }
 
-function HarvestButton({ linkId }: { linkId: string }) {
-  const [pending, startTransition] = useTransition();
-  const [result, setResult] = useState<string | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-
+function AnalyseButton({ linkId, chatTitle }: { linkId: string; chatTitle: string }) {
+  const [open, setOpen] = useState(false);
+  const [token, setToken] = useState(0);
   return (
-    <div className="space-y-1">
+    <>
       <Button
         type="button"
         size="sm"
-        disabled={pending}
         onClick={() => {
-          setResult(null);
-          setErr(null);
-          startTransition(async () => {
-            const r = await harvestProjectChatAction({ linkId, limit: 25 });
-            if (!r.ok) {
-              setErr(r.message);
-              return;
-            }
-            if (r.emptyBuffer) {
-              setResult('Буфер пуст — бот пока не получал сообщений (или они уже собраны).');
-              return;
-            }
-            if (!r.created.length) {
-              setResult('Не удалось создать задачи (пустые сообщения).');
-              return;
-            }
-            setResult(
-              `Создано задач: ${r.created.length}. Первые: ${r.created
-                .slice(0, 5)
-                .map((n) => `${r.projectKey}-${n}`)
-                .join(', ')}`,
-            );
-          });
+          setToken((t) => t + 1);
+          setOpen(true);
         }}
       >
-        {pending ? 'Собираю…' : 'Собрать в задачи'}
+        Анализ ИИ
       </Button>
-      {err ? <p className="text-sm text-red-600">{err}</p> : null}
-      {result ? <p className="text-xs text-emerald-700">{result}</p> : null}
-    </div>
+      <AiHarvestProposalsModal
+        open={open}
+        onClose={() => setOpen(false)}
+        linkId={linkId}
+        chatTitle={chatTitle}
+        triggerToken={token}
+      />
+    </>
   );
 }
 
@@ -388,11 +369,13 @@ export function TelegramIntegrationWizard({
             )}
           </Step>
 
-          <Step n={6} title="Соберите сообщения в задачи" done={stepLinkDone && stepHarvestDone}>
+          <Step n={6} title="Превратите сообщения в задачи (с ИИ)" done={stepLinkDone && stepHarvestDone}>
             {links.length === 0 ? (
               <p>
-                После привязки чата (шаг 5) сюда попадут все ваши группы. По кнопке «Собрать в задачи» giper-pm
-                создаст по одной задаче на каждое непрочитанное сообщение.
+                После привязки чата (шаг 5) сюда попадут все ваши группы. ИИ прочитает накопленные
+                сообщения, выкинет «ок/спасибо/стикеры», сгруппирует обсуждения и предложит готовые
+                задачи (с описанием, типом, приоритетом, исполнителем и сроком). PM подтверждает или
+                правит каждую перед созданием.
               </p>
             ) : (
               <ul className="space-y-3">
@@ -412,15 +395,18 @@ export function TelegramIntegrationWizard({
                           В буфере: {l.bufferedMessages}
                         </div>
                       </div>
-                      <HarvestButton linkId={l.id} />
+                      <AnalyseButton
+                        linkId={l.id}
+                        chatTitle={l.chatTitle ?? l.telegramChatId}
+                      />
                     </div>
                   </li>
                 ))}
               </ul>
             )}
             <p className="text-xs">
-              То же самое можно делать прямо из Telegram командой{' '}
-              <code className="rounded bg-muted px-1">/harvest 25</code>.
+              Файлы, прикреплённые к сообщениям (документы, картинки, голосовые), скачиваются и
+              прикрепляются к создаваемой задаче автоматически.
             </p>
           </Step>
         </CardContent>

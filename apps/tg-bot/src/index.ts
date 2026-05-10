@@ -22,6 +22,7 @@ import { Redis } from 'ioredis';
 import { prisma, type PrismaClient } from '@giper/db';
 import { decryptToken } from '@giper/shared/tgTokenCrypto';
 import { registerBotHandlers, type OwningBot } from './projectLinkHarvest';
+import { startDownloadWorker } from './downloadFiles';
 
 const REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6379';
 const RECONCILE_INTERVAL_MS = 60_000;
@@ -158,6 +159,11 @@ class BotManager {
     return this.running.size;
   }
 
+  /** Look up the running grammY Bot for a given UserTelegramBot id. */
+  getBot(botId: string): Bot | undefined {
+    return this.running.get(botId)?.bot;
+  }
+
   async stopAll(): Promise<void> {
     for (const id of [...this.running.keys()]) {
       await this.stopBot(id, 'shutdown');
@@ -192,6 +198,9 @@ class BotManager {
   await manager.reconcile();
   // eslint-disable-next-line no-console
   console.log(`[tg-bot] boot complete; ${manager.count()} bot(s) running`);
+
+  // AI-harvest file download worker (separate pub/sub channel).
+  await startDownloadWorker(subRedis, prisma, (botId) => manager.getBot(botId));
 
   setInterval(() => {
     manager.reconcile().catch((e) => {

@@ -101,6 +101,9 @@ services:
     # Loopback-only host binding — host nginx is the public entrypoint.
     ports:
       - "127.0.0.1:3110:3000"
+    # Allow the container to reach the host's Ollama on 127.0.0.1:11434.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy
@@ -150,6 +153,10 @@ services:
       # Cron secret (used by /api/cron/bitrix24)
       CRON_SECRET: ${CRON_SECRET}
 
+      # Local LLM (Ollama on host, GPU 1) for AI chat-harvest analysis.
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434/v1}
+      LLM_MODEL: ${LLM_MODEL:-qwen2.5:14b}
+
   ws:
     image: ghcr.io/${GHCR_OWNER}/giper-ws:${IMAGE_TAG:-latest}
     restart: unless-stopped
@@ -170,6 +177,8 @@ services:
   tg-bot:
     image: ghcr.io/${GHCR_OWNER}/giper-tg-bot:${IMAGE_TAG:-latest}
     restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy
@@ -182,6 +191,15 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-giper}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-giper_pm}
       REDIS_URL: redis://redis:6379
       TG_TOKEN_ENC_KEY: ${TG_TOKEN_ENC_KEY}
+      # Used in /harvest reply to deep-link the PM into the web UI.
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL}
+      # MinIO storage (used to upload Telegram files attached to AI-created tasks).
+      STORAGE_ENDPOINT: http://minio:9000
+      STORAGE_REGION: us-east-1
+      STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY}
+      STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY}
+      STORAGE_BUCKET: ${STORAGE_BUCKET:-attachments}
+      STORAGE_FORCE_PATH_STYLE: '1'
 
 volumes:
   postgres_data:
