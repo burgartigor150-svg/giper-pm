@@ -1,7 +1,8 @@
-// Re-export from the shared package so the multi-bot runner (apps/tg-bot)
-// and the web app use the exact same cipher implementation/key.
+// Re-export from the shared subpath. Lives outside the @giper/shared
+// barrel so that node:crypto only loads in server-side bundles (server
+// actions, API routes), never in client components.
 export {
-  encryptTgBotToken as encryptToken,
-  decryptTgBotToken as decryptToken,
-  maskTgBotToken as maskToken,
-} from '@giper/shared';
+  encryptToken,
+  decryptToken,
+  maskToken,
+} from '@giper/shared/tgTokenCrypto';

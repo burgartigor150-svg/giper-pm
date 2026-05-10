@@ -20,7 +20,7 @@
 import { Bot } from 'grammy';
 import { Redis } from 'ioredis';
 import { prisma, type PrismaClient } from '@giper/db';
-import { decryptTgBotToken } from '@giper/shared';
+import { decryptToken } from '@giper/shared/tgTokenCrypto';
 import { registerBotHandlers, type OwningBot } from './projectLinkHarvest';
 
 const REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6379';
@@ -85,7 +85,7 @@ class BotManager {
   }): Promise<void> {
     let token: string;
     try {
-      token = decryptTgBotToken(row.encryptedToken);
+      token = decryptToken(row.encryptedToken);
     } catch (e) {
       // eslint-disable-next-line no-console
       console.error(`[tg-bot:${row.botUsername}] decrypt failed`, e);
