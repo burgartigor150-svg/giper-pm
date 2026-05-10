@@ -177,7 +177,7 @@ services:
 
       # WhisperX HTTP server (T4 GPU). web doesn't transcribe directly
       # but server actions can probe /health.
-      WHISPERX_BASE_URL: ${WHISPERX_BASE_URL:-http://host.docker.internal:8771}
+      WHISPERX_BASE_URL: ${WHISPERX_BASE_URL:-http://whisperx:9000}
 
   ws:
     image: ghcr.io/${GHCR_OWNER}/giper-ws:${IMAGE_TAG:-latest}
@@ -332,7 +332,7 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              device_ids: ['0']
+              device_ids: ['1']
               capabilities: [gpu]
     ports:
       - "127.0.0.1:8771:9000"
@@ -367,7 +367,7 @@ services:
       REDIS_URL: redis://redis:6379
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434/v1}
       LLM_MODEL: ${LLM_MODEL:-qwen2.5:14b}
-      WHISPERX_BASE_URL: ${WHISPERX_BASE_URL:-http://host.docker.internal:8771}
+      WHISPERX_BASE_URL: ${WHISPERX_BASE_URL:-http://whisperx:9000}
       WHISPER_MODEL: ${WHISPER_MODEL:-large-v3}
       HF_TOKEN: ${HF_TOKEN}
       STORAGE_ENDPOINT: http://minio:9000
