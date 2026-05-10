@@ -15,6 +15,7 @@ function buildNav(user: SessionUser): NavItem[] {
     { key: 'calendar', href: '/calendar' },
     { key: 'time', href: '/time' },
     { key: 'messages', href: '/messages' },
+    { key: 'telegram', href: '/integrations/telegram' },
   ];
   if (user.role === 'ADMIN' || user.role === 'PM') {
     items.push({ key: 'team', href: '/team' });
