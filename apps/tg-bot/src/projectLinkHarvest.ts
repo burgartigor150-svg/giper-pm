@@ -90,6 +90,10 @@ export function registerBotHandlers(
 
   bot.command('linkproj', async (ctx) => {
     const chat = ctx.chat;
+    // eslint-disable-next-line no-console
+    console.log(
+      `[bot:${owningBot.botUsername}] /linkproj from chat=${chat?.id} type=${chat?.type} arg="${ctx.match}"`,
+    );
     if (!chat || chat.type === 'private') {
       await ctx.reply(
         'Команду /linkproj нужно отправить в групповом чате (или супергруппе), куда добавлен бот.',
@@ -106,7 +110,11 @@ export function registerBotHandlers(
 
     const payload = await redis.get(`tg:plink:${codeKey}`);
     if (!payload) {
-      await ctx.reply('Код не найден или истёк. Сгенерируйте новый в вебе.');
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[bot:${owningBot.botUsername}] /linkproj code TG-${codeKey} not found in redis (expired or wrong)`,
+      );
+      await ctx.reply('Код не найден или истёк (TTL 10 мин). Сгенерируйте новый в вебе.');
       return;
     }
 
@@ -170,12 +178,15 @@ export function registerBotHandlers(
     });
 
     await redis.del(`tg:plink:${codeKey}`);
+    // eslint-disable-next-line no-console
+    console.log(
+      `[bot:${owningBot.botUsername}] linked chat ${telegramChatId} ("${chatTitle}") to project ${project.key}`,
+    );
     await ctx.reply(
       [
         `Чат привязан к проекту ${project.key}.`,
         'Пишите задачи обычными сообщениями — бот их копит.',
-        'Команда /harvest (или /harvest 40) создаст задачи из последних сообщений.',
-        'Это же можно сделать кнопкой в вебе на странице «Интеграции → Telegram» или «Проект → Telegram».',
+        'Откройте веб giper-pm и нажмите «Анализ ИИ» — модель прочитает сообщения и предложит готовые задачи.',
       ].join('\n'),
     );
   });
