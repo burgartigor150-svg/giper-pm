@@ -223,29 +223,75 @@ export async function POST(req: Request) {
     case 'egress_ended':
     case 'egress_updated': {
       // egress_updated fires multiple times; we only react to the
-      // terminal status (COMPLETE / FAILED).
-      const eg = pickEgress(ev);
-      const status = (eg?.status || '').toUpperCase();
-      const isTerminal = status.includes('COMPLETE') || status.includes('FAILED') || status.includes('ENDED');
-      if (!isTerminal) break;
-      const m = await findMeeting(pickRoomName(ev));
-      if (!m) break;
-      const fileResult =
-        eg?.file_results?.[0] || eg?.fileResults?.[0] || eg?.file || null;
-      const recordingKey = fileResult?.filename || m.recordingKey;
-      const durationSec = fileResult?.duration ? Math.round(fileResult.duration) : null;
-      await prisma.meeting.update({
-        where: { id: m.id },
-        data: {
-          recordingKey,
-          ...(durationSec ? { recordingDurationSec: durationSec } : {}),
-          status: status.includes('FAILED') ? 'FAILED' : 'ENDED',
-          endedAt: new Date(),
-          processingError: status.includes('FAILED') ? 'Egress failed' : null,
-        },
-      });
-      if (!status.includes('FAILED')) {
-        await redis().publish(TRANSCRIBE_CHANNEL, JSON.stringify({ meetingId: m.id }));
+      // terminal status (COMPLETE / FAILED). LiveKit does not include
+      // the `room` field on egress events — we must locate the Meeting
+      // via the egress id we previously persisted on participant_joined.
+      try {
+        const eg = pickEgress(ev);
+        const status = (eg?.status || '').toUpperCase();
+        const isTerminal =
+          status.includes('COMPLETE') ||
+          status.includes('FAILED') ||
+          status.includes('ENDED') ||
+          status.includes('ABORTED') ||
+          status.includes('LIMIT_REACHED');
+        if (!isTerminal) break;
+
+        const egressId = eg?.egress_id || eg?.egressId || null;
+        let m: Awaited<ReturnType<typeof findMeeting>> = null;
+        if (egressId) {
+          m = await prisma.meeting.findFirst({
+            where: { livekitEgressId: egressId },
+            select: {
+              id: true,
+              status: true,
+              recordingKey: true,
+              livekitEgressId: true,
+              livekitRoomName: true,
+            },
+          });
+        }
+        if (!m) m = await findMeeting(pickRoomName(ev));
+        if (!m) {
+          // eslint-disable-next-line no-console
+          console.warn('[livekit-webhook] egress event without matching meeting', {
+            egressId,
+            room: pickRoomName(ev),
+            status,
+          });
+          break;
+        }
+
+        const fileResult =
+          eg?.file_results?.[0] || eg?.fileResults?.[0] || eg?.file || null;
+        const recordingKey = fileResult?.filename || m.recordingKey;
+        const durationSec = fileResult?.duration ? Math.round(fileResult.duration) : null;
+
+        // The filename LiveKit returns for S3 uploads can be either the
+        // bare object key (what we want) or "s3://bucket/object". Strip
+        // any bucket prefix so transcribe-worker can fetch directly.
+        const cleanKey = (recordingKey || '').replace(/^s3:\/\/[^/]+\//, '');
+
+        await prisma.meeting.update({
+          where: { id: m.id },
+          data: {
+            recordingKey: cleanKey || recordingKey,
+            ...(durationSec ? { recordingDurationSec: durationSec } : {}),
+            status: status.includes('FAILED') ? 'FAILED' : 'PROCESSING',
+            endedAt: new Date(),
+            processingError: status.includes('FAILED') ? 'Egress failed' : null,
+          },
+        });
+
+        if (!status.includes('FAILED')) {
+          await redis().publish(TRANSCRIBE_CHANNEL, JSON.stringify({ meetingId: m.id }));
+          // eslint-disable-next-line no-console
+          console.log(`[livekit-webhook] published meeting:transcribe for ${m.id} key=${cleanKey}`);
+        }
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.error('[livekit-webhook] egress event handler crashed', e);
+        // Don't 500 — LiveKit will retry forever and log noise.
       }
       break;
     }
