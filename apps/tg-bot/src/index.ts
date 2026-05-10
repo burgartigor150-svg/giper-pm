@@ -21,6 +21,7 @@ import { Bot } from 'grammy';
 import { Redis } from 'ioredis';
 import { prisma, type PrismaClient } from '@giper/db';
 import { decryptToken } from '@giper/shared/tgTokenCrypto';
+import { tgProxyDispatcher, tgProxyUrl } from '@giper/shared/tgProxy';
 import { registerBotHandlers, type OwningBot } from './projectLinkHarvest';
 import { startDownloadWorker } from './downloadFiles';
 
@@ -100,7 +101,18 @@ class BotManager {
       botUsername: row.botUsername,
     };
 
-    const bot = new Bot(token);
+    // Route grammY's HTTP traffic through the configured proxy when
+    // TG_PROXY_URL is set (api.telegram.org is RKN-blocked on the
+    // production host). undici's ProxyAgent ships in Node 20+ via the
+    // `undici` package and is supported by grammY's baseFetchConfig.
+    const dispatcher = tgProxyDispatcher();
+    const bot = new Bot(token, {
+      client: {
+        baseFetchConfig: dispatcher
+          ? ({ dispatcher } as Record<string, unknown>)
+          : undefined,
+      },
+    });
     registerBotHandlers(bot, this.redis, this.prismaClient, owning);
 
     bot.start({
@@ -196,8 +208,12 @@ class BotManager {
   });
 
   await manager.reconcile();
+  const proxy = tgProxyUrl();
   // eslint-disable-next-line no-console
-  console.log(`[tg-bot] boot complete; ${manager.count()} bot(s) running`);
+  console.log(
+    `[tg-bot] boot complete; ${manager.count()} bot(s) running` +
+      (proxy ? ` (TG via proxy ${proxy.replace(/\/\/[^@]+@/, '//***@')})` : ''),
+  );
 
   // AI-harvest file download worker (separate pub/sub channel).
   await startDownloadWorker(subRedis, prisma, (botId) => manager.getBot(botId));

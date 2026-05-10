@@ -13,6 +13,7 @@ import type { Bot } from 'grammy';
 import type { Redis } from 'ioredis';
 import type { PrismaClient } from '@giper/db';
 import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { tgFetch } from '@giper/shared/tgProxy';
 
 export const DOWNLOAD_CHANNEL = 'tg:download-files';
 
@@ -80,7 +81,8 @@ async function fetchTelegramFile(bot: Bot, telegramFileId: string): Promise<{ bu
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), 60_000);
   try {
-    const res = await fetch(url, { signal: ctrl.signal });
+    // tgFetch tunnels through TG_PROXY_URL when configured (RKN block).
+    const res = await tgFetch(url, { signal: ctrl.signal });
     if (!res.ok) {
       throw new Error(`Telegram CDN HTTP ${res.status}`);
     }

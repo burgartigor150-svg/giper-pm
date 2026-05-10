@@ -138,6 +138,9 @@ services:
       # AES-256-GCM master key for personal Telegram bot tokens. Must
       # match the same value in the tg-bot service below.
       TG_TOKEN_ENC_KEY: ${TG_TOKEN_ENC_KEY}
+      # api.telegram.org is RKN-blocked on the .ru host. Tunnel through
+      # the existing xray HTTP proxy on the host (gparser-xray service).
+      TG_PROXY_URL: ${TG_PROXY_URL:-http://host.docker.internal:10829}
 
       # GitHub webhook
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET}
@@ -191,6 +194,8 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-giper}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-giper_pm}
       REDIS_URL: redis://redis:6379
       TG_TOKEN_ENC_KEY: ${TG_TOKEN_ENC_KEY}
+      # Same proxy as web — for grammY long-poll and Telegram CDN downloads.
+      TG_PROXY_URL: ${TG_PROXY_URL:-http://host.docker.internal:10829}
       # Used in /harvest reply to deep-link the PM into the web UI.
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL}
       # MinIO storage (used to upload Telegram files attached to AI-created tasks).

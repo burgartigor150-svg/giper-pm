@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { Redis } from 'ioredis';
 import { prisma } from '@giper/db';
+import { tgFetch } from '@giper/shared/tgProxy';
 import { requireAuth } from '@/lib/auth';
 import { canSeeSettings } from '@/lib/permissions';
 import { encryptToken } from '@/lib/tgTokenCrypto';
@@ -56,9 +57,11 @@ type TgGetMe = {
 
 async function callGetMe(token: string): Promise<TgGetMe['result']> {
   const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 10_000);
+  const t = setTimeout(() => ctrl.abort(), 15_000);
   try {
-    const res = await fetch(`https://api.telegram.org/bot${token}/getMe`, {
+    // tgFetch routes through TG_PROXY_URL when set (api.telegram.org is
+    // blocked by RKN on the .ru deploy host).
+    const res = await tgFetch(`https://api.telegram.org/bot${token}/getMe`, {
       signal: ctrl.signal,
     });
     const json = (await res.json()) as TgGetMe;

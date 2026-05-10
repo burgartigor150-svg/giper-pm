@@ -44,6 +44,9 @@ importers:
       tsx:
         specifier: ^4.21.0
         version: 4.21.0
+      undici:
+        specifier: ^6.21.0
+        version: 6.25.0
     devDependencies:
       '@types/node':
         specifier: ^22.10.0
@@ -126,6 +129,9 @@ importers:
       recharts:
         specifier: ^2.15.4
         version: 2.15.4(react-dom@19.0.0-rc-66855b96-20241106(react@19.0.0-rc-66855b96-20241106))(react@19.0.0-rc-66855b96-20241106)
+      undici:
+        specifier: ^6.21.0
+        version: 6.25.0
       xlsx:
         specifier: ^0.18.5
         version: 0.18.5
@@ -260,6 +266,9 @@ importers:
 
   packages/shared:
     dependencies:
+      undici:
+        specifier: ^6.21.0
+        version: 6.25.0
       zod:
         specifier: ^3.23.8
         version: 3.25.76
@@ -3993,6 +4002,10 @@ packages:
 
   undici-types@7.19.2:
     resolution: {integrity: sha512-qYVnV5OEm2AW8cJMCpdV20CDyaN3g0AjDlOGf1OW4iaDEx8MwdtChUp4zu4H0VP3nDRF/8RKWH+IPp9uW0YGZg==}
+
+  undici@6.25.0:
+    resolution: {integrity: sha512-ZgpWDC5gmNiuY9CnLVXEH8rl50xhRCuLNA97fAUnKi8RRuV4E6KG31pDTsLVUKnohJE0I3XDrTeEydAXRw47xg==}
+    engines: {node: '>=18.17'}
 
   unrs-resolver@1.11.1:
     resolution: {integrity: sha512-bSjt9pjaEBnNiGgc9rUiHGKv5l4/TGzDmYw3RhnkJGtLhbnnA/5qJj7x3dNDCRx/PJxu774LlH8lCOlB4hEfKg==}
@@ -8350,6 +8363,8 @@ snapshots:
   undici-types@6.21.0: {}
 
   undici-types@7.19.2: {}
+
+  undici@6.25.0: {}
 
   unrs-resolver@1.11.1:
     dependencies:
