@@ -22,10 +22,15 @@ import {
 import {
   DndContext,
   DragOverlay,
+  MeasuringStrategy,
+  type CollisionDetection,
   type DragEndEvent,
   type DragStartEvent,
   MouseSensor,
   TouchSensor,
+  type UniqueIdentifier,
+  pointerWithin,
+  rectIntersection,
   useSensor,
   useSensors,
   useDraggable,
@@ -108,6 +113,16 @@ const MONTH_LABEL = [
 ];
 
 const CELL_VISIBLE_LIMIT = 8;
+
+/** Month/week cells are tight; prefer pointer, then rect overlap with day droppables. */
+const calendarCollisionDetection: CollisionDetection = (args) => {
+  const isDay = (id: UniqueIdentifier) => String(id).startsWith('day:');
+  const byPointer = pointerWithin(args).filter((c) => isDay(c.id));
+  if (byPointer.length) return byPointer;
+  const byRect = rectIntersection(args).filter((c) => isDay(c.id));
+  if (byRect.length) return byRect;
+  return [];
+};
 
 // ---------------- helpers ----------------
 
@@ -330,6 +345,9 @@ export function Calendar({
     const id = String(e.active.id);
     setActiveDragItem(items.find((it) => it.id === id) ?? null);
   }
+  function onDragCancel() {
+    setActiveDragItem(null);
+  }
   function onDragEnd(e: DragEndEvent) {
     setActiveDragItem(null);
     const activeId = String(e.active.id);
@@ -364,7 +382,17 @@ export function Calendar({
   }
 
   return (
-    <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd}>
+    <DndContext
+      sensors={sensors}
+      collisionDetection={calendarCollisionDetection}
+      measuring={{
+        droppable: { strategy: MeasuringStrategy.Always },
+      }}
+      autoScroll={false}
+      onDragStart={onDragStart}
+      onDragCancel={onDragCancel}
+      onDragEnd={onDragEnd}
+    >
       <div className="flex flex-col gap-3">
         {/* Top bar */}
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -651,7 +679,7 @@ function MonthGrid({
     weeks.push(row);
   }
   return (
-    <div className="grid grid-cols-7 gap-px overflow-hidden rounded-md border border-border bg-border text-xs">
+    <div className="touch-none grid grid-cols-7 gap-px overflow-hidden rounded-md border border-border bg-border text-xs">
       {WEEKDAYS.map((d) => (
         <div
           key={d}
@@ -696,7 +724,7 @@ function WeekGrid({
     days.push(new Date(start.getFullYear(), start.getMonth(), start.getDate() + i));
   }
   return (
-    <div className="grid grid-cols-7 gap-px overflow-hidden rounded-md border border-border bg-border text-xs">
+    <div className="touch-none grid grid-cols-7 gap-px overflow-hidden rounded-md border border-border bg-border text-xs">
       {days.map((d, i) => (
         <div
           key={`h-${ymd(d)}`}
@@ -772,6 +800,10 @@ function DayCell({
   onClick: (d: Date) => void;
   tall?: boolean;
 }) {
+  // Droppable must wrap a real layout box. Using `display: contents` on the
+  // droppable wrapper (old pattern) yields a zero-sized rect in browsers, so
+  // @dnd-kit never reports `over` on drag end — deadlines never persist.
+  const { setNodeRef, isOver } = useDroppable({ id: `day:${ymd(day)}` });
   const isWeekend = day.getDay() === 0 || day.getDay() === 6;
   const overdueOpen =
     day < today && items.some((i) => i.internalStatus !== 'DONE' && i.internalStatus !== 'CANCELED');
@@ -781,53 +813,53 @@ function DayCell({
   const hidden = items.length - visible.length;
 
   return (
-    <DroppableDay date={day} className="contents">
-      <div
-        className={[
-          'flex flex-col gap-1 bg-background p-1.5',
-          tall ? 'min-h-[280px]' : 'min-h-[120px]',
-          inMonth ? '' : 'opacity-40',
-          isWeekend ? 'bg-muted/40' : '',
-          overdueOpen ? 'bg-red-50' : '',
-          isToday ? 'ring-2 ring-blue-500 ring-inset' : '',
-          isSelected && !isToday ? 'ring-2 ring-purple-500 ring-inset' : '',
-        ].join(' ')}
+    <div
+      ref={setNodeRef}
+      className={[
+        'flex flex-col gap-1 bg-background p-1.5',
+        tall ? 'min-h-[280px]' : 'min-h-[120px]',
+        inMonth ? '' : 'opacity-40',
+        isWeekend ? 'bg-muted/40' : '',
+        overdueOpen ? 'bg-red-50' : '',
+        isToday ? 'ring-2 ring-blue-500 ring-inset' : '',
+        isSelected && !isToday ? 'ring-2 ring-purple-500 ring-inset' : '',
+        isOver ? 'outline outline-2 outline-blue-400 outline-offset-[-2px]' : '',
+      ].join(' ')}
+    >
+      <button
+        type="button"
+        onClick={() => onClick(day)}
+        className="flex items-center justify-between text-left"
       >
-        <button
-          type="button"
-          onClick={() => onClick(day)}
-          className="flex items-center justify-between text-left"
+        <span
+          className={[
+            'text-[11px] font-mono',
+            isToday ? 'font-semibold text-blue-700' : 'text-muted-foreground',
+          ].join(' ')}
         >
-          <span
-            className={[
-              'text-[11px] font-mono',
-              isToday ? 'font-semibold text-blue-700' : 'text-muted-foreground',
-            ].join(' ')}
-          >
-            {day.getDate()}
+          {day.getDate()}
+        </span>
+        {items.length > 0 ? (
+          <span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px]">
+            {items.length}
           </span>
-          {items.length > 0 ? (
-            <span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px]">
-              {items.length}
-            </span>
-          ) : null}
-        </button>
-        <div className="flex min-h-0 flex-col gap-0.5">
-          {visible.map((it) => (
-            <DraggableTaskCard key={it.id} item={it} />
-          ))}
-          {hidden > 0 ? (
-            <button
-              type="button"
-              onClick={() => onClick(day)}
-              className="px-1 text-left text-[10px] text-muted-foreground hover:underline"
-            >
-              +{hidden} ещё
-            </button>
-          ) : null}
-        </div>
+        ) : null}
+      </button>
+      <div className="flex min-h-0 flex-col gap-0.5">
+        {visible.map((it) => (
+          <DraggableTaskCard key={it.id} item={it} />
+        ))}
+        {hidden > 0 ? (
+          <button
+            type="button"
+            onClick={() => onClick(day)}
+            className="px-1 text-left text-[10px] text-muted-foreground hover:underline"
+          >
+            +{hidden} ещё
+          </button>
+        ) : null}
       </div>
-    </DroppableDay>
+    </div>
   );
 }
 
