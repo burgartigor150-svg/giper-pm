@@ -87,6 +87,30 @@ export async function generateProjectTelegramLinkCodeAction(projectKey: string):
   };
 }
 
+/**
+ * Poll helper: returns the current ProjectTelegramChat rows for the
+ * given project that belong to one of the caller's bots. Wizard step 5
+ * uses this to detect "linked" without a full page reload after the PM
+ * sends `/linkproj` in the group.
+ */
+export async function pollProjectTelegramLinksAction(projectKey: string): Promise<
+  | { ok: true; links: { id: string; chatTitle: string | null; telegramChatId: string }[] }
+  | { ok: false; message: string }
+> {
+  const me = await requireAuth();
+  const project = await prisma.project.findUnique({
+    where: { key: projectKey },
+    select: { id: true },
+  });
+  if (!project) return { ok: false, message: 'Проект не найден' };
+  const links = await prisma.projectTelegramChat.findMany({
+    where: { projectId: project.id, bot: { userId: me.id } },
+    orderBy: { createdAt: 'desc' },
+    select: { id: true, chatTitle: true, telegramChatId: true },
+  });
+  return { ok: true, links };
+}
+
 export async function unlinkProjectTelegramChatAction(
   projectKey: string,
   linkId: string,

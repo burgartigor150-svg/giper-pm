@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useEffect, useRef, useState, useTransition } from 'react';
 import {
   Card,
   CardContent,
@@ -14,7 +14,11 @@ import {
   connectTelegramBotAction,
   disconnectTelegramBotAction,
 } from '@/actions/telegramBots';
-import { generateProjectTelegramLinkCodeAction } from '@/actions/projectTelegram';
+import {
+  generateProjectTelegramLinkCodeAction,
+  pollProjectTelegramLinksAction,
+} from '@/actions/projectTelegram';
+import { createProjectQuickAction } from '@/actions/projects';
 import { AiHarvestProposalsModal } from '@/components/domain/AiHarvestProposalsModal';
 
 export type WizardProject = {
@@ -154,50 +158,220 @@ function DisconnectButton({ botId, onDone }: { botId: string; onDone: () => void
 function GenerateCodeForProject({
   projectKey,
   botUsername,
-  onGenerated,
 }: {
   projectKey: string;
   botUsername: string;
-  onGenerated: () => void;
 }) {
   const [pending, startTransition] = useTransition();
   const [code, setCode] = useState<{ text: string; expiresAt: number } | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [linkedChat, setLinkedChat] = useState<{ id: string; chatTitle: string | null } | null>(null);
+  const baselineLinkIds = useRef<Set<string>>(new Set());
 
   function mint() {
     setErr(null);
-    setCode(null);
+    setLinkedChat(null);
     startTransition(async () => {
       try {
+        // Snapshot existing links so we only react to NEW ones appearing
+        // after this minted code (the user might have linked other chats
+        // earlier in the same session).
+        const before = await pollProjectTelegramLinksAction(projectKey);
+        if (before.ok) {
+          baselineLinkIds.current = new Set(before.links.map((l) => l.id));
+        }
         const r = await generateProjectTelegramLinkCodeAction(projectKey);
         setCode({ text: r.code, expiresAt: r.expiresAt });
-        onGenerated();
       } catch (e) {
         setErr(e instanceof Error ? e.message : 'Ошибка');
       }
     });
   }
 
+  // While we have a fresh code AND no link yet — poll every 4s for up
+  // to 10 minutes (TTL of the code). Stop once we see a new link.
+  useEffect(() => {
+    if (!code || linkedChat) return;
+    if (Date.now() > code.expiresAt) return;
+    let stopped = false;
+    const tick = async () => {
+      if (stopped) return;
+      const r = await pollProjectTelegramLinksAction(projectKey);
+      if (stopped) return;
+      if (r.ok) {
+        const fresh = r.links.find((l) => !baselineLinkIds.current.has(l.id));
+        if (fresh) {
+          setLinkedChat({ id: fresh.id, chatTitle: fresh.chatTitle });
+          return;
+        }
+      }
+      timerId = window.setTimeout(tick, 4000);
+    };
+    let timerId = window.setTimeout(tick, 4000);
+    return () => {
+      stopped = true;
+      window.clearTimeout(timerId);
+    };
+  }, [code, linkedChat, projectKey]);
+
   return (
     <div className="space-y-2">
       <Button type="button" size="sm" disabled={pending} onClick={mint}>
-        {pending ? 'Генерирую…' : 'Сгенерировать код привязки'}
+        {pending ? 'Генерирую…' : code ? 'Перевыпустить код' : 'Сгенерировать код привязки'}
       </Button>
       {err ? <p className="text-sm text-red-600">{err}</p> : null}
       {code ? (
         <div className="rounded-md border border-border bg-muted/40 p-3 text-sm">
           <p className="text-xs text-muted-foreground">
-            В групповом чате (где сидит @{botUsername}) отправьте боту:
+            В групповом чате (где сидит{' '}
+            <a
+              href={`https://t.me/${botUsername}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-medium text-foreground underline"
+            >
+              @{botUsername}
+            </a>
+            ) отправьте боту:
           </p>
           <pre className="mt-2 whitespace-pre-wrap break-words rounded bg-background px-2 py-1 font-mono text-sm">
             /linkproj {code.text}
           </pre>
           <p className="mt-2 text-xs text-muted-foreground">
-            Действует до {new Date(code.expiresAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}.
+            Действует до{' '}
+            {new Date(code.expiresAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}.
+            Я слежу за этой страницей и подсвечу зелёным, как только бот привяжет чат — обновлять не нужно.
           </p>
         </div>
       ) : null}
+      {linkedChat ? (
+        <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-100">
+          ✓ Чат «<strong>{linkedChat.chatTitle ?? 'без названия'}</strong>» привязан к проекту. Переходите к шагу 6.
+        </div>
+      ) : null}
     </div>
+  );
+}
+
+function CreateProjectInline({
+  onCreated,
+}: {
+  onCreated: (project: { key: string; name: string }) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [pending, startTransition] = useTransition();
+  const [err, setErr] = useState<string | null>(null);
+  const [name, setName] = useState('');
+  const [key, setKey] = useState('');
+  const [keyTouched, setKeyTouched] = useState(false);
+
+  // Auto-suggest project key from name unless the user typed one explicitly.
+  function deriveKey(n: string): string {
+    const cleaned = n
+      .toUpperCase()
+      .replace(/[^A-Z]/g, '')
+      .slice(0, 5);
+    return cleaned;
+  }
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setErr(null);
+    const finalKey = (keyTouched ? key : deriveKey(name)).trim().toUpperCase();
+    const finalName = name.trim();
+    if (!finalName) {
+      setErr('Введите название проекта');
+      return;
+    }
+    if (!/^[A-Z]{2,5}$/.test(finalKey)) {
+      setErr('Ключ: 2–5 заглавных латинских букв (например GFM)');
+      return;
+    }
+    startTransition(async () => {
+      const r = await createProjectQuickAction({ key: finalKey, name: finalName });
+      if (!r.ok) {
+        setErr(r.message);
+        return;
+      }
+      onCreated(r.project);
+      setOpen(false);
+      setName('');
+      setKey('');
+      setKeyTouched(false);
+    });
+  }
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="text-xs text-foreground underline underline-offset-2"
+      >
+        + Создать новый проект
+      </button>
+    );
+  }
+  return (
+    <form
+      onSubmit={submit}
+      className="space-y-2 rounded-md border border-border bg-background/60 p-3"
+    >
+      <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        Новый проект
+      </div>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+        <div className="sm:col-span-2 space-y-1">
+          <label className="text-[10px] uppercase text-muted-foreground">Название</label>
+          <Input
+            value={name}
+            onChange={(e) => {
+              setName(e.target.value);
+              if (!keyTouched) setKey(deriveKey(e.target.value));
+            }}
+            placeholder="Команда продаж"
+            disabled={pending}
+            required
+          />
+        </div>
+        <div className="space-y-1">
+          <label className="text-[10px] uppercase text-muted-foreground">Ключ (2-5 букв)</label>
+          <Input
+            value={key}
+            onChange={(e) => {
+              setKey(e.target.value.toUpperCase());
+              setKeyTouched(true);
+            }}
+            placeholder="SALES"
+            maxLength={5}
+            disabled={pending}
+            required
+          />
+        </div>
+      </div>
+      {err ? <p className="text-xs text-red-600">{err}</p> : null}
+      <div className="flex flex-wrap items-center gap-2">
+        <Button type="submit" size="sm" disabled={pending || !name.trim()}>
+          {pending ? 'Создаю…' : 'Создать и выбрать'}
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={pending}
+          onClick={() => {
+            setOpen(false);
+            setErr(null);
+          }}
+        >
+          Отмена
+        </Button>
+        <span className="text-[11px] text-muted-foreground">
+          Задачи будут получать номера вида <code>{(keyTouched ? key : deriveKey(name)) || 'KEY'}-1</code>,{' '}
+          <code>{(keyTouched ? key : deriveKey(name)) || 'KEY'}-2</code>…
+        </span>
+      </div>
+    </form>
   );
 }
 
@@ -229,14 +403,17 @@ function AnalyseButton({ linkId, chatTitle }: { linkId: string; chatTitle: strin
 
 export function TelegramIntegrationWizard({
   bot,
-  projects,
+  projects: initialProjects,
   links,
 }: {
   bot: WizardBot | null;
   projects: WizardProject[];
   links: WizardChatLink[];
 }) {
-  const [selectedProject, setSelectedProject] = useState<string>(projects[0]?.key ?? '');
+  // Local mirror so quick-create can append a new project and we
+  // immediately switch the dropdown without a full page reload.
+  const [projects, setProjects] = useState<WizardProject[]>(initialProjects);
+  const [selectedProject, setSelectedProject] = useState<string>(initialProjects[0]?.key ?? '');
 
   const stepBotDone = !!bot;
   const stepLinkDone = links.length > 0;
@@ -244,6 +421,13 @@ export function TelegramIntegrationWizard({
 
   function reload() {
     if (typeof window !== 'undefined') window.location.reload();
+  }
+
+  function onProjectCreated(p: { key: string; name: string }) {
+    setProjects((prev) =>
+      prev.some((x) => x.key === p.key) ? prev : [{ key: p.key, name: p.name }, ...prev],
+    );
+    setSelectedProject(p.key);
   }
 
   return (
@@ -338,31 +522,38 @@ export function TelegramIntegrationWizard({
           <Step n={5} title="Привяжите чат к проекту" done={stepLinkDone}>
             {!bot ? (
               <p className="text-amber-700">Сначала подключите бота.</p>
-            ) : projects.length === 0 ? (
-              <p className="text-amber-700">
-                У вас пока нет проектов, в которых вы PM или владелец. Создайте проект, потом возвращайтесь сюда.
-              </p>
             ) : (
-              <div className="space-y-2">
-                <label className="block text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Проект
-                </label>
-                <select
-                  className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-                  value={selectedProject}
-                  onChange={(e) => setSelectedProject(e.target.value)}
-                >
-                  {projects.map((p) => (
-                    <option key={p.key} value={p.key}>
-                      {p.key} — {p.name}
-                    </option>
-                  ))}
-                </select>
+              <div className="space-y-3">
+                {projects.length === 0 ? (
+                  <p className="text-amber-700">
+                    У вас пока нет проектов, в которых вы PM или владелец. Создайте новый ниже —
+                    или сначала на странице «Проекты», если нужны клиент/бюджет.
+                  </p>
+                ) : (
+                  <div className="space-y-1">
+                    <label className="block text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      Проект
+                    </label>
+                    <select
+                      className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                      value={selectedProject}
+                      onChange={(e) => setSelectedProject(e.target.value)}
+                    >
+                      {projects.map((p) => (
+                        <option key={p.key} value={p.key}>
+                          {p.key} — {p.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                <CreateProjectInline onCreated={onProjectCreated} />
+
                 {selectedProject ? (
                   <GenerateCodeForProject
                     projectKey={selectedProject}
                     botUsername={bot.botUsername}
-                    onGenerated={reload}
                   />
                 ) : null}
               </div>

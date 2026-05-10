@@ -95,6 +95,55 @@ export async function createProjectAction(_prev: unknown, formData: FormData): P
 }
 
 /**
+ * "Quick create" used by the Telegram-integration wizard (and any
+ * other place that needs to spin up a project inline without leaving
+ * the current page). Same validation + permissions as
+ * `createProjectAction`, but returns the created `{key, name}` instead
+ * of redirecting.
+ */
+export async function createProjectQuickAction({
+  key,
+  name,
+  description,
+}: {
+  key: string;
+  name: string;
+  description?: string;
+}): Promise<{ ok: true; project: { key: string; name: string } } | { ok: false; message: string }> {
+  const user = await requireAuth();
+  const parsed = createProjectSchema.safeParse({
+    key,
+    name,
+    description: description?.trim() || undefined,
+  });
+  if (!parsed.success) {
+    const fieldErrors = parsed.error.flatten().fieldErrors;
+    const first =
+      fieldErrors.key?.[0] ||
+      fieldErrors.name?.[0] ||
+      fieldErrors.description?.[0] ||
+      'Проверьте поля';
+    return { ok: false, message: first };
+  }
+  try {
+    const project = await createProject(parsed.data as CreateProjectInput, {
+      id: user.id,
+      role: user.role,
+    });
+    revalidatePath('/projects');
+    revalidatePath('/integrations/telegram');
+    return { ok: true, project: { key: project.key, name: project.name } };
+  } catch (e) {
+    if (e instanceof DomainError) {
+      return { ok: false, message: e.message };
+    }
+    // eslint-disable-next-line no-console
+    console.error('createProjectQuickAction', e);
+    return { ok: false, message: 'Не удалось создать проект' };
+  }
+}
+
+/**
  * Manually publish an already-created local project to Bitrix24.
  * Used by the "Опубликовать в Bitrix" button on the project page —
  * either when the user didn't tick the checkbox at create time, or
