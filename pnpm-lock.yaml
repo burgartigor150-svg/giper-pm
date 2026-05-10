@@ -26,6 +26,12 @@ importers:
       '@giper/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@giper/integrations':
+        specifier: workspace:*
+        version: link:../../packages/integrations
+      '@giper/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       grammy:
         specifier: ^1.30.0
         version: 1.42.0
