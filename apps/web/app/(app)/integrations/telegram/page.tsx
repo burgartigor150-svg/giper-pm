@@ -35,9 +35,49 @@ export default async function TelegramIntegrationPage() {
         ) : null}
       </div>
 
+      <Card className="border-blue-200/80 bg-blue-50/50 dark:border-blue-900 dark:bg-blue-950/30">
+        <CardHeader>
+          <CardTitle className="text-base">Если вы PM или участник команды</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2 text-sm text-muted-foreground">
+          <p>
+            Доступ к серверу и файлам репозитория <strong className="text-foreground">не нужен</strong>. Достаточно
+            привязать аккаунт кодом ниже и пользоваться ботом или Mini App из Telegram.
+          </p>
+          <p>
+            Не открывается вход из Telegram или пишет «не удалось войти» — передайте администратору ссылку из блока
+            ниже и попросите проверить токен и BotFather (это делается один раз на всю организацию).
+          </p>
+        </CardContent>
+      </Card>
+
+      {me.role === 'ADMIN' ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Для администратора (сервер и BotFather)</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 text-sm text-muted-foreground">
+            <ol className="list-decimal space-y-1 pl-5">
+              <li>
+                В <code className="rounded bg-muted px-1">.env</code> у прод-сборки задать{' '}
+                <code className="rounded bg-muted px-1">TG_BOT_TOKEN</code> и перезапустить контейнер{' '}
+                <strong className="text-foreground">web</strong> (и сервис бота, если он есть в compose).
+              </li>
+              <li>
+                В @BotFather → ваш бот → <strong className="text-foreground">Mini Apps</strong> указать URL ниже.
+              </li>
+              <li>
+                <code className="rounded bg-muted px-1">AUTH_URL</code> на web должен совпадать с публичным HTTPS-доменом
+                сайта.
+              </li>
+            </ol>
+          </CardContent>
+        </Card>
+      ) : null}
+
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Mini App (вход из Telegram)</CardTitle>
+          <CardTitle className="text-base">Mini App — ссылка для BotFather</CardTitle>
         </CardHeader>
         <CardContent>
           <MiniAppUrlBlock url={webAppUrl} />
