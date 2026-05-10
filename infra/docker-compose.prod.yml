@@ -301,6 +301,9 @@ services:
           stun_servers:
             - stun.l.google.com:19302
             - stun1.l.google.com:19302
+          # Allow TCP fallback when UDP is blocked (corp firewalls).
+          use_ice_lite: false
+          packet_buffer_size: 1000
         # MUST match the egress redis (compose service `redis` exposed
         # as 127.0.0.1:6380 on host). Otherwise PSRPC has split-brain
         # and StartEgress hangs with "no response from servers".
@@ -310,6 +313,23 @@ services:
           api_key: ${LIVEKIT_API_KEY}
           urls:
             - ${PUBLIC_BASE_URL}/api/livekit/webhook
+        # Per-room limits sized for 30-person all-hands meetings:
+        # - max_participants 50: comfortable headroom over 30
+        # - empty_timeout: keep room alive 5 min after everyone leaves
+        #   (covers reconnect-loop windows during deploys)
+        # - departure_timeout: how long to wait for a participant to
+        #   reconnect before evicting; default 20s is too short for
+        #   mobile users on flaky connections.
+        room:
+          max_participants: 50
+          empty_timeout: 300
+          departure_timeout: 60
+        # Audio: enable Opus DTX (silence suppression) — for 30-person
+        # meetings where most people are muted, this cuts upstream
+        # bandwidth from O(N) to O(active speakers).
+        audio:
+          smooth_intervals: 4
+          active_level: 30
         logging:
           level: info
 
@@ -365,7 +385,7 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              device_ids: ['1']
+              device_ids: ['0']
               capabilities: [gpu]
     ports:
       - "127.0.0.1:8771:9000"

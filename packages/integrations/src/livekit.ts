@@ -21,6 +21,7 @@ import {
   EgressClient,
   EncodedFileOutput,
   EncodedFileType,
+  EncodingOptionsPreset,
   RoomCompositeOptions,
   S3Upload,
 } from 'livekit-server-sdk';
@@ -101,13 +102,18 @@ export async function startCompositeEgress(opts: {
       }),
     },
   });
-  const layout = 'grid';
+  // For 30-person meetings the default `grid` layout would render
+  // 30 video tiles in headless Chrome → high CPU + tiny faces, often
+  // dropping frames. `speaker` layout shows the active speaker large
+  // + thumbnails of others, which scales gracefully and produces a
+  // more useful recording. H264_720P_30 keeps file size manageable
+  // (~1.5 GB/hour) while staying readable.
   const opts2: RoomCompositeOptions = {
-    layout,
+    layout: 'speaker',
     audioOnly: false,
     videoOnly: false,
     customBaseUrl: '',
-    encodingOptions: undefined,
+    encodingOptions: EncodingOptionsPreset.H264_720P_30,
   };
   const info = await egress.startRoomCompositeEgress(opts.roomName, { file: fileOutput }, opts2);
   return { egressId: info.egressId, recordingKey };
