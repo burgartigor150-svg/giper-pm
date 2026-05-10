@@ -32,14 +32,33 @@ const TRANSCRIBE_CHANNEL = 'meeting:transcribe';
 
 type LkRoom = { name?: string; sid?: string };
 type LkParticipant = { identity?: string; name?: string };
+// LiveKit can serialize EgressStatus as either the protobuf string
+// ("EGRESS_COMPLETE") or its numeric enum value depending on the
+// webhook serializer version. We accept both.
 type LkEgressInfo = {
   egress_id?: string;
   egressId?: string;
-  status?: string;
+  status?: string | number;
   file?: { filename?: string; duration?: number };
   file_results?: { filename?: string; duration?: number }[];
   fileResults?: { filename?: string; duration?: number }[];
 };
+
+const EGRESS_STATUS_BY_NUM: Record<number, string> = {
+  0: 'EGRESS_STARTING',
+  1: 'EGRESS_ACTIVE',
+  2: 'EGRESS_ENDING',
+  3: 'EGRESS_COMPLETE',
+  4: 'EGRESS_FAILED',
+  5: 'EGRESS_ABORTED',
+  6: 'EGRESS_LIMIT_REACHED',
+};
+
+function normalizeEgressStatus(s: string | number | undefined | null): string {
+  if (s == null) return '';
+  if (typeof s === 'number') return EGRESS_STATUS_BY_NUM[s] || `EGRESS_${s}`;
+  return String(s).toUpperCase();
+}
 type LkEvent = {
   event?: string;
   room?: LkRoom;
@@ -228,7 +247,7 @@ export async function POST(req: Request) {
       // via the egress id we previously persisted on participant_joined.
       try {
         const eg = pickEgress(ev);
-        const status = (eg?.status || '').toUpperCase();
+        const status = normalizeEgressStatus(eg?.status);
         const isTerminal =
           status.includes('COMPLETE') ||
           status.includes('FAILED') ||
