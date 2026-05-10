@@ -21,8 +21,11 @@ import {
 } from 'lucide-react';
 import {
   DndContext,
+  DragOverlay,
   type DragEndEvent,
-  PointerSensor,
+  type DragStartEvent,
+  MouseSensor,
+  TouchSensor,
   useSensor,
   useSensors,
   useDraggable,
@@ -161,9 +164,17 @@ export function Calendar({
   const [optimisticMove, setOptimisticMove] = useState<Map<string, string>>(
     new Map(),
   );
+  // Mouse + touch sensors instead of the unified PointerSensor — gives
+  // us better cross-browser behaviour (Pointer events on Safari can be
+  // squashed by parent elements with touch-action: pan-y, which the
+  // calendar grid effectively has via the surrounding scroll container).
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, {
+      activationConstraint: { delay: 150, tolerance: 5 },
+    }),
   );
+  const [activeDragItem, setActiveDragItem] = useState<DeadlineItem | null>(null);
   const today = useMemo(() => startOfDay(new Date()), []);
   const todayKey = dayKey(today);
 
@@ -315,13 +326,21 @@ export function Calendar({
   }, [navigate, goToday]);
 
   // ---- DnD
+  function onDragStart(e: DragStartEvent) {
+    const id = String(e.active.id);
+    setActiveDragItem(items.find((it) => it.id === id) ?? null);
+  }
   function onDragEnd(e: DragEndEvent) {
+    setActiveDragItem(null);
     const activeId = String(e.active.id);
     const overId = e.over?.id ? String(e.over.id) : null;
     if (!overId || !overId.startsWith('day:')) return;
     const newDate = overId.slice('day:'.length); // YYYY-MM-DD
     const moved = items.find((it) => it.id === activeId);
     if (!moved) return;
+    // Skip a no-op move (dropped on the same day).
+    const sameDay = ymd(new Date(moved.dueDate)) === newDate;
+    if (sameDay) return;
     // Optimistic move on the client.
     setOptimisticMove((prev) => {
       const next = new Map(prev);
@@ -345,7 +364,7 @@ export function Calendar({
   }
 
   return (
-    <DndContext sensors={sensors} onDragEnd={onDragEnd}>
+    <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd}>
       <div className="flex flex-col gap-3">
         {/* Top bar */}
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -563,6 +582,17 @@ export function Calendar({
           с Bitrix24). Стрелки ←/→ — переключение, T — сегодня.
         </p>
       </div>
+      {/* Floating preview of the dragged card. Rendered in a portal at
+          document level so the calendar grid's overflow:hidden doesn't
+          clip the visual. Without this, the original card stays put
+          and nothing appears to "move" — making DnD look broken. */}
+      <DragOverlay dropAnimation={null}>
+        {activeDragItem ? (
+          <div className={cardClass(activeDragItem, false) + ' shadow-lg'}>
+            <CardBody item={activeDragItem} />
+          </div>
+        ) : null}
+      </DragOverlay>
     </DndContext>
   );
 }
@@ -831,7 +861,7 @@ function DraggableTaskCard({
   expanded?: boolean;
 }) {
   const router = useRouter();
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: item.id,
   });
   // Track whether the pointer has actually moved past the activation
@@ -841,15 +871,6 @@ function DraggableTaskCard({
   useEffect(() => {
     if (isDragging) draggedSinceDownRef.current = true;
   }, [isDragging]);
-
-  const style = transform
-    ? {
-        transform: `translate(${transform.x}px, ${transform.y}px)`,
-        zIndex: 50,
-      }
-    : undefined;
-  const bar = PRIORITY_BAR[item.priority] ?? 'bg-slate-400';
-  const bg = STATUS_BG[item.internalStatus] ?? 'bg-muted';
   const link = `/projects/${item.projectKey}/tasks/${item.number}`;
   const title = `${item.projectKey}-${item.number} · ${item.title}${
     item.assignee ? ` · ${item.assignee.name}` : ''
@@ -857,12 +878,15 @@ function DraggableTaskCard({
   return (
     <div
       ref={setNodeRef}
-      style={style}
       {...attributes}
       {...listeners}
       role="link"
       tabIndex={0}
       title={title}
+      // While the user actually drags, hide the original card — the
+      // DragOverlay portal renders a floating copy at document level
+      // (escapes the calendar grid's overflow:hidden clipping).
+      style={isDragging ? { opacity: 0 } : undefined}
       // Don't render a real <a>/<Link> — Chrome/Safari treat anchors
       // as native HTML5 drag sources, which races dnd-kit's pointer
       // sensor and aborts the drag entirely. Manual click → router.push
@@ -871,14 +895,12 @@ function DraggableTaskCard({
         draggedSinceDownRef.current = false;
       }}
       onClick={(e) => {
-        // Suppress the click that fires at the end of a successful drop.
         if (draggedSinceDownRef.current) {
           draggedSinceDownRef.current = false;
           e.preventDefault();
           e.stopPropagation();
           return;
         }
-        // Cmd/Ctrl-click → open in a new tab, like a real link.
         if (e.metaKey || e.ctrlKey || e.button === 1) {
           window.open(link, '_blank', 'noopener,noreferrer');
           return;
@@ -891,15 +913,34 @@ function DraggableTaskCard({
           router.push(link);
         }
       }}
-      className={[
-        'cursor-grab select-none active:cursor-grabbing',
-        'flex items-center gap-1 overflow-hidden rounded-sm pl-0 pr-1 py-0.5 text-[10px]',
-        'hover:underline',
-        bg,
-        isDragging ? 'opacity-60' : '',
-        expanded ? 'p-1 text-xs' : '',
-      ].join(' ')}
+      className={cardClass(item, expanded)}
     >
+      <CardBody item={item} expanded={expanded} />
+    </div>
+  );
+}
+
+function cardClass(item: DeadlineItem, expanded: boolean | undefined): string {
+  const bg = STATUS_BG[item.internalStatus] ?? 'bg-muted';
+  return [
+    'cursor-grab select-none touch-none active:cursor-grabbing',
+    'flex items-center gap-1 overflow-hidden rounded-sm pl-0 pr-1 py-0.5 text-[10px]',
+    'hover:underline',
+    bg,
+    expanded ? 'p-1 text-xs' : '',
+  ].join(' ');
+}
+
+function CardBody({
+  item,
+  expanded,
+}: {
+  item: DeadlineItem;
+  expanded?: boolean;
+}) {
+  const bar = PRIORITY_BAR[item.priority] ?? 'bg-slate-400';
+  return (
+    <>
       <span className={`h-full w-1 shrink-0 self-stretch ${bar}`} />
       <span className="flex-1 truncate">
         {item.projectKey}-{item.number} {item.title}
@@ -909,7 +950,7 @@ function DraggableTaskCard({
           {item.assignee.name}
         </span>
       ) : null}
-    </div>
+    </>
   );
 }
 
