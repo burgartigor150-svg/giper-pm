@@ -163,37 +163,48 @@ export async function POST(req: Request) {
           console.warn('[livekit-webhook] upsert participant failed', e);
         }
 
+        // Mark meeting ACTIVE immediately so the room UI updates.
+        if (m.status === 'PLANNED') {
+          await prisma.meeting.update({
+            where: { id: m.id },
+            data: { status: 'ACTIVE', startedAt: new Date() },
+          });
+        }
+
         // First real participant → kick off composite recording. The
         // room is now guaranteed to exist on LiveKit (this very event
-        // proves it). Idempotent: only first call wins.
+        // proves it). Run async + fire-and-forget so the webhook
+        // returns 200 to LiveKit within the 10s budget; otherwise
+        // LiveKit times out and retries the whole webhook → cascade.
         if (!m.livekitEgressId && m.livekitRoomName) {
-          const egRes = await startEgressWithRetry(m.id, m.livekitRoomName);
-          if (egRes.ok) {
-            await prisma.meeting.update({
-              where: { id: m.id },
-              data: {
-                livekitEgressId: egRes.egressId,
-                recordingKey: egRes.recordingKey,
-                status: 'ACTIVE',
-                startedAt: m.status === 'PLANNED' ? new Date() : undefined,
-              },
-            });
+          const room = m.livekitRoomName;
+          const meetingId = m.id;
+          // intentionally not awaited
+          void (async () => {
+            const egRes = await startEgressWithRetry(meetingId, room);
+            if (egRes.ok) {
+              await prisma.meeting.update({
+                where: { id: meetingId },
+                data: {
+                  livekitEgressId: egRes.egressId,
+                  recordingKey: egRes.recordingKey,
+                  processingError: null,
+                },
+              });
+              // eslint-disable-next-line no-console
+              console.log(`[livekit-webhook] egress started for meeting ${meetingId}: ${egRes.egressId}`);
+            } else {
+              // eslint-disable-next-line no-console
+              console.error(`[livekit-webhook] egress final fail for meeting ${meetingId}: ${egRes.error}`);
+              await prisma.meeting.update({
+                where: { id: meetingId },
+                data: { processingError: `Egress failed to start: ${egRes.error}` },
+              });
+            }
+          })().catch((e) => {
             // eslint-disable-next-line no-console
-            console.log(`[livekit-webhook] egress started for meeting ${m.id}: ${egRes.egressId}`);
-          } else {
-            // eslint-disable-next-line no-console
-            console.error(`[livekit-webhook] egress final fail for meeting ${m.id}: ${egRes.error}`);
-            // Don't fail the meeting — participants can still talk; we
-            // just won't have a recording → no transcript.
-            await prisma.meeting.update({
-              where: { id: m.id },
-              data: {
-                status: 'ACTIVE',
-                startedAt: m.status === 'PLANNED' ? new Date() : undefined,
-                processingError: `Egress failed to start: ${egRes.error}`,
-              },
-            });
-          }
+            console.error('[livekit-webhook] egress async wrapper crashed', e);
+          });
         }
       }
       break;
