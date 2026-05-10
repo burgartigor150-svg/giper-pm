@@ -1,5 +1,5 @@
 /**
- * Public site origin for absolute links (Mini App URL, instructions).
+ * Public site origin for absolute links (used in instructions / share buttons).
  * Prefer AUTH_URL (Auth.js / prod compose). Optional NEXT_PUBLIC_APP_URL fallback.
  */
 export function siteOrigin(): string {
@@ -8,9 +8,4 @@ export function siteOrigin(): string {
   const pub = process.env.NEXT_PUBLIC_APP_URL?.trim();
   if (pub) return pub.replace(/\/$/, '');
   return '';
-}
-
-export function miniAppUrl(): string {
-  const o = siteOrigin();
-  return o ? `${o}/telegram/webapp` : '/telegram/webapp';
 }

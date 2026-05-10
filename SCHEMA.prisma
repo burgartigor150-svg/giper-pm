@@ -34,10 +34,6 @@ model User {
   mustChangePassword     Boolean   @default(false)
   lastPasswordChangeAt   DateTime?
 
-  // Telegram pairing
-  tgChatId      String?   @unique
-  tgUsername    String?
-
   // External integrations
   bitrixUserId  String?   @unique // user.ID in cloud Bitrix24
 

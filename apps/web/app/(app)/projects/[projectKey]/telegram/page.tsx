@@ -36,17 +36,24 @@ export default async function ProjectTelegramPage({
     notFound();
   }
 
-  const links = await prisma.projectTelegramChat.findMany({
-    where: { projectId: project.id },
-    orderBy: { createdAt: 'desc' },
-    select: {
-      id: true,
-      telegramChatId: true,
-      chatTitle: true,
-      createdAt: true,
-      _count: { select: { ingestMessages: true } },
-    },
-  });
+  const [links, myBot] = await Promise.all([
+    prisma.projectTelegramChat.findMany({
+      where: { projectId: project.id },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        telegramChatId: true,
+        chatTitle: true,
+        createdAt: true,
+        bot: { select: { botUsername: true } },
+        _count: { select: { ingestMessages: true } },
+      },
+    }),
+    prisma.userTelegramBot.findFirst({
+      where: { userId: user.id, isActive: true },
+      select: { id: true, botUsername: true },
+    }),
+  ]);
 
   return (
     <div className="mx-auto max-w-3xl space-y-4">
@@ -67,21 +74,37 @@ export default async function ProjectTelegramPage({
         <CardContent className="space-y-3 text-sm text-muted-foreground">
           <ol className="list-decimal space-y-2 pl-5">
             <li>
-              В <strong className="text-foreground">@BotFather</strong> отключи режим приватности группы у бота giper-pm
-              (или бот не увидит обычные сообщения — только команды).
+              Подключите своего бота на странице{' '}
+              <Link href="/integrations/telegram" className="underline text-foreground">
+                Интеграции → Telegram
+              </Link>
+              {myBot ? (
+                <>
+                  {' '}
+                  (сейчас:{' '}
+                  <code className="rounded bg-muted px-1 text-foreground">@{myBot.botUsername}</code>)
+                </>
+              ) : (
+                <>
+                  {' '}
+                  — бот ещё не подключён.
+                </>
+              )}
+              .
             </li>
             <li>
-              Добавь бота в свой рабочий чат или канал (с правом читать сообщения).
+              В @BotFather у бота отключите режим приватности группы — иначе бот видит только команды,
+              а не обычные сообщения.
             </li>
+            <li>Добавьте бота в свой рабочий чат или канал (как обычного участника).</li>
             <li>
-              Сгенерируй одноразовый код ниже и в том чате отправь:{' '}
+              Сгенерируйте одноразовый код ниже и в том чате отправьте боту:{' '}
               <code className="rounded bg-muted px-1 text-foreground">/linkproj TG-…</code>
             </li>
             <li>
-              Дальше текстовые сообщения из чата сохраняются в буфер. Команда{' '}
-              <code className="rounded bg-muted px-1 text-foreground">/harvest</code> в этом же чате создаёт задачи в
-              проекте <span className="font-mono text-foreground">{project.key}</span> из последних сообщений (по
-              одной задаче на сообщение).
+              Текстовые сообщения из чата сохраняются в буфер. Кнопкой «Собрать в задачи» (или командой{' '}
+              <code className="rounded bg-muted px-1 text-foreground">/harvest</code> в чате) giper-pm создаёт
+              задачи в проекте <span className="font-mono text-foreground">{project.key}</span> по одной на сообщение.
             </li>
           </ol>
           <p className="text-xs">
@@ -90,7 +113,7 @@ export default async function ProjectTelegramPage({
         </CardContent>
       </Card>
 
-      <ProjectTelegramPanel projectKey={project.key} initialLinks={links} />
+      <ProjectTelegramPanel projectKey={project.key} initialLinks={links} hasBot={!!myBot} />
     </div>
   );
 }

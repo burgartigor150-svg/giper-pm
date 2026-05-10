@@ -113,7 +113,9 @@ export async function syncUsers(
       // @bitrix.local TLD makes it obvious in the admin UI that this
       // is a stub — and won't ever clash with a real corporate email.
       const email = realEmail || `bitrix-${u.ID}@bitrix.local`;
-      const nameSeed = fullName || (realEmail ? realEmail.split('@')[0] : `Bitrix #${u.ID}`);
+      const nameSeed =
+        fullName ||
+        (realEmail ? realEmail.split('@')[0] || realEmail : `Bitrix #${u.ID}`);
       await prisma.user.create({
         data: {
           email,

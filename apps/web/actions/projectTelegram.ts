@@ -41,15 +41,27 @@ async function loadProjectForPerm(projectKey: string) {
 export async function generateProjectTelegramLinkCodeAction(projectKey: string): Promise<{
   code: string;
   expiresAt: number;
-  botUsername: string | null;
+  botUsername: string;
 }> {
   const me = await requireAuth();
   const project = await loadProjectForPerm(projectKey);
   if (!project) throw new Error('Проект не найден');
-  if (
-    !canManageAssignments({ id: me.id, role: me.role }, project)
-  ) {
+  if (!canManageAssignments({ id: me.id, role: me.role }, project)) {
     throw new Error('Недостаточно прав (нужны права PM / лида проекта)');
+  }
+
+  // The user must have their own personal Telegram bot connected — that
+  // bot will be the one ingesting messages in the group. Without it the
+  // /linkproj command would have nothing to react to.
+  const bot = await prisma.userTelegramBot.findFirst({
+    where: { userId: me.id, isActive: true },
+    orderBy: { createdAt: 'desc' },
+    select: { id: true, botUsername: true },
+  });
+  if (!bot) {
+    throw new Error(
+      'Сначала подключите своего Telegram-бота на странице «Интеграции → Telegram».',
+    );
   }
 
   let suffix = '';
@@ -57,7 +69,7 @@ export async function generateProjectTelegramLinkCodeAction(projectKey: string):
     const c = newCode();
     const ok = await redis().set(
       `tg:plink:${c}`,
-      JSON.stringify({ projectId: project.id, userId: me.id }),
+      JSON.stringify({ projectId: project.id, userId: me.id, botId: bot.id }),
       'EX',
       LINK_TTL_SECONDS,
       'NX',
@@ -71,7 +83,7 @@ export async function generateProjectTelegramLinkCodeAction(projectKey: string):
   return {
     code: `TG-${suffix}`,
     expiresAt: Date.now() + LINK_TTL_SECONDS * 1000,
-    botUsername: process.env.PUBLIC_TG_BOT_USERNAME ?? null,
+    botUsername: bot.botUsername,
   };
 }
 

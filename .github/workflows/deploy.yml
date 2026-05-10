@@ -81,6 +81,18 @@ jobs:
           cache-from: type=gha,scope=migrate
           cache-to: type=gha,scope=migrate,mode=max
 
+      - name: Build & push tg-bot
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.tg-bot
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/giper-tg-bot:${{ steps.tag.outputs.tag }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/giper-tg-bot:latest
+          cache-from: type=gha,scope=tg-bot
+          cache-to: type=gha,scope=tg-bot,mode=max
+
   deploy:
     needs: build
     runs-on: ubuntu-latest

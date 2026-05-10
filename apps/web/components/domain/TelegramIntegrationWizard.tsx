@@ -1,6 +1,6 @@
 'use client';
 
-import Link from 'next/link';
+import { useState, useTransition } from 'react';
 import {
   Card,
   CardContent,
@@ -8,67 +8,283 @@ import {
   CardHeader,
   CardTitle,
 } from '@giper/ui/components/Card';
-import { GenerateTgPairingCodeForm } from '@/components/domain/GenerateTgPairingCodeForm';
-import { MiniAppUrlBlock } from '@/components/domain/MiniAppUrlBlock';
+import { Button } from '@giper/ui/components/Button';
+import { Input } from '@giper/ui/components/Input';
+import {
+  connectTelegramBotAction,
+  disconnectTelegramBotAction,
+  harvestProjectChatAction,
+} from '@/actions/telegramBots';
+import { generateProjectTelegramLinkCodeAction } from '@/actions/projectTelegram';
+
+export type WizardProject = {
+  key: string;
+  name: string;
+};
+
+export type WizardChatLink = {
+  id: string;
+  projectKey: string;
+  projectName: string;
+  chatTitle: string | null;
+  telegramChatId: string;
+  bufferedMessages: number;
+  createdAt: string;
+};
+
+export type WizardBot = {
+  id: string;
+  botUsername: string;
+  botName: string | null;
+  isActive: boolean;
+  lastError: string | null;
+  lastPolledAt: string | null;
+};
 
 function Step({
   n,
   title,
+  done,
   children,
 }: {
   n: number;
   title: string;
+  done: boolean;
   children: React.ReactNode;
 }) {
   return (
     <div className="flex gap-4 border-b border-border/60 pb-6 last:border-b-0 last:pb-0">
       <div
-        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-foreground text-sm font-semibold text-background"
+        className={
+          'flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold ' +
+          (done
+            ? 'bg-emerald-600 text-white'
+            : 'bg-foreground text-background')
+        }
         aria-hidden
       >
-        {n}
+        {done ? '✓' : n}
       </div>
       <div className="min-w-0 flex-1 space-y-3">
         <h2 className="text-base font-semibold leading-tight">{title}</h2>
-        <div className="text-sm text-muted-foreground">{children}</div>
+        <div className="space-y-2 text-sm text-muted-foreground">{children}</div>
       </div>
     </div>
   );
 }
 
-export function TelegramIntegrationWizard({
-  linked,
-  tgUsername,
-  botUsername,
-  showAdminBlocks,
-  webAppUrl,
+function ConnectBotForm({
+  onConnected,
 }: {
-  linked: boolean;
-  tgUsername: string | null;
-  botUsername: string | null;
-  showAdminBlocks: boolean;
-  webAppUrl: string;
+  onConnected: () => void;
 }) {
-  const botHandle = botUsername ? `@${botUsername.replace(/^@/, '')}` : null;
-  const botHref = botUsername ? `https://t.me/${botUsername.replace(/^@/, '')}` : null;
+  const [token, setToken] = useState('');
+  const [pending, startTransition] = useTransition();
+  const [err, setErr] = useState<string | null>(null);
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setErr(null);
+    const t = token.trim();
+    if (!t) return;
+    startTransition(async () => {
+      const res = await connectTelegramBotAction({ token: t });
+      if (!res.ok) {
+        setErr(res.message);
+        return;
+      }
+      setToken('');
+      onConnected();
+    });
+  }
+
+  return (
+    <form className="space-y-2" onSubmit={submit}>
+      <Input
+        type="password"
+        autoComplete="off"
+        placeholder="1234567890:AA…"
+        value={token}
+        onChange={(e) => setToken(e.target.value)}
+        disabled={pending}
+      />
+      <div className="flex flex-wrap items-center gap-2">
+        <Button type="submit" size="sm" disabled={pending || !token.trim()}>
+          {pending ? 'Проверяю…' : 'Подключить бота'}
+        </Button>
+        <span className="text-xs text-muted-foreground">
+          Токен шифруется и доступен только серверу giper-pm.
+        </span>
+      </div>
+      {err ? <p className="text-sm text-red-600">{err}</p> : null}
+    </form>
+  );
+}
+
+function DisconnectButton({ botId, onDone }: { botId: string; onDone: () => void }) {
+  const [pending, startTransition] = useTransition();
+  const [err, setErr] = useState<string | null>(null);
+  return (
+    <div className="flex items-center gap-2">
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled={pending}
+        onClick={() => {
+          if (!confirm('Отключить бота? Все привязки чатов и буфер сообщений будут удалены.')) return;
+          setErr(null);
+          startTransition(async () => {
+            const res = await disconnectTelegramBotAction({ botId });
+            if (!res.ok) {
+              setErr(res.message);
+              return;
+            }
+            onDone();
+          });
+        }}
+      >
+        {pending ? '…' : 'Отключить бота'}
+      </Button>
+      {err ? <p className="text-sm text-red-600">{err}</p> : null}
+    </div>
+  );
+}
+
+function GenerateCodeForProject({
+  projectKey,
+  botUsername,
+  onGenerated,
+}: {
+  projectKey: string;
+  botUsername: string;
+  onGenerated: () => void;
+}) {
+  const [pending, startTransition] = useTransition();
+  const [code, setCode] = useState<{ text: string; expiresAt: number } | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  function mint() {
+    setErr(null);
+    setCode(null);
+    startTransition(async () => {
+      try {
+        const r = await generateProjectTelegramLinkCodeAction(projectKey);
+        setCode({ text: r.code, expiresAt: r.expiresAt });
+        onGenerated();
+      } catch (e) {
+        setErr(e instanceof Error ? e.message : 'Ошибка');
+      }
+    });
+  }
+
+  return (
+    <div className="space-y-2">
+      <Button type="button" size="sm" disabled={pending} onClick={mint}>
+        {pending ? 'Генерирую…' : 'Сгенерировать код привязки'}
+      </Button>
+      {err ? <p className="text-sm text-red-600">{err}</p> : null}
+      {code ? (
+        <div className="rounded-md border border-border bg-muted/40 p-3 text-sm">
+          <p className="text-xs text-muted-foreground">
+            В групповом чате (где сидит @{botUsername}) отправьте боту:
+          </p>
+          <pre className="mt-2 whitespace-pre-wrap break-words rounded bg-background px-2 py-1 font-mono text-sm">
+            /linkproj {code.text}
+          </pre>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Действует до {new Date(code.expiresAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}.
+          </p>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function HarvestButton({ linkId }: { linkId: string }) {
+  const [pending, startTransition] = useTransition();
+  const [result, setResult] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  return (
+    <div className="space-y-1">
+      <Button
+        type="button"
+        size="sm"
+        disabled={pending}
+        onClick={() => {
+          setResult(null);
+          setErr(null);
+          startTransition(async () => {
+            const r = await harvestProjectChatAction({ linkId, limit: 25 });
+            if (!r.ok) {
+              setErr(r.message);
+              return;
+            }
+            if (r.emptyBuffer) {
+              setResult('Буфер пуст — бот пока не получал сообщений (или они уже собраны).');
+              return;
+            }
+            if (!r.created.length) {
+              setResult('Не удалось создать задачи (пустые сообщения).');
+              return;
+            }
+            setResult(
+              `Создано задач: ${r.created.length}. Первые: ${r.created
+                .slice(0, 5)
+                .map((n) => `${r.projectKey}-${n}`)
+                .join(', ')}`,
+            );
+          });
+        }}
+      >
+        {pending ? 'Собираю…' : 'Собрать в задачи'}
+      </Button>
+      {err ? <p className="text-sm text-red-600">{err}</p> : null}
+      {result ? <p className="text-xs text-emerald-700">{result}</p> : null}
+    </div>
+  );
+}
+
+export function TelegramIntegrationWizard({
+  bot,
+  projects,
+  links,
+}: {
+  bot: WizardBot | null;
+  projects: WizardProject[];
+  links: WizardChatLink[];
+}) {
+  const [selectedProject, setSelectedProject] = useState<string>(projects[0]?.key ?? '');
+
+  const stepBotDone = !!bot;
+  const stepLinkDone = links.length > 0;
+  const stepHarvestDone = links.some((l) => l.bufferedMessages > 0);
+
+  function reload() {
+    if (typeof window !== 'undefined') window.location.reload();
+  }
 
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-6 p-6">
       <header className="space-y-2">
-        <h1 className="text-2xl font-semibold">Подключите личный Telegram</h1>
+        <h1 className="text-2xl font-semibold">Подключите свой Telegram-бот</h1>
         <p className="text-sm text-muted-foreground">
-          Вы связываете <strong className="text-foreground">свой</strong> аккаунт Telegram с учёткой giper-pm. Никаких
-          API-ключей и доступа к серверу не нужно — только Telegram и эта страница.
+          У giper-pm нет общего бота организации. Каждый PM подключает{' '}
+          <strong className="text-foreground">собственного бота</strong> через @BotFather и привязывает его к чатам своих
+          проектов. Сообщения из этих чатов превращаются в задачи.
         </p>
-        {linked ? (
+        {bot ? (
           <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-100">
-            Сейчас привязано:{' '}
-            <strong>{tgUsername ? `@${tgUsername}` : 'Telegram подключён'}</strong>. Ниже можно перепривязать другой
-            аккаунт.
+            Подключён бот <strong>@{bot.botUsername}</strong>
+            {bot.botName ? ` (${bot.botName})` : ''}.
+            {bot.lastError ? (
+              <span className="ml-2 text-amber-800 dark:text-amber-300">⚠ {bot.lastError}</span>
+            ) : null}
           </p>
         ) : (
           <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
-            Пока не привязано. Пройдите шаги 1 → 3 — это займёт около минуты.
+            Бот ещё не подключён. Пройдите шаги 1–3 — это займёт пару минут.
           </p>
         )}
       </header>
@@ -76,141 +292,145 @@ export function TelegramIntegrationWizard({
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-lg">Шаги</CardTitle>
-          <CardDescription>Делайте по порядку — так быстрее всего получится.</CardDescription>
+          <CardDescription>Делайте по порядку — каждое действие занимает 30 секунд.</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-6 pt-2">
-          <Step n={1} title="Откройте корпоративного бота в Telegram">
+          <Step n={1} title="Создайте бота в @BotFather" done={stepBotDone}>
             <p>
-              На телефоне или в Telegram Desktop найдите бота организации
-              {botHandle ? (
-                <>
-                  :{' '}
-                  <a
-                    href={botHref!}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="font-medium text-foreground underline"
-                  >
-                    {botHandle}
-                  </a>
-                </>
-              ) : (
-                <> (имя бота подскажет администратор giper-pm).</>
-              )}
+              Откройте{' '}
+              <a
+                href="https://t.me/BotFather"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-medium text-foreground underline"
+              >
+                @BotFather
+              </a>{' '}
+              в Telegram → отправьте команду <code className="rounded bg-muted px-1">/newbot</code> →
+              придумайте имя и username (заканчивается на <code className="rounded bg-muted px-1">_bot</code>).
             </p>
-            <p>Нажмите «Запустить» / Start, если бот ещё не запускали.</p>
+            <p>
+              BotFather пришлёт длинную строку вида{' '}
+              <code className="rounded bg-muted px-1">1234567890:AA-Bb…</code> — это{' '}
+              <strong className="text-foreground">токен</strong>, скопируйте его. Не показывайте никому.
+            </p>
           </Step>
 
-          <Step n={2} title="Вход через приложение в Telegram (по желанию)">
+          <Step n={2} title="Отключите Group Privacy у бота" done={stepBotDone}>
             <p>
-              Если у бота в меню есть пункт вроде <strong className="text-foreground">«Открыть приложение»</strong> или
-              Mini App — после привязки на шаге 3 вы сможете открывать giper-pm прямо из Telegram без пароля.
+              Без этого бот видит только команды (которые начинаются с <code className="rounded bg-muted px-1">/</code>),
+              но не обычные сообщения — и собирать задачи будет неоткуда.
             </p>
-            <p className="text-xs">Нет такой кнопки — не страшно, можно пользоваться только сайтом и командами бота.</p>
+            <p>
+              В @BotFather: <code className="rounded bg-muted px-1">/mybots</code> → выберите вашего бота →{' '}
+              <strong className="text-foreground">Bot Settings</strong> →{' '}
+              <strong className="text-foreground">Group Privacy</strong> →{' '}
+              <strong className="text-foreground">Turn off</strong>.
+            </p>
           </Step>
 
-          <Step n={3} title="Привяжите учётку одноразовым кодом">
-            <p>
-              Нажмите кнопку ниже — появится код на несколько минут. Отправьте боту в <strong>личку</strong> команду
-              ровно в том виде, как покажет система (начинается с <code className="rounded bg-muted px-1">/pair</code>
-              ).
-            </p>
-            <GenerateTgPairingCodeForm buttonLabel="Получить код для привязки" />
+          <Step n={3} title="Вставьте токен сюда" done={stepBotDone}>
+            {bot ? (
+              <div className="space-y-2">
+                <p className="text-emerald-800 dark:text-emerald-200">
+                  Бот <strong>@{bot.botUsername}</strong> подключён. Токен зашифрован и больше не виден.
+                </p>
+                <DisconnectButton botId={bot.id} onDone={reload} />
+              </div>
+            ) : (
+              <ConnectBotForm onConnected={reload} />
+            )}
           </Step>
 
-          <Step n={4} title="Проверка">
-            {linked ? (
-              <p className="text-emerald-800 dark:text-emerald-200">
-                Готово — Telegram подключён. Можно пользоваться командами бота и (если включено) Mini App.
+          <Step n={4} title="Добавьте бота в групповой чат проекта" done={stepBotDone && stepLinkDone}>
+            {bot ? (
+              <p>
+                В Telegram откройте групповой чат вашего проекта (или создайте новый) → Manage group / Add member →{' '}
+                найдите <strong className="text-foreground">@{bot.botUsername}</strong> и добавьте.
+                Если бота не видно — он точно не отключал Group Privacy на шаге 2.
+              </p>
+            ) : (
+              <p className="text-amber-700">Сначала подключите бота на шаге 3.</p>
+            )}
+          </Step>
+
+          <Step n={5} title="Привяжите чат к проекту" done={stepLinkDone}>
+            {!bot ? (
+              <p className="text-amber-700">Сначала подключите бота.</p>
+            ) : projects.length === 0 ? (
+              <p className="text-amber-700">
+                У вас пока нет проектов, в которых вы PM или владелец. Создайте проект, потом возвращайтесь сюда.
               </p>
             ) : (
               <div className="space-y-2">
-                <p>
-                  После отправки <code className="rounded bg-muted px-1">/pair …</code> бот ответит подтверждением.
-                  Обновите страницу — статус сверху станет зелёным.
-                </p>
-                <button
-                  type="button"
-                  className="text-sm font-medium text-foreground underline"
-                  onClick={() => window.location.reload()}
+                <label className="block text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Проект
+                </label>
+                <select
+                  className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                  value={selectedProject}
+                  onChange={(e) => setSelectedProject(e.target.value)}
                 >
-                  Обновить страницу
-                </button>
+                  {projects.map((p) => (
+                    <option key={p.key} value={p.key}>
+                      {p.key} — {p.name}
+                    </option>
+                  ))}
+                </select>
+                {selectedProject ? (
+                  <GenerateCodeForProject
+                    projectKey={selectedProject}
+                    botUsername={bot.botUsername}
+                    onGenerated={reload}
+                  />
+                ) : null}
               </div>
             )}
+          </Step>
+
+          <Step n={6} title="Соберите сообщения в задачи" done={stepLinkDone && stepHarvestDone}>
+            {links.length === 0 ? (
+              <p>
+                После привязки чата (шаг 5) сюда попадут все ваши группы. По кнопке «Собрать в задачи» giper-pm
+                создаст по одной задаче на каждое непрочитанное сообщение.
+              </p>
+            ) : (
+              <ul className="space-y-3">
+                {links.map((l) => (
+                  <li
+                    key={l.id}
+                    className="rounded-md border border-border bg-background/40 p-3"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                        <div className="text-sm font-medium text-foreground">
+                          {l.chatTitle ?? 'Без названия'}{' '}
+                          <span className="font-mono text-xs text-muted-foreground">({l.telegramChatId})</span>
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          Проект <span className="font-mono">{l.projectKey}</span> — {l.projectName}.{' '}
+                          В буфере: {l.bufferedMessages}
+                        </div>
+                      </div>
+                      <HarvestButton linkId={l.id} />
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <p className="text-xs">
+              То же самое можно делать прямо из Telegram командой{' '}
+              <code className="rounded bg-muted px-1">/harvest 25</code>.
+            </p>
           </Step>
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Что умеет бот после привязки</CardTitle>
-          <CardDescription>Кратко — полный список можно вызвать командой /help у бота.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-2 text-sm text-muted-foreground">
-          <p>
-            <code className="rounded bg-muted px-1">/me</code>, <code className="rounded bg-muted px-1">/today</code>,{' '}
-            <code className="rounded bg-muted px-1">/week</code> — таймер и часы
-          </p>
-          <p>
-            <code className="rounded bg-muted px-1">/log</code> — записать время на задачу
-          </p>
-          <p>
-            В <strong className="text-foreground">групповом чате</strong> проекта (если вы PM/лид):{' '}
-            <code className="rounded bg-muted px-1">/linkproj</code> и <code className="rounded bg-muted px-1">/harvest</code>{' '}
-            — страница проекта → раздел «Telegram» подскажет код.
-          </p>
-        </CardContent>
-      </Card>
-
-      {showAdminBlocks ? (
-        <>
-          <Card className="border-dashed">
-            <CardHeader>
-              <CardTitle className="text-base">Только администратор инстанса</CardTitle>
-              <CardDescription>
-                Настройка один раз на организацию: сервер и BotFather. Обычным пользователям этот блок не нужен.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4 text-sm text-muted-foreground">
-              <ol className="list-decimal space-y-2 pl-5">
-                <li>
-                  В окружении контейнера <strong className="text-foreground">web</strong> задан токен бота и совпадает с
-                  процессом бота на сервере.
-                </li>
-                <li>
-                  В @BotFather → Mini Apps указан URL Mini App (скопируйте ниже).
-                </li>
-                <li>
-                  Публичный адрес сайта совпадает с настройкой авторизации (<code className="rounded bg-muted px-1">AUTH_URL</code>
-                  ).
-                </li>
-              </ol>
-              <div className="rounded-md border border-border bg-muted/30 p-3">
-                <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  URL для BotFather (Mini App)
-                </div>
-                <MiniAppUrlBlock url={webAppUrl} />
-              </div>
-            </CardContent>
-          </Card>
-
-          <p className="text-xs text-muted-foreground">
-            Техническая документация:{' '}
-            <Link
-              href="https://github.com/burgartigor150-svg/giper-pm/blob/main/apps/tg-bot/README.md"
-              className="underline"
-            >
-              apps/tg-bot/README.md
-            </Link>
-          </p>
-        </>
-      ) : (
-        <p className="text-center text-xs text-muted-foreground">
-          Не работает бот или Mini App? Обратитесь к администратору giper-pm в вашей организации — без ваших ключей и без
-          доступа к серверу.
-        </p>
-      )}
+      <p className="text-center text-xs text-muted-foreground">
+        Токен бота хранится зашифрованным (AES-256-GCM) и доступен только runner-у giper-pm. Ни админ инстанса, ни
+        другие пользователи его не видят. Telegram сам по себе не даёт боту работать без токена — это техническое
+        ограничение Telegram.
+      </p>
     </div>
   );
 }

@@ -38,7 +38,7 @@ export default async function SettingsPage() {
                 Bitrix24 →
               </Link>
               <Link href="/integrations/telegram" className="text-sm underline">
-                Telegram и Mini App →
+                Telegram (личные боты PM) →
               </Link>
             </CardContent>
           </Card>

@@ -132,9 +132,9 @@ services:
       WS_PUBLISH_URL: http://ws:3001/publish
       NEXT_PUBLIC_WS_URL: ${PUBLIC_WS_URL}
 
-      # Telegram Mini App auth (must match tg-bot token)
-      TG_BOT_TOKEN: ${TG_BOT_TOKEN:-}
-      PUBLIC_TG_BOT_USERNAME: ${PUBLIC_TG_BOT_USERNAME:-}
+      # AES-256-GCM master key for personal Telegram bot tokens. Must
+      # match the same value in the tg-bot service below.
+      TG_TOKEN_ENC_KEY: ${TG_TOKEN_ENC_KEY}
 
       # GitHub webhook
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET}
@@ -161,6 +161,27 @@ services:
       WS_HOST: 0.0.0.0
       WS_AUTH_SECRET: ${WS_AUTH_SECRET}
       WS_PUBLISH_SECRET: ${WS_PUBLISH_SECRET}
+
+  # Multi-bot runner: long-polls every UserTelegramBot row where
+  # isActive=true. Each PM connects their personal BotFather bot via
+  # the giper-pm web UI (Интеграции → Telegram). Tokens live AES-256-GCM
+  # encrypted in Postgres; this container decrypts at boot and on the
+  # `tg:bots:reload` Redis pub/sub event.
+  tg-bot:
+    image: ghcr.io/${GHCR_OWNER}/giper-tg-bot:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-giper}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-giper_pm}
+      REDIS_URL: redis://redis:6379
+      TG_TOKEN_ENC_KEY: ${TG_TOKEN_ENC_KEY}
 
 volumes:
   postgres_data:

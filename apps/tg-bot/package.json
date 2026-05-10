@@ -12,6 +12,8 @@
   },
   "dependencies": {
     "@giper/db": "workspace:*",
+    "@giper/integrations": "workspace:*",
+    "@giper/shared": "workspace:*",
     "grammy": "^1.30.0",
     "ioredis": "^5.4.1",
     "tsx": "^4.21.0"

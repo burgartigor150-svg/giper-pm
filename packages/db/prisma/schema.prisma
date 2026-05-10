@@ -36,10 +36,6 @@ model User {
   mustChangePassword     Boolean   @default(false)
   lastPasswordChangeAt   DateTime?
 
-  // Telegram pairing
-  tgChatId      String?   @unique
-  tgUsername    String?
-
   // External integrations
   bitrixUserId  String?   @unique // user.ID in cloud Bitrix24
 
@@ -85,6 +81,9 @@ model User {
 
   /// Telegram groups/channels this user linked to a giper-pm project.
   linkedProjectTelegramChats ProjectTelegramChat[] @relation("ProjectTelegramLinker")
+
+  /// Personal Telegram bots (BotFather) the user connected for project harvest.
+  telegramBots      UserTelegramBot[]
 
   @@index([role, isActive])
 }
@@ -305,12 +304,18 @@ model Project {
 
 /// A Telegram group or channel whose messages PM wants to turn into tasks.
 /// Bot must be added to the chat with Group Privacy disabled so it sees normal messages.
+///
+/// Each row is owned by exactly one personal bot (`UserTelegramBot`) — the
+/// same Telegram chat could in principle be linked through different PMs'
+/// bots, hence the composite (botId, telegramChatId) unique key.
 model ProjectTelegramChat {
   id             String   @id @default(cuid())
   projectId      String
   project        Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  botId          String
+  bot            UserTelegramBot @relation(fields: [botId], references: [id], onDelete: Cascade)
   /// Telegram chat id as string (e.g. "-1001234567890").
-  telegramChatId String   @unique
+  telegramChatId String
   chatTitle      String?
   linkedByUserId String
   linkedBy       User     @relation("ProjectTelegramLinker", fields: [linkedByUserId], references: [id])
@@ -318,7 +323,34 @@ model ProjectTelegramChat {
 
   ingestMessages TelegramProjectMessage[]
 
+  @@unique([botId, telegramChatId])
   @@index([projectId])
+  @@index([botId])
+}
+
+/// Personal Telegram bot owned by a single PM. The token is provided by
+/// the user via UI (BotFather → /newbot) and stored AES-256-GCM encrypted.
+/// The multi-bot runner in apps/tg-bot polls all `isActive=true` rows.
+model UserTelegramBot {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Telegram bot user id (returned by getMe). Stable across token rotations.
+  botTgId        String   @unique
+  botUsername    String
+  botName        String?
+  /// AES-256-GCM ciphertext: base64( iv | cipher | authTag ).
+  encryptedToken String   @db.Text
+  isActive       Boolean  @default(true)
+  lastPolledAt   DateTime?
+  lastError      String?  @db.Text
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  telegramChats  ProjectTelegramChat[]
+
+  @@index([userId])
+  @@index([isActive])
 }
 
 model TelegramProjectMessage {

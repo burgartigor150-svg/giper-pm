@@ -1,10 +1,17 @@
 /**
- * Project ↔ Telegram chat linking + message buffer + /harvest → Task rows.
+ * Per-bot handlers: project ↔ Telegram chat linking, message ingest,
+ * and `/harvest` → Task creation.
+ *
+ * Each bot in the multi-bot runner is "owned" by exactly one PM
+ * (UserTelegramBot.userId). All actions are authorised against that
+ * owner — we never look up `tgChatId` on User anymore (that pairing
+ * was removed when we dropped the single org-wide bot model).
  */
 
 import type { Bot, Context } from 'grammy';
 import type { Redis } from 'ioredis';
 import type { PrismaClient } from '@giper/db';
+import { runHarvest } from '@giper/integrations';
 
 type SlimProject = {
   id: string;
@@ -13,18 +20,11 @@ type SlimProject = {
   members: { userId: string; role: string }[];
 };
 
-export async function findPairedUser(
-  prisma: PrismaClient,
-  ctx: Context,
-): Promise<{ id: string; name: string; role: string } | null> {
-  if (!ctx.chat || !ctx.from) return null;
-  // Private chat: chat.id === user's Telegram id. Groups: use sender id.
-  const actorId = ctx.chat.type === 'private' ? ctx.chat.id : ctx.from.id;
-  return prisma.user.findUnique({
-    where: { tgChatId: String(actorId) },
-    select: { id: true, name: true, role: true },
-  });
-}
+export type OwningBot = {
+  id: string;
+  userId: string;
+  botUsername: string;
+};
 
 function harvestAllowed(
   user: { id: string; role: string },
@@ -35,8 +35,15 @@ function harvestAllowed(
   return project.members.some((m) => m.userId === user.id && m.role === 'LEAD');
 }
 
+async function loadOwner(prisma: PrismaClient, userId: string) {
+  return prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true, name: true, role: true, isActive: true },
+  });
+}
+
 async function loadProject(prisma: PrismaClient, projectId: string): Promise<SlimProject | null> {
-  const p = await prisma.project.findUnique({
+  return prisma.project.findUnique({
     where: { id: projectId },
     select: {
       id: true,
@@ -45,86 +52,87 @@ async function loadProject(prisma: PrismaClient, projectId: string): Promise<Sli
       members: { select: { userId: true, role: true } },
     },
   });
-  return p;
 }
 
-const MAX_RETRIES = 10;
-
-async function createTaskFromText(
+export function registerBotHandlers(
+  bot: Bot,
+  redis: Redis,
   prisma: PrismaClient,
-  projectId: string,
-  creatorId: string,
-  title: string,
-  description: string,
-): Promise<number> {
-  let lastErr: unknown;
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-    const max = await prisma.task.aggregate({
-      where: { projectId },
-      _max: { number: true },
-    });
-    const nextNumber = (max._max.number ?? 0) + 1;
-    try {
-      const created = await prisma.task.create({
-        data: {
-          projectId,
-          number: nextNumber,
-          title,
-          description,
-          creatorId,
-          status: 'BACKLOG',
-          priority: 'MEDIUM',
-          type: 'TASK',
-        },
-        select: { number: true },
-      });
-      return created.number;
-    } catch (e) {
-      lastErr = e;
-      await new Promise((r) => setTimeout(r, Math.floor(Math.random() * 50) * (attempt + 1)));
+  owningBot: OwningBot,
+) {
+  bot.command('start', async (ctx) => {
+    const arg = (ctx.match || '').toString().trim();
+    if (arg) {
+      // start payloads with codes are no longer used; just greet.
     }
-  }
-  throw lastErr ?? new Error('task number conflict');
-}
+    await ctx.reply(
+      [
+        `Привет! Я бот giper-pm пользователя @${owningBot.botUsername}.`,
+        '',
+        'Меня нужно добавить в групповой чат вашего проекта и:',
+        '/linkproj TG-XXXXXX — привязать этот чат к проекту (код возьмите в вебе на странице «Интеграции → Telegram»)',
+        '/harvest [N] — собрать последние N сообщений в задачи (по умолчанию 25, максимум 100)',
+        '/help — повторить эту шпаргалку',
+        '',
+        'Важно: в @BotFather у меня должен быть отключён Group Privacy — иначе я не вижу обычные сообщения в группе.',
+      ].join('\n'),
+    );
+  });
 
-export function registerProjectTelegram(bot: Bot, redis: Redis, prisma: PrismaClient) {
+  bot.command('help', async (ctx) => {
+    await ctx.reply(
+      [
+        'Команды:',
+        '/linkproj TG-XXXXXX — в группе: привязать чат к проекту',
+        '/harvest [N] — в привязанной группе: создать задачи из последних N сообщений',
+      ].join('\n'),
+    );
+  });
+
   bot.command('linkproj', async (ctx) => {
     const chat = ctx.chat;
     if (!chat || chat.type === 'private') {
       await ctx.reply(
-        'Эту команду нужно отправить в группе или супергруппе, куда добавлен бот:\n/linkproj TG-XXXXXX',
+        'Команду /linkproj нужно отправить в групповом чате (или супергруппе), куда добавлен бот.',
       );
-      return;
-    }
-    const actor = await findPairedUser(prisma, ctx);
-    if (!actor) {
-      await ctx.reply('Сначала привяжи личку к учётке: /pair TG-… из веба.');
       return;
     }
 
     const rawArg = (ctx.match || '').toString().trim();
     const codeKey = rawArg.toUpperCase().replace(/^TG-/, '');
     if (!codeKey) {
-      await ctx.reply('Использование: /linkproj TG-XXXXXX (код из веба проекта)');
+      await ctx.reply('Использование: /linkproj TG-XXXXXX (код возьмите в вебе на странице проекта)');
       return;
     }
 
     const payload = await redis.get(`tg:plink:${codeKey}`);
     if (!payload) {
-      await ctx.reply('Код не найден или истёк. Сгенерируй новый на странице проекта → Telegram.');
+      await ctx.reply('Код не найден или истёк. Сгенерируйте новый в вебе.');
       return;
     }
 
-    let parsed: { projectId: string; userId: string };
+    let parsed: { projectId: string; userId: string; botId: string };
     try {
-      parsed = JSON.parse(payload) as { projectId: string; userId: string };
+      parsed = JSON.parse(payload) as { projectId: string; userId: string; botId: string };
     } catch {
-      await ctx.reply('Битый код, сгенерируй новый.');
+      await ctx.reply('Битый код, сгенерируйте новый.');
       return;
     }
 
-    if (parsed.userId !== actor.id) {
-      await ctx.reply('Этот код выпустил другой пользователь. Зайди в веб под своей учёткой и сгенерируй код заново.');
+    if (parsed.botId !== owningBot.id) {
+      await ctx.reply(
+        'Этот код выпустил пользователь, у которого подключён другой бот. Сгенерируйте код в вебе под своей учёткой.',
+      );
+      return;
+    }
+    if (parsed.userId !== owningBot.userId) {
+      await ctx.reply('Код принадлежит другому пользователю giper-pm.');
+      return;
+    }
+
+    const owner = await loadOwner(prisma, owningBot.userId);
+    if (!owner || !owner.isActive) {
+      await ctx.reply('Учётка владельца бота не найдена или отключена в giper-pm.');
       return;
     }
 
@@ -133,7 +141,7 @@ export function registerProjectTelegram(bot: Bot, redis: Redis, prisma: PrismaCl
       await ctx.reply('Проект не найден.');
       return;
     }
-    if (!harvestAllowed(actor, project)) {
+    if (!harvestAllowed(owner, project)) {
       await ctx.reply('Недостаточно прав для привязки чата к этому проекту.');
       return;
     }
@@ -142,26 +150,33 @@ export function registerProjectTelegram(bot: Bot, redis: Redis, prisma: PrismaCl
     const chatTitle = 'title' in chat ? chat.title ?? null : null;
 
     await prisma.projectTelegramChat.upsert({
-      where: { telegramChatId },
+      where: {
+        botId_telegramChatId: {
+          botId: owningBot.id,
+          telegramChatId,
+        },
+      },
       create: {
         projectId: project.id,
+        botId: owningBot.id,
         telegramChatId,
         chatTitle,
-        linkedByUserId: actor.id,
+        linkedByUserId: owner.id,
       },
       update: {
         projectId: project.id,
         chatTitle,
-        linkedByUserId: actor.id,
+        linkedByUserId: owner.id,
       },
     });
 
     await redis.del(`tg:plink:${codeKey}`);
     await ctx.reply(
       [
-        `✅ Чат привязан к проекту ${project.key}.`,
-        `Пишите задачи обычными сообщениями — бот их копит.`,
-        `Команда /harvest (или /harvest 40) создаёт задачи из последних сообщений.`,
+        `Чат привязан к проекту ${project.key}.`,
+        'Пишите задачи обычными сообщениями — бот их копит.',
+        'Команда /harvest (или /harvest 40) создаст задачи из последних сообщений.',
+        'Это же можно сделать кнопкой в вебе на странице «Интеграции → Telegram» или «Проект → Telegram».',
       ].join('\n'),
     );
   });
@@ -172,15 +187,15 @@ export function registerProjectTelegram(bot: Bot, redis: Redis, prisma: PrismaCl
       await ctx.reply('/harvest нужно вызывать в привязанном групповом чате.');
       return;
     }
-    const actor = await findPairedUser(prisma, ctx);
-    if (!actor) {
-      await ctx.reply('Сначала привяжи личку к учётке: /pair TG-… из веба.');
-      return;
-    }
 
     const telegramChatId = String(chat.id);
     const link = await prisma.projectTelegramChat.findUnique({
-      where: { telegramChatId },
+      where: {
+        botId_telegramChatId: {
+          botId: owningBot.id,
+          telegramChatId,
+        },
+      },
       include: {
         project: {
           select: {
@@ -193,59 +208,34 @@ export function registerProjectTelegram(bot: Bot, redis: Redis, prisma: PrismaCl
       },
     });
     if (!link) {
-      await ctx.reply('Этот чат не привязан к проекту. /linkproj TG-…');
+      await ctx.reply('Этот чат не привязан к проекту. Сначала /linkproj TG-…');
       return;
     }
 
-    if (!harvestAllowed(actor, link.project)) {
+    const owner = await loadOwner(prisma, owningBot.userId);
+    if (!owner || !owner.isActive) {
+      await ctx.reply('Учётка владельца бота не найдена или отключена в giper-pm.');
+      return;
+    }
+    if (!harvestAllowed(owner, link.project)) {
       await ctx.reply('Недостаточно прав создавать задачи в этом проекте.');
       return;
     }
 
     const arg = (ctx.match || '').toString().trim();
-    const limit = Math.min(100, Math.max(1, parseInt(arg, 10) || 25));
+    const limit = parseInt(arg, 10) || 25;
+    const result = await runHarvest(prisma, link, owner.id, limit);
 
-    const rows = await prisma.telegramProjectMessage.findMany({
-      where: { linkId: link.id, harvestedAt: null },
-      orderBy: { capturedAt: 'desc' },
-      take: limit,
-    });
-
-    if (!rows.length) {
+    if (result.emptyBuffer) {
       await ctx.reply('В буфере нет неразобранных сообщений (или они уже собраны).');
       return;
     }
-
-    const chronological = [...rows].reverse();
-    const created: number[] = [];
-    const now = new Date();
-
-    for (const row of chronological) {
-      const full = row.text.trim();
-      if (full.length < 2) continue;
-      const firstLine = full.split(/\r?\n/).find((line: string) => line.trim()) ?? full;
-      const title = firstLine.trim().slice(0, 220);
-      if (!title) continue;
-      const description = full.slice(0, 12000);
-
-      try {
-        const num = await createTaskFromText(prisma, link.project.id, actor.id, title, description);
-        created.push(num);
-        await prisma.telegramProjectMessage.update({
-          where: { id: row.id },
-          data: { harvestedAt: now },
-        });
-      } catch {
-        // eslint-disable-next-line no-console
-        console.error('[tg-bot] harvest row failed', row.id);
-      }
-    }
-
-    if (!created.length) {
+    if (!result.createdTaskNumbers.length) {
       await ctx.reply('Не удалось создать задачи из буфера (пустой текст?).');
       return;
     }
 
+    const created = result.createdTaskNumbers;
     const preview = created.slice(0, 15).map((n) => `${link.project.key}-${n}`).join(', ');
     const more = created.length > 15 ? ` … +${created.length - 15}` : '';
     await ctx.reply(`Создано задач: ${created.length}. ${preview}${more}`);
@@ -268,7 +258,12 @@ export function registerProjectTelegram(bot: Bot, redis: Redis, prisma: PrismaCl
 
     const telegramChatId = String(chat.id);
     const link = await prisma.projectTelegramChat.findUnique({
-      where: { telegramChatId },
+      where: {
+        botId_telegramChatId: {
+          botId: owningBot.id,
+          telegramChatId,
+        },
+      },
       select: { id: true },
     });
     if (!link) return;
@@ -300,4 +295,9 @@ export function registerProjectTelegram(bot: Bot, redis: Redis, prisma: PrismaCl
 
   bot.on('message:text', ingestText);
   bot.on('channel_post:text', ingestText);
+
+  bot.catch((err) => {
+    // eslint-disable-next-line no-console
+    console.error(`[tg-bot:${owningBot.botUsername}] handler error`, err);
+  });
 }

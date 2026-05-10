@@ -3,7 +3,6 @@ import Credentials from 'next-auth/providers/credentials';
 import bcrypt from 'bcryptjs';
 import { prisma, type UserRole } from '@giper/db';
 import { DomainError } from './errors';
-import { verifyTelegramWebAppInitData } from './telegram/verifyWebAppInitData';
 
 declare module 'next-auth' {
   interface Session {
@@ -35,43 +34,6 @@ export const authConfig: NextAuthConfig = {
     error: '/login/error',
   },
   providers: [
-    Credentials({
-      id: 'telegram-webapp',
-      name: 'Telegram Web App',
-      credentials: {
-        initData: { label: 'initData', type: 'text' },
-      },
-      async authorize(creds) {
-        const initData = String(creds?.initData ?? '');
-        const botToken = process.env.TG_BOT_TOKEN?.trim();
-        if (!initData || !botToken) return null;
-
-        const verified = verifyTelegramWebAppInitData(initData, botToken);
-        if (!verified) return null;
-
-        const user = await prisma.user.findUnique({
-          where: { tgChatId: String(verified.telegramUserId), isActive: true },
-          select: {
-            id: true,
-            email: true,
-            name: true,
-            image: true,
-            role: true,
-            mustChangePassword: true,
-          },
-        });
-        if (!user) return null;
-
-        return {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          image: user.image,
-          role: user.role,
-          mustChangePassword: user.mustChangePassword,
-        };
-      },
-    }),
     Credentials({
       id: 'credentials',
       name: 'Credentials',

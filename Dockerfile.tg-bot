@@ -1,23 +1,25 @@
 # syntax=docker/dockerfile:1.7
 
 # -----------------------------------------------------------------------
-# Production image for apps/tg-bot — small grammY long-polling bot.
-# Same shape as Dockerfile.ws (tsx runtime, hoisted node_modules).
-# Image stays under ~150 MB.
+# Production image for apps/tg-bot — multi-bot grammY long-polling runner.
+# Each PM connects their personal BotFather bot via the giper-pm web UI;
+# tokens are AES-256-GCM encrypted in Postgres and decrypted here at
+# boot. The image stays under ~200 MB.
 #
-# Not built by CI yet. Wire into .github/workflows/deploy.yml and
-# infra/docker-compose.prod.yml when TG_BOT_TOKEN is set in
-# /opt/giper-pm/.env on the deploy host.
+# Required env at runtime:
+#   DATABASE_URL, REDIS_URL, TG_TOKEN_ENC_KEY (32-byte hex/base64)
 # -----------------------------------------------------------------------
 
 ARG NODE_VERSION=20
 ARG PNPM_VERSION=9.12.3
 
+# ---------- 1. deps -----------------------------------------------------
 FROM node:${NODE_VERSION}-alpine AS deps
 RUN apk add --no-cache libc6-compat openssl
 RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate
 WORKDIR /repo
 
+# Manifests only (layer cache friendly).
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY apps/tg-bot/package.json apps/tg-bot/
 COPY apps/web/package.json apps/web/
@@ -30,39 +32,37 @@ COPY packages/shared/package.json packages/shared/
 COPY packages/ui/package.json packages/ui/
 
 RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
-    pnpm install --frozen-lockfile --prefer-offline --filter @giper/tg-bot...
+    pnpm install --frozen-lockfile --prefer-offline \
+        --filter @giper/tg-bot... \
+        --filter @giper/db \
+        --filter @giper/shared \
+        --filter @giper/integrations
 
-# Generate the prisma client into a flat dir we can COPY into runtime.
+# Generate the prisma client (creates @prisma/client + .prisma/client/*).
 COPY packages/db ./packages/db
-RUN pnpm --filter @giper/db exec prisma generate && \
-    mkdir -p /prisma-out/.prisma /prisma-out/@prisma && \
-    REAL_CLIENT="$(readlink -f /repo/packages/db/node_modules/@prisma/client)" && \
-    REAL_ROOT="$(dirname $(dirname $REAL_CLIENT))" && \
-    cp -RL "$REAL_ROOT/.prisma/." /prisma-out/.prisma/ && \
-    cp -RL "$REAL_ROOT/@prisma/." /prisma-out/@prisma/
+RUN pnpm --filter @giper/db exec prisma generate
 
-# Hoisted flat tree so node ESM resolves transitive deps without pnpm
-# symlinks at runtime. Same trick as Dockerfile.ws.
-RUN mkdir -p /flat && \
-    cp /repo/apps/tg-bot/package.json /flat/package.json && \
-    cd /flat && \
-    npm install --omit=dev --no-package-lock --prefer-offline 2>&1 | tail -5
+# Copy workspace package source so import resolution at runtime works.
+COPY packages/shared ./packages/shared
+COPY packages/integrations ./packages/integrations
+COPY apps/tg-bot ./apps/tg-bot
+COPY tsconfig.base.json ./tsconfig.base.json
 
+# ---------- 2. runtime --------------------------------------------------
 FROM node:${NODE_VERSION}-alpine AS runtime
 RUN apk add --no-cache libc6-compat openssl tini
 WORKDIR /app
 
-COPY --from=deps /flat/node_modules ./apps/tg-bot/node_modules
-COPY --from=deps /prisma-out/.prisma ./apps/tg-bot/node_modules/.prisma
-COPY --from=deps /prisma-out/@prisma ./apps/tg-bot/node_modules/@prisma
-COPY apps/tg-bot ./apps/tg-bot
-COPY tsconfig.base.json ./tsconfig.base.json
+# Copy the entire pnpm-managed monorepo subset — workspace symlinks point
+# to packages/* siblings, so we ship them as-is. tsx resolves both real
+# files and pnpm symlinks correctly.
+COPY --from=deps /repo /app
 
 ENV NODE_ENV=production
 
 # No HTTP healthcheck — the bot is a long-polling client. Liveness is
 # implicit: if the process exits, restart-policy unless-stopped brings
-# it back; if Telegram blocks the token, the logs will scream.
-
+# it back; if any token is rejected, the row's lastError column updates
+# and admins can see it in the UI.
 ENTRYPOINT ["/sbin/tini", "--"]
 CMD ["node", "--import", "file:///app/apps/tg-bot/node_modules/tsx/dist/esm/index.mjs", "/app/apps/tg-bot/src/index.ts"]

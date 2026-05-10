@@ -120,7 +120,10 @@ NEXTAUTH_URL=http://localhost:3000
 GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
 GITHUB_WEBHOOK_SECRET=
-TG_BOT_TOKEN=
+# AES-256-GCM master key for encrypting personal Telegram bot tokens
+# (UserTelegramBot.encryptedToken). Same value MUST be set for the
+# tg-bot service. Generate: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+TG_TOKEN_ENC_KEY=
 REDIS_URL=redis://localhost:6379
 ```
 
