@@ -111,6 +111,11 @@ export function MeetingRoom({
       </header>
       <div className="flex-1">
         <LiveKitRoom
+          // key forces a single mount per token — without it React can
+          // strict-mode-double-mount the component, which spawns two
+          // sockets with the same identity and the second one kicks the
+          // first → "video flickers for 1 sec then disappears".
+          key={token}
           serverUrl={serverUrl}
           token={token}
           connect
@@ -118,8 +123,23 @@ export function MeetingRoom({
           video={choices.videoEnabled}
           connectOptions={connectOptions}
           data-lk-theme="default"
-          onDisconnected={() => {
-            router.push(`/meetings/${meetingId}`);
+          onConnected={() => {
+            // eslint-disable-next-line no-console
+            console.log('[meetings] connected to LiveKit', { meetingId });
+          }}
+          onError={(e) => {
+            // eslint-disable-next-line no-console
+            console.error('[meetings] LiveKit error', e);
+          }}
+          onDisconnected={(reason) => {
+            // eslint-disable-next-line no-console
+            console.log('[meetings] disconnected', reason);
+            // Don't router.push() on every disconnect — that triggers
+            // SSR re-render → fresh JWT → fresh connect → kicks the
+            // previous session → infinite reconnect loop ("flickering"
+            // camera). LiveKit auto-reconnects internally; the user
+            // navigates away via the ControlBar Leave button or our
+            // header «Завершить встречу».
           }}
           style={{ height: '100%' }}
         >
