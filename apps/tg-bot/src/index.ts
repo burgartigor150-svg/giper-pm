@@ -21,10 +21,7 @@ import { Bot } from 'grammy';
 import { Redis } from 'ioredis';
 import { prisma, type PrismaClient } from '@giper/db';
 import { decryptToken } from '@giper/shared/tgTokenCrypto';
-import {
-  installTelegramProxyFetch,
-  tgProxyUrl,
-} from '@giper/shared/tgProxy';
+import { tgFetch, tgProxyUrl } from '@giper/shared/tgProxy';
 import { registerBotHandlers, type OwningBot } from './projectLinkHarvest';
 import { startDownloadWorker } from './downloadFiles';
 
@@ -104,10 +101,14 @@ class BotManager {
       botUsername: row.botUsername,
     };
 
-    // grammY uses globalThis.fetch under the hood. We install a process
-    // wide wrapper at boot (see installTelegramProxyFetch) that tunnels
-    // every call to api.telegram.org through the xray HTTP-proxy.
-    const bot = new Bot(token);
+    // grammY uses its own internal fetch shim, NOT globalThis.fetch.
+    // Pass our proxy-aware fetch via client.fetch so that long-poll
+    // (getUpdates) and every API call go through xray when configured.
+    const bot = new Bot(token, {
+      client: {
+        fetch: tgFetch as unknown as typeof globalThis.fetch,
+      },
+    });
     registerBotHandlers(bot, this.redis, this.prismaClient, owning);
 
     bot.start({
@@ -181,10 +182,6 @@ class BotManager {
 // --------------------------- Boot ------------------------------------
 
 (async () => {
-  // Install fetch wrapper BEFORE creating any Bot — grammY captures
-  // globalThis.fetch on first use.
-  installTelegramProxyFetch();
-
   const redis = new Redis(REDIS_URL, { lazyConnect: true });
   // Separate connection for pub/sub: ioredis subscribers can't issue
   // other commands on the same socket.
