@@ -22,6 +22,18 @@ cp .env.example .env.local
 pnpm dev
 ```
 
+## Mini App (веб внутри Telegram)
+
+Чтобы открывать giper-pm без отдельного логина паролем:
+
+1. На сервере у контейнера **web** должен быть тот же **`TG_BOT_TOKEN`**, что у бота (уже нужен для проверки подписи `initData`).
+2. В @BotFather → ваш бот → **Bot Settings → Menu Button** (или **Configure Mini App**): укажите URL  
+   `https://<ваш-хост>/telegram/webapp`  
+   (ровно HTTPS, домен совпадает с `AUTH_URL` / публичным адресом).
+3. Пользователь должен один раз выполнить **`/pair`** и иметь в БД `User.tgChatId` = его Telegram user id (как при обычной привязке).
+
+Открытие Mini App → страница проверяет `Telegram.WebApp.initData` → sessия NextAuth → редирект на `/calendar`.
+
 ## Activation in production (3 steps)
 
 The image is intentionally **not built or deployed yet**. To turn it on:

@@ -132,6 +132,10 @@ services:
       WS_PUBLISH_URL: http://ws:3001/publish
       NEXT_PUBLIC_WS_URL: ${PUBLIC_WS_URL}
 
+      # Telegram Mini App auth (must match tg-bot token)
+      TG_BOT_TOKEN: ${TG_BOT_TOKEN:-}
+      PUBLIC_TG_BOT_USERNAME: ${PUBLIC_TG_BOT_USERNAME:-}
+
       # GitHub webhook
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET}
 
