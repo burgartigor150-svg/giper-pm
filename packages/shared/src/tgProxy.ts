@@ -16,10 +16,11 @@
  * ports).
  */
 
-import { ProxyAgent, type Dispatcher } from 'undici';
+import { ProxyAgent, fetch as undiciFetch, type Dispatcher } from 'undici';
 
 let _agent: Dispatcher | null = null;
 let _agentForUrl: string | null = null;
+let _patched = false;
 
 export function tgProxyUrl(): string | null {
   const url = process.env.TG_PROXY_URL?.trim();
@@ -43,10 +44,23 @@ export function tgProxyDispatcher(): Dispatcher | undefined {
   return _agent;
 }
 
+function isTelegramUrl(input: unknown): boolean {
+  try {
+    const s =
+      typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : (input as Request)?.url || '';
+    return s.startsWith('https://api.telegram.org');
+  } catch {
+    return false;
+  }
+}
+
 /**
- * Drop-in replacement for global fetch that adds the proxy dispatcher
- * when configured. Use for any call that goes to api.telegram.org or
- * Telegram CDN (`https://api.telegram.org/file/bot…`).
+ * Drop-in replacement for global fetch that routes Telegram API calls
+ * through the configured proxy dispatcher.
  */
 export async function tgFetch(
   input: string | URL,
@@ -56,7 +70,35 @@ export async function tgFetch(
   if (!dispatcher) {
     return fetch(input, init);
   }
-  // Cast: Node's RequestInit doesn't list `dispatcher` but undici's
-  // global fetch reads it.
-  return fetch(input, { ...init, dispatcher } as RequestInit & { dispatcher: Dispatcher });
+  // undiciFetch returns a (mostly) WHATWG-compatible Response — use its
+  // own type to keep dispatcher option typed correctly.
+  return undiciFetch(input, { ...init, dispatcher }) as unknown as Response;
+}
+
+/**
+ * Replace the process-wide `globalThis.fetch` with a wrapper that
+ * tunnels every call to api.telegram.org through the configured proxy
+ * dispatcher. Other hosts (Ollama, MinIO, Postgres, …) keep using the
+ * original fetch unchanged.
+ *
+ * This is the only reliable way to make grammY's long-poll go through
+ * the proxy: grammY ships its own ApiClient that ignores per-request
+ * `dispatcher` options on certain code paths, but it always uses
+ * `globalThis.fetch`. Idempotent — patches once per process.
+ */
+export function installTelegramProxyFetch(): void {
+  if (_patched) return;
+  const dispatcher = tgProxyDispatcher();
+  if (!dispatcher) return;
+  const original = globalThis.fetch;
+  globalThis.fetch = (async (input: unknown, init?: unknown) => {
+    if (isTelegramUrl(input)) {
+      return undiciFetch(
+        input as Parameters<typeof undiciFetch>[0],
+        { ...(init as Parameters<typeof undiciFetch>[1] | undefined), dispatcher },
+      );
+    }
+    return (original as (...a: unknown[]) => Promise<Response>)(input, init);
+  }) as typeof globalThis.fetch;
+  _patched = true;
 }
