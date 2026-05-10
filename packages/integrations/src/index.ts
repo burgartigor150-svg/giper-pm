@@ -22,3 +22,8 @@ export {
   type TranscribeResult,
   type TranscriptSegment,
 } from './whisperx';
+export {
+  isVertexEnabled,
+  vertexChat,
+  vertexJson,
+} from './vertex';

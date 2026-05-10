@@ -18,7 +18,19 @@ import {
   useTracks,
 } from '@livekit/components-react';
 import '@livekit/components-styles';
-import { Track, type LocalUserChoices, type RoomConnectOptions } from 'livekit-client';
+import { Track, type RoomConnectOptions } from 'livekit-client';
+
+// LocalUserChoices is what <PreJoin onSubmit> hands us. Inline the
+// shape we actually consume (audio/video toggles + username) to avoid
+// taking a hard dep on the type (livekit-client renamed it across
+// versions).
+type LocalUserChoices = {
+  username: string;
+  videoEnabled: boolean;
+  audioEnabled: boolean;
+  videoDeviceId?: string;
+  audioDeviceId?: string;
+};
 import { endMeetingAction } from '@/actions/meetings';
 
 type IceServer = { urls: string[]; username?: string; credential?: string };

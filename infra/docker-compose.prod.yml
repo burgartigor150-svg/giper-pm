@@ -164,8 +164,20 @@ services:
       CRON_SECRET: ${CRON_SECRET}
 
       # Local LLM (Ollama on host, GPU 1) for AI chat-harvest analysis.
+      # NOTE: now used only as fallback — primary is Google Vertex AI
+      # (see GOOGLE_APPLICATION_CREDENTIALS below). Switch is automatic
+      # in @giper/integrations/llm.
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434/v1}
       LLM_MODEL: ${LLM_MODEL:-qwen2.5:14b}
+
+      # Google Vertex AI (Gemini). When set, replaces Ollama for
+      # summary + AI task proposals. Service-account JSON mounted via
+      # the `volumes:` block below.
+      GOOGLE_APPLICATION_CREDENTIALS: /secrets/gcp-sa.json
+      GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:-}
+      GOOGLE_CLOUD_LOCATION: ${GOOGLE_CLOUD_LOCATION:-us-central1}
+      VERTEX_CHAT_MODEL: ${VERTEX_CHAT_MODEL:-gemini-2.5-flash}
+      VERTEX_JSON_MODEL: ${VERTEX_JSON_MODEL:-gemini-2.5-flash}
 
       # LiveKit (video meetings). API key/secret are shared with the
       # livekit + livekit-egress + transcribe-worker services. The
@@ -188,6 +200,11 @@ services:
       TURN_REALM: ${TURN_REALM}
       TURN_UDP_PORT: ${TURN_UDP_PORT:-3478}
       TURN_TLS_PORT: ${TURN_TLS_PORT:-5349}
+    volumes:
+      # Google Cloud service account for Vertex AI. The host path is
+      # configured via GCP_SA_JSON_PATH (defaults to the german-quest
+      # secret since both projects share the same GCP project).
+      - ${GCP_SA_JSON_PATH:-/home/igun2/german-quest/secrets/gcp-sa.json}:/secrets/gcp-sa.json:ro
 
   ws:
     image: ghcr.io/${GHCR_OWNER}/giper-ws:${IMAGE_TAG:-latest}
@@ -390,6 +407,12 @@ services:
       REDIS_URL: redis://redis:6379
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434/v1}
       LLM_MODEL: ${LLM_MODEL:-qwen2.5:14b}
+      # Vertex AI primary, Ollama fallback. Same key/cred as web.
+      GOOGLE_APPLICATION_CREDENTIALS: /secrets/gcp-sa.json
+      GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:-}
+      GOOGLE_CLOUD_LOCATION: ${GOOGLE_CLOUD_LOCATION:-us-central1}
+      VERTEX_CHAT_MODEL: ${VERTEX_CHAT_MODEL:-gemini-2.5-flash}
+      VERTEX_JSON_MODEL: ${VERTEX_JSON_MODEL:-gemini-2.5-flash}
       WHISPERX_BASE_URL: ${WHISPERX_BASE_URL:-http://host.docker.internal:8771}
       WHISPER_MODEL: ${WHISPER_MODEL:-large-v3}
       HF_TOKEN: ${HF_TOKEN}
@@ -403,6 +426,8 @@ services:
       # TG voice transcription path uses the same xray proxy as the bot
       # (api.telegram.org is RKN-blocked).
       TG_PROXY_URL: ${TG_PROXY_URL:-http://host.docker.internal:10829}
+    volumes:
+      - ${GCP_SA_JSON_PATH:-/home/igun2/german-quest/secrets/gcp-sa.json}:/secrets/gcp-sa.json:ro
 
 volumes:
   postgres_data:

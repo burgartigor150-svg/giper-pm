@@ -16,6 +16,7 @@
   "dependencies": {
     "@giper/db": "workspace:*",
     "@giper/shared": "workspace:*",
+    "@google-cloud/vertexai": "^1.12.0",
     "livekit-server-sdk": "^2.10.0"
   },
   "devDependencies": {

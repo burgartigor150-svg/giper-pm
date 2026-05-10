@@ -17,7 +17,9 @@
  */
 
 import {
+  isVertexEnabled,
   proposeTasks,
+  vertexChat,
   type ChatMessageInput,
   type ProjectContext,
   type TaskProposal,
@@ -118,10 +120,12 @@ function chunkSegments(segments: TranscriptSegment[]): TranscriptSegment[][] {
 }
 
 /**
- * Low-level chat completion call against Ollama's OpenAI-compatible
- * endpoint. We pipe `num_ctx` through `extra_body` so the request
- * actually uses the larger context — without this Ollama silently
- * truncates to the model's default (often 4096).
+ * Low-level chat completion. Routes to Google Vertex AI (Gemini) when
+ * `GOOGLE_APPLICATION_CREDENTIALS` + `GOOGLE_CLOUD_PROJECT` are set
+ * (preferred — no GPU contention with WhisperX, runs in Google Cloud);
+ * otherwise falls back to local Ollama. Same prompt + temperature for
+ * both — we don't try to match output formats exactly because the
+ * caller post-processes anyway.
  */
 async function chatCompletion({
   system,
@@ -132,6 +136,9 @@ async function chatCompletion({
   user: string;
   temperature?: number;
 }): Promise<string> {
+  if (isVertexEnabled()) {
+    return vertexChat({ system, user, temperature });
+  }
   const { baseUrl, model } = llmConfig();
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS);
@@ -186,7 +193,9 @@ export async function summarizeMeeting(segments: TranscriptSegment[]): Promise<s
   console.log(`[summary] map-reduce over ${chunks.length} chunks (~${Math.round(totalChars / 1000)}k chars total)`);
   const partials: string[] = [];
   for (let i = 0; i < chunks.length; i++) {
-    const text = formatTranscript(chunks[i], CHUNK_CHARS);
+    const chunk = chunks[i];
+    if (!chunk || !chunk.length) continue;
+    const text = formatTranscript(chunk, CHUNK_CHARS);
     const partial = await chatCompletion({
       system: PARTIAL_SUMMARY_SYSTEM,
       user: `Фрагмент ${i + 1} из ${chunks.length}:\n\n${text}`,
@@ -195,7 +204,7 @@ export async function summarizeMeeting(segments: TranscriptSegment[]): Promise<s
     if (partial) partials.push(`Фрагмент ${i + 1}:\n${partial}`);
   }
   if (!partials.length) return 'Записано слишком мало содержательного';
-  if (partials.length === 1) return partials[0].replace(/^Фрагмент 1:\n/, '');
+  if (partials.length === 1) return (partials[0] || '').replace(/^Фрагмент 1:\n/, '');
 
   return chatCompletion({
     system: META_SUMMARY_SYSTEM,

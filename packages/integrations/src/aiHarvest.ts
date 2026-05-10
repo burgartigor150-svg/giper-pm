@@ -10,6 +10,8 @@
  * which proposals to actually create.
  */
 
+import { isVertexEnabled, vertexJson } from './vertex';
+
 const DEFAULT_BASE_URL = 'http://127.0.0.1:11434/v1';
 const DEFAULT_MODEL = 'qwen2.5:14b';
 const REQUEST_TIMEOUT_MS = Number(process.env.LLM_REQUEST_TIMEOUT_MS) > 0 ? Number(process.env.LLM_REQUEST_TIMEOUT_MS) : 600_000;
@@ -166,6 +168,19 @@ const RESPONSE_SCHEMA = {
 } as const;
 
 async function callLlm(systemPrompt: string, userPrompt: string): Promise<string> {
+  // Prefer Vertex AI / Gemini when configured — much faster + frees
+  // the local GPU for WhisperX. Falls back to Ollama otherwise.
+  if (isVertexEnabled()) {
+    const obj = await vertexJson({
+      system: systemPrompt,
+      user: userPrompt,
+      schema: RESPONSE_SCHEMA as unknown as Parameters<typeof vertexJson>[0]['schema'],
+      temperature: 0.2,
+      maxOutputTokens: 8192,
+    });
+    return obj ? JSON.stringify(obj) : '';
+  }
+
   const { baseUrl, model } = llmConfig();
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS);
