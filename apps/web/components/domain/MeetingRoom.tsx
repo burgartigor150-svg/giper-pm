@@ -81,6 +81,11 @@ export function MeetingRoom({
                 videoEnabled: true,
                 audioEnabled: true,
               }}
+              // Persist=true autoloads previous choices and immediately
+              // submits, skipping the device-picker UI — which is
+              // exactly the "PreJoin closes instantly" symptom. Force
+              // false so the user always sees the form.
+              persistUserChoices={false}
               onSubmit={(c) => setChoices(c)}
               onError={(e) => {
                 // eslint-disable-next-line no-console

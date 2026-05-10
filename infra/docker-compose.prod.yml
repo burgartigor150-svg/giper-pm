@@ -234,7 +234,9 @@ services:
   # tricky to pass as CLI flag; CLI flags for webhook.* changed across
   # versions, env-yaml is stable.
   livekit:
-    image: livekit/livekit-server:v1.8
+    # v1.9 introduces /rtc/v1 path that recent livekit-client (>= 2.10)
+    # tries first; v1.8 caused 404 + retry + slow negotiation timeout.
+    image: livekit/livekit-server:v1.9
     restart: unless-stopped
     network_mode: host
     depends_on:
