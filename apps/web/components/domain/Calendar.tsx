@@ -5,6 +5,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   useTransition,
 } from 'react';
@@ -829,11 +830,23 @@ function DraggableTaskCard({
   item: DeadlineItem;
   expanded?: boolean;
 }) {
+  const router = useRouter();
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: item.id,
   });
+  // Track whether the pointer has actually moved past the activation
+  // distance — `isDragging` only flips when dnd-kit fires its onDragStart,
+  // and we need to suppress the click that would otherwise navigate.
+  const draggedSinceDownRef = useRef(false);
+  useEffect(() => {
+    if (isDragging) draggedSinceDownRef.current = true;
+  }, [isDragging]);
+
   const style = transform
-    ? { transform: `translate(${transform.x}px, ${transform.y}px)`, zIndex: 50 }
+    ? {
+        transform: `translate(${transform.x}px, ${transform.y}px)`,
+        zIndex: 50,
+      }
     : undefined;
   const bar = PRIORITY_BAR[item.priority] ?? 'bg-slate-400';
   const bg = STATUS_BG[item.internalStatus] ?? 'bg-muted';
@@ -841,10 +854,47 @@ function DraggableTaskCard({
   const title = `${item.projectKey}-${item.number} · ${item.title}${
     item.assignee ? ` · ${item.assignee.name}` : ''
   }`;
-  const inner = (
+  return (
     <div
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
+      role="link"
+      tabIndex={0}
+      title={title}
+      // Don't render a real <a>/<Link> — Chrome/Safari treat anchors
+      // as native HTML5 drag sources, which races dnd-kit's pointer
+      // sensor and aborts the drag entirely. Manual click → router.push
+      // gives us reliable DnD plus normal click-to-open behaviour.
+      onPointerDown={() => {
+        draggedSinceDownRef.current = false;
+      }}
+      onClick={(e) => {
+        // Suppress the click that fires at the end of a successful drop.
+        if (draggedSinceDownRef.current) {
+          draggedSinceDownRef.current = false;
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
+        // Cmd/Ctrl-click → open in a new tab, like a real link.
+        if (e.metaKey || e.ctrlKey || e.button === 1) {
+          window.open(link, '_blank', 'noopener,noreferrer');
+          return;
+        }
+        router.push(link);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          router.push(link);
+        }
+      }}
       className={[
+        'cursor-grab select-none active:cursor-grabbing',
         'flex items-center gap-1 overflow-hidden rounded-sm pl-0 pr-1 py-0.5 text-[10px]',
+        'hover:underline',
         bg,
         isDragging ? 'opacity-60' : '',
         expanded ? 'p-1 text-xs' : '',
@@ -859,13 +909,6 @@ function DraggableTaskCard({
           {item.assignee.name}
         </span>
       ) : null}
-    </div>
-  );
-  return (
-    <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
-      <Link href={link} className="block hover:underline" title={title}>
-        {inner}
-      </Link>
     </div>
   );
 }
