@@ -21,9 +21,9 @@ export function MiniAppUrlBlock({ url }: { url: string }) {
   return (
     <div className="space-y-3 text-sm">
       <p className="text-muted-foreground">
-        Укажите этот URL в @BotFather как <strong className="text-foreground">Menu Button</strong> или{' '}
-        <strong className="text-foreground">Mini App</strong> для бота. После привязки аккаунта через{' '}
-        <code className="rounded bg-muted px-1">/pair</code> открытие из Telegram выполнит вход в giper-pm.
+        Вставьте в @BotFather → ваш бот → <strong className="text-foreground">Mini Apps</strong> (как URL приложения).
+        Пользователи после <code className="rounded bg-muted px-1">/pair</code> смогут открывать giper-pm из Telegram
+        без пароля.
       </p>
       <div className="flex flex-wrap items-center gap-2">
         <code className="max-w-full break-all rounded-md border border-border bg-muted/50 px-2 py-1.5 text-xs">

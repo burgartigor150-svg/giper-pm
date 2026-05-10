@@ -10,7 +10,11 @@ type CodeState = {
   botUsername: string | null;
 };
 
-export function GenerateTgPairingCodeForm() {
+export function GenerateTgPairingCodeForm({
+  buttonLabel = 'Сгенерировать код',
+}: {
+  buttonLabel?: string;
+} = {}) {
   const [state, setState] = useState<CodeState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -30,7 +34,7 @@ export function GenerateTgPairingCodeForm() {
   return (
     <div className="space-y-3">
       <Button onClick={handleClick} disabled={pending}>
-        {pending ? 'Генерирую…' : 'Сгенерировать код'}
+        {pending ? 'Генерирую…' : buttonLabel}
       </Button>
 
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
