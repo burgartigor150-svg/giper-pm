@@ -29,7 +29,9 @@ function redis(): Redis {
   return _redis;
 }
 
-export const TG_BOTS_RELOAD_CHANNEL = 'tg:bots:reload';
+// Must match the channel name the tg-bot multi-bot runner subscribes
+// to (see apps/tg-bot/src/index.ts).
+const TG_BOTS_RELOAD_CHANNEL = 'tg:bots:reload';
 
 type ReloadEvent =
   | { action: 'add' | 'update'; botId: string }
