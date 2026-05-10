@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { Redis } from 'ioredis';
 import { prisma } from '@giper/db';
-import { verifyWebhook } from '@giper/integrations';
+import { startCompositeEgress, verifyWebhook } from '@giper/integrations';
 
 /**
  * LiveKit OSS posts events here whenever something interesting happens
@@ -59,8 +59,45 @@ async function findMeeting(roomName: string | null) {
   if (!roomName) return null;
   return prisma.meeting.findUnique({
     where: { livekitRoomName: roomName },
-    select: { id: true, status: true, recordingKey: true },
+    select: {
+      id: true,
+      status: true,
+      recordingKey: true,
+      livekitEgressId: true,
+      livekitRoomName: true,
+    },
   });
+}
+
+/**
+ * Bounded retry for startCompositeEgress — first call may race with
+ * LiveKit's internal room-create + first-track-published events. We
+ * try up to 4 times with backoff (instant, 1s, 3s, 6s).
+ */
+async function startEgressWithRetry(
+  meetingId: string,
+  roomName: string,
+): Promise<{ ok: true; egressId: string; recordingKey: string } | { ok: false; error: string }> {
+  const delays = [0, 1000, 3000, 6000];
+  let lastErr: unknown = null;
+  for (let i = 0; i < delays.length; i++) {
+    if (delays[i]) await new Promise((r) => setTimeout(r, delays[i]));
+    try {
+      const res = await startCompositeEgress({ roomName, meetingId });
+      return { ok: true, ...res };
+    } catch (e) {
+      lastErr = e;
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[livekit-webhook] startCompositeEgress attempt ${i + 1}/${delays.length} failed:`,
+        e instanceof Error ? e.message : String(e),
+      );
+    }
+  }
+  return {
+    ok: false,
+    error: lastErr instanceof Error ? lastErr.message : 'startEgress failed',
+  };
 }
 
 export async function POST(req: Request) {
@@ -124,6 +161,39 @@ export async function POST(req: Request) {
         } catch (e) {
           // eslint-disable-next-line no-console
           console.warn('[livekit-webhook] upsert participant failed', e);
+        }
+
+        // First real participant → kick off composite recording. The
+        // room is now guaranteed to exist on LiveKit (this very event
+        // proves it). Idempotent: only first call wins.
+        if (!m.livekitEgressId && m.livekitRoomName) {
+          const egRes = await startEgressWithRetry(m.id, m.livekitRoomName);
+          if (egRes.ok) {
+            await prisma.meeting.update({
+              where: { id: m.id },
+              data: {
+                livekitEgressId: egRes.egressId,
+                recordingKey: egRes.recordingKey,
+                status: 'ACTIVE',
+                startedAt: m.status === 'PLANNED' ? new Date() : undefined,
+              },
+            });
+            // eslint-disable-next-line no-console
+            console.log(`[livekit-webhook] egress started for meeting ${m.id}: ${egRes.egressId}`);
+          } else {
+            // eslint-disable-next-line no-console
+            console.error(`[livekit-webhook] egress final fail for meeting ${m.id}: ${egRes.error}`);
+            // Don't fail the meeting — participants can still talk; we
+            // just won't have a recording → no transcript.
+            await prisma.meeting.update({
+              where: { id: m.id },
+              data: {
+                status: 'ACTIVE',
+                startedAt: m.status === 'PLANNED' ? new Date() : undefined,
+                processingError: `Egress failed to start: ${egRes.error}`,
+              },
+            });
+          }
         }
       }
       break;

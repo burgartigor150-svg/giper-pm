@@ -6,7 +6,6 @@ import { prisma } from '@giper/db';
 import {
   livekitPublicUrl,
   mintAccessToken,
-  startCompositeEgress,
   stopEgress,
 } from '@giper/integrations';
 import { requireAuth } from '@/lib/auth';
@@ -130,34 +129,12 @@ export async function joinMeetingAction({
     canPublish: true,
   });
 
-  // First successful join → start composite recording (idempotent: skip
-  // if egressId already set). Webhook 'room_started' would also work
-  // but it doesn't fire until LiveKit actually sees the first track.
-  if (!meeting.livekitEgressId && meeting.status === 'PLANNED') {
-    try {
-      const { egressId, recordingKey } = await startCompositeEgress({
-        roomName: meeting.livekitRoomName,
-        meetingId: meeting.id,
-      });
-      await prisma.meeting.update({
-        where: { id: meeting.id },
-        data: {
-          status: 'ACTIVE',
-          startedAt: new Date(),
-          livekitEgressId: egressId,
-          recordingKey,
-        },
-      });
-    } catch (e) {
-      // Recording failure shouldn't block joining; log and continue.
-      // eslint-disable-next-line no-console
-      console.warn('[meetings] startCompositeEgress failed', e);
-      await prisma.meeting.update({
-        where: { id: meeting.id },
-        data: { status: 'ACTIVE', startedAt: new Date() },
-      });
-    }
-  }
+  // NOTE: We do NOT start composite recording here. Calling
+  // startEgress before the room actually exists in LiveKit (which
+  // happens only after the first WebRTC connect from the browser)
+  // returns 404 "requested room does not exist". Egress is started
+  // by the webhook handler on `participant_joined` instead — see
+  // apps/web/app/api/livekit/webhook/route.ts.
 
   return {
     ok: true,
