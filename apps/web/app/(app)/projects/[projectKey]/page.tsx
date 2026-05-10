@@ -5,7 +5,7 @@ import { Button } from '@giper/ui/components/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '@giper/ui/components/Card';
 import { requireAuth } from '@/lib/auth';
 import { getProject } from '@/lib/projects';
-import { canEditProject, canCreateTask } from '@/lib/permissions';
+import { canEditProject, canCreateTask, canManageAssignments } from '@/lib/permissions';
 import { DomainError } from '@/lib/errors';
 import { getT } from '@/lib/i18n';
 import { renderRichText } from '@/lib/text/renderRichText';
@@ -36,6 +36,10 @@ export default async function ProjectOverviewPage({
   }
 
   const canEdit = canEditProject(
+    { id: user.id, role: user.role },
+    { ownerId: project.ownerId, members: project.members },
+  );
+  const canTelegramHarvest = canManageAssignments(
     { id: user.id, role: user.role },
     { ownerId: project.ownerId, members: project.members },
   );
@@ -72,6 +76,13 @@ export default async function ProjectOverviewPage({
           {canCreate ? (
             <Link href={`/projects/${project.key}/tasks/new`}>
               <Button size="sm">+ Задача</Button>
+            </Link>
+          ) : null}
+          {canTelegramHarvest ? (
+            <Link href={`/projects/${project.key}/telegram`}>
+              <Button variant="outline" size="sm">
+                Telegram
+              </Button>
             </Link>
           ) : null}
           {canEdit ? (

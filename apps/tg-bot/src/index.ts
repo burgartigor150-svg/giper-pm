@@ -21,6 +21,7 @@
 import { Bot, type Context } from 'grammy';
 import { Redis } from 'ioredis';
 import { prisma } from '@giper/db';
+import { findPairedUser, registerProjectTelegram } from './projectLinkHarvest';
 
 const TG_BOT_TOKEN = requireEnv('TG_BOT_TOKEN');
 const REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6379';
@@ -30,17 +31,6 @@ const redis = new Redis(REDIS_URL, { lazyConnect: true });
 const bot = new Bot(TG_BOT_TOKEN);
 
 // --------------------------- Helpers ---------------------------------
-
-async function findUserByChat(chatId: number): Promise<{
-  id: string;
-  name: string;
-  role: string;
-} | null> {
-  return prisma.user.findUnique({
-    where: { tgChatId: String(chatId) },
-    select: { id: true, name: true, role: true },
-  });
-}
 
 function startOfToday(): Date {
   const d = new Date();
@@ -68,8 +58,7 @@ async function requirePaired(ctx: Context): Promise<{
   id: string;
   name: string;
 } | null> {
-  if (!ctx.chat) return null;
-  const u = await findUserByChat(ctx.chat.id);
+  const u = await findPairedUser(prisma, ctx);
   if (!u) {
     const where = PUBLIC_BASE_URL
       ? `${PUBLIC_BASE_URL}/settings/integrations/telegram`
@@ -95,7 +84,9 @@ bot.command('start', async (ctx) => {
       'Привет! Я бот giper-pm.',
       '',
       'Команды:',
-      '/pair TG-XXXXXX — привязать чат к учётке (код возьми в вебе)',
+      '/pair TG-XXXXXX — привязать личку к учётке (код возьми в вебе)',
+      '/linkproj TG-XXXXXX — в группе: привязать чат к проекту (код со страницы проекта)',
+      '/harvest [N] — в привязанной группе: собрать последние N сообщений в задачи',
       '/me — кто ты + текущий таймер',
       '/today — часы за сегодня',
       '/week — часы за неделю',
@@ -110,7 +101,8 @@ bot.command('help', async (ctx) => {
   await ctx.reply(
     [
       'Команды:',
-      '/pair TG-XXXXXX — привязать чат',
+      '/pair TG-XXXXXX — привязать личку',
+      '/linkproj /harvest — см. /start',
       '/me — текущий статус',
       '/today, /week — отчёты',
       '/stop — остановить таймер',
@@ -296,6 +288,8 @@ bot.catch((err) => {
   // eslint-disable-next-line no-console
   console.error('[tg-bot] unhandled', err);
 });
+
+registerProjectTelegram(bot, redis, prisma);
 
 // --------------------------- Boot ------------------------------------
 

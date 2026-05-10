@@ -9,6 +9,8 @@ Phase 2 of `ROADMAP.md` — minimal viable surface:
 - `/today`, `/week` — sum of hours
 - `/stop` — stop the active live timer
 - `/log 1.5 GFM-42 fixed bug` — append manual `TimeEntry` (source `TELEGRAM`)
+- `/linkproj TG-XXXXXX` — **in a group/supergroup** where the bot is admin/member: bind this chat to a giper-pm **project** (one-time code from web → **Проект → Telegram**). Requires **Group Privacy disabled** for the bot (@BotFather → Bot Settings) so it sees normal chat text.
+- `/harvest [N]` — in that linked group: create tasks from the last **N** buffered messages (default 25, max 100). Only messages **after** the bot joined / chat was linked are stored — Telegram does not expose older history to bots.
 
 ## Local dev
 
