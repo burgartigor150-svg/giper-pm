@@ -20,6 +20,7 @@ export default auth((req) => {
     pathname.startsWith('/api/auth') ||
     pathname.startsWith('/api/cron') ||
     pathname.startsWith('/api/webhooks') ||
+    pathname.startsWith('/api/livekit/webhook') ||
     pathname === '/api/health' ||
     pathname === '/';
 

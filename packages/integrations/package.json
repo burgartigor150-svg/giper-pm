@@ -15,7 +15,8 @@
   },
   "dependencies": {
     "@giper/db": "workspace:*",
-    "@giper/shared": "workspace:*"
+    "@giper/shared": "workspace:*",
+    "livekit-server-sdk": "^2.10.0"
   },
   "devDependencies": {
     "typescript": "^5.6.3",

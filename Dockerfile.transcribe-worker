@@ -1,0 +1,53 @@
+# syntax=docker/dockerfile:1.7
+#
+# Production image for apps/transcribe-worker — Redis sub + ffmpeg +
+# WhisperX + Qwen worker. Uses the same workspace-aware layout as
+# Dockerfile.tg-bot (pnpm-managed monorepo + tsx runtime).
+
+ARG NODE_VERSION=20
+ARG PNPM_VERSION=9.12.3
+
+FROM node:${NODE_VERSION}-alpine AS deps
+RUN apk add --no-cache libc6-compat openssl
+RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate
+WORKDIR /repo
+
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+COPY apps/transcribe-worker/package.json apps/transcribe-worker/
+COPY apps/tg-bot/package.json apps/tg-bot/
+COPY apps/web/package.json apps/web/
+COPY apps/ws/package.json apps/ws/
+COPY packages/db/package.json packages/db/
+COPY packages/db/prisma ./packages/db/prisma
+COPY packages/integrations/package.json packages/integrations/
+COPY packages/realtime/package.json packages/realtime/
+COPY packages/shared/package.json packages/shared/
+COPY packages/ui/package.json packages/ui/
+
+RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
+    pnpm install --frozen-lockfile --prefer-offline \
+        --filter @giper/transcribe-worker... \
+        --filter @giper/db \
+        --filter @giper/shared \
+        --filter @giper/integrations
+
+# Generate the prisma client.
+COPY packages/db ./packages/db
+RUN pnpm --filter @giper/db exec prisma generate
+
+# Copy workspace package source so import resolution at runtime works.
+COPY packages/shared ./packages/shared
+COPY packages/integrations ./packages/integrations
+COPY apps/transcribe-worker ./apps/transcribe-worker
+COPY tsconfig.base.json ./tsconfig.base.json
+
+FROM node:${NODE_VERSION}-alpine AS runtime
+RUN apk add --no-cache libc6-compat openssl tini ffmpeg
+WORKDIR /app
+
+COPY --from=deps /repo /app
+
+ENV NODE_ENV=production
+
+ENTRYPOINT ["/sbin/tini", "--"]
+CMD ["node", "/app/apps/transcribe-worker/node_modules/tsx/dist/cli.mjs", "/app/apps/transcribe-worker/src/index.ts"]

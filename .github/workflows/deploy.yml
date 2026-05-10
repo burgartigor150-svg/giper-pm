@@ -93,6 +93,18 @@ jobs:
           cache-from: type=gha,scope=tg-bot
           cache-to: type=gha,scope=tg-bot,mode=max
 
+      - name: Build & push transcribe-worker
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.transcribe-worker
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/giper-transcribe-worker:${{ steps.tag.outputs.tag }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/giper-transcribe-worker:latest
+          cache-from: type=gha,scope=transcribe-worker
+          cache-to: type=gha,scope=transcribe-worker,mode=max
+
   deploy:
     needs: build
     runs-on: ubuntu-latest

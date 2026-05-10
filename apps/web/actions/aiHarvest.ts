@@ -135,14 +135,30 @@ export async function proposeAiHarvestAction({
 
   const chronological = [...rows].reverse();
   const messageIndex: StoredBundle['messageIndex'] = {};
+  // Track voice/video_note attachments that haven't been transcribed
+  // yet — we kick off a batch and ask the user to retry in a few sec.
+  const needsTranscribe: string[] = [];
   const llmInput = chronological.map((r) => {
     const atts = (Array.isArray(r.attachments) ? r.attachments : []) as {
       telegramFileId: string;
       fileName: string;
       mimeType: string | null;
       sizeBytes: number | null;
+      transcript?: string;
     }[];
     messageIndex[r.id] = { messageId: r.id, attachments: atts };
+    const voiceWithoutTranscript = atts.some((a) => {
+      if (a.transcript) return false;
+      const isVoice =
+        a.mimeType?.includes('audio') ||
+        a.mimeType?.includes('video') ||
+        a.fileName.startsWith('voice-') ||
+        a.fileName.startsWith('audio-') ||
+        a.fileName.endsWith('.ogg') ||
+        a.fileName.endsWith('.oga');
+      return isVoice;
+    });
+    if (voiceWithoutTranscript) needsTranscribe.push(r.id);
     return {
       id: r.id,
       author: r.fromUsername || r.fromTgUserId || 'unknown',
@@ -151,6 +167,22 @@ export async function proposeAiHarvestAction({
       hasAttachment: atts.length > 0,
     };
   });
+
+  if (needsTranscribe.length > 0) {
+    try {
+      await redis().publish(
+        'tg:transcribe-voice',
+        JSON.stringify({ messageIds: needsTranscribe }),
+      );
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn('[aiHarvest] publish tg:transcribe-voice failed', e);
+    }
+    return {
+      ok: false,
+      message: `Сначала распознаём ${needsTranscribe.length} голосовых сообщений (~${Math.max(15, needsTranscribe.length * 8)} сек). Нажмите «Анализ ИИ» ещё раз через минуту.`,
+    };
+  }
 
   const members = link.project.members.map((m) => ({ id: m.user.id, name: m.user.name }));
   const result = await proposeTasks(llmInput, {

@@ -70,9 +70,12 @@ export async function tgFetch(
   if (!dispatcher) {
     return fetch(input, init);
   }
-  // undiciFetch returns a (mostly) WHATWG-compatible Response — use its
-  // own type to keep dispatcher option typed correctly.
-  return undiciFetch(input, { ...init, dispatcher }) as unknown as Response;
+  // undici accepts a richer init type; cast through unknown so Node's
+  // RequestInit (without `dispatcher`) doesn't fight us at compile time.
+  return undiciFetch(
+    input,
+    { ...init, dispatcher } as unknown as Parameters<typeof undiciFetch>[1],
+  ) as unknown as Response;
 }
 
 /**

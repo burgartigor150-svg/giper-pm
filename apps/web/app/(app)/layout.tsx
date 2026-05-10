@@ -18,6 +18,7 @@ function buildNav(user: SessionUser): NavItem[] {
   ];
   if (canSeeSettings(user)) {
     items.push({ key: 'telegram', href: '/integrations/telegram' });
+    items.push({ key: 'meetings', href: '/meetings' });
   }
   if (user.role === 'ADMIN' || user.role === 'PM') {
     items.push({ key: 'team', href: '/team' });

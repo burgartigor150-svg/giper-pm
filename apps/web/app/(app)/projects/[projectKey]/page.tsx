@@ -14,6 +14,7 @@ import { TaskStatusBadge } from '@/components/domain/TaskStatusBadge';
 import { listRecentTasksForProject } from '@/lib/tasks';
 import { ProjectMembersEditor } from '@/components/domain/ProjectMembersEditor';
 import { ProjectBudgetCard } from '@/components/domain/ProjectBudgetCard';
+import { CreateMeetingButton } from '@/components/domain/CreateMeetingButton';
 import { getProjectBudgetReport } from '@/lib/reports/projectBudget';
 
 export default async function ProjectOverviewPage({
@@ -84,6 +85,13 @@ export default async function ProjectOverviewPage({
                 Telegram
               </Button>
             </Link>
+          ) : null}
+          {canTelegramHarvest ? (
+            <CreateMeetingButton
+              projectKey={project.key}
+              label="Встреча"
+              defaultTitle={`Встреча ${project.name}`}
+            />
           ) : null}
           {canEdit ? (
             <Link href={`/projects/${project.key}/settings`}>

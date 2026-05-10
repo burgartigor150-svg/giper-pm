@@ -14,6 +14,7 @@ import {
   MessageSquare,
   Calendar,
   Send,
+  Video,
   X,
 } from 'lucide-react';
 import { cn } from '@giper/ui/cn';
@@ -29,6 +30,7 @@ export type NavKey =
   | 'team'
   | 'messages'
   | 'telegram'
+  | 'meetings'
   | 'reports'
   | 'settings';
 
@@ -46,6 +48,7 @@ const ICONS: Record<NavKey, React.ComponentType<{ className?: string }>> = {
   team: Users,
   messages: MessageSquare,
   telegram: Send,
+  meetings: Video,
   reports: BarChart3,
   settings: Settings,
 };

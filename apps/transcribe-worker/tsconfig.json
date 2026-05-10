@@ -1,0 +1,20 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "outDir": "dist",
+    "noEmit": false,
+    "module": "ESNext",
+    "target": "ES2022",
+    "moduleResolution": "Bundler",
+    "esModuleInterop": true,
+    "paths": {
+      "@giper/db": ["../../packages/db/src/index.ts"],
+      "@giper/shared": ["../../packages/shared/src/index.ts"],
+      "@giper/shared/*": ["../../packages/shared/src/*"],
+      "@giper/integrations": ["../../packages/integrations/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

@@ -160,6 +160,18 @@ services:
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434/v1}
       LLM_MODEL: ${LLM_MODEL:-qwen2.5:14b}
 
+      # LiveKit (video meetings). API key/secret are shared with the
+      # livekit + livekit-egress + transcribe-worker services. The
+      # public WSS URL is what the browser uses to connect.
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
+      LIVEKIT_API_URL: http://host.docker.internal:7880
+      LIVEKIT_PUBLIC_URL: ${LIVEKIT_PUBLIC_URL}
+
+      # WhisperX HTTP server (T4 GPU). web doesn't transcribe directly
+      # but server actions can probe /health.
+      WHISPERX_BASE_URL: ${WHISPERX_BASE_URL:-http://host.docker.internal:8771}
+
   ws:
     image: ghcr.io/${GHCR_OWNER}/giper-ws:${IMAGE_TAG:-latest}
     restart: unless-stopped
@@ -206,7 +218,145 @@ services:
       STORAGE_BUCKET: ${STORAGE_BUCKET:-attachments}
       STORAGE_FORCE_PATH_STYLE: '1'
 
+  # ---------------------------------------------------------------------
+  # Video meetings stack: LiveKit SFU + composite recording + WhisperX
+  # transcription. Recording lands in MinIO under meetings/<id>/...,
+  # tg-bot's downloadFiles handler doesn't touch it. Transcription is
+  # consumed by transcribe-worker (separate service below).
+  # ---------------------------------------------------------------------
+
+  # LiveKit OSS SFU. Front-ended by host nginx at /livekit/* (WSS).
+  # WebRTC media uses UDP 50000-60000 directly to clients (network_mode
+  # host required for the UDP range to be reachable without per-port
+  # docker port mapping; UFW must allow that range).
+  #
+  # All config via LIVEKIT_CONFIG env (yaml body) — KEY:SECRET map is
+  # tricky to pass as CLI flag; CLI flags for webhook.* changed across
+  # versions, env-yaml is stable.
+  livekit:
+    image: livekit/livekit-server:v1.8
+    restart: unless-stopped
+    network_mode: host
+    depends_on:
+      redis:
+        condition: service_started
+    environment:
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
+      LIVEKIT_CONFIG: |
+        port: 7880
+        bind_addresses:
+          - 0.0.0.0
+        rtc:
+          tcp_port: 7881
+          port_range_start: 50000
+          port_range_end: 60000
+          use_external_ip: true
+        redis:
+          address: 127.0.0.1:6379
+        webhook:
+          api_key: ${LIVEKIT_API_KEY}
+          urls:
+            - ${PUBLIC_BASE_URL}/api/livekit/webhook
+        logging:
+          level: info
+
+  # LiveKit Egress: Chrome headless that joins the room as a viewer and
+  # composites the video grid into MP4, streamed straight to MinIO.
+  # Stays in giper-pm_default bridge so it can resolve `redis` and
+  # `minio` by service name; reaches LiveKit (host network) via
+  # host.docker.internal.
+  livekit-egress:
+    image: livekit/egress:v1.8
+    restart: unless-stopped
+    cap_add:
+      - SYS_ADMIN  # required by Chrome sandbox
+    depends_on:
+      redis:
+        condition: service_started
+      minio:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      EGRESS_CONFIG_BODY: |
+        api_key: ${LIVEKIT_API_KEY}
+        api_secret: ${LIVEKIT_API_SECRET}
+        ws_url: ws://host.docker.internal:7880
+        redis:
+          address: redis:6379
+        s3:
+          access_key: ${STORAGE_ACCESS_KEY}
+          secret: ${STORAGE_SECRET_KEY}
+          region: us-east-1
+          bucket: ${STORAGE_BUCKET:-attachments}
+          endpoint: http://minio:9000
+          force_path_style: true
+        log_level: info
+
+  # Whisper ASR webservice (https://github.com/ahmetoner/whisper-asr-webservice).
+  # Supports ASR_ENGINE=whisperx for diarization (needs HF_TOKEN). HTTP
+  # POST /asr accepts audio + returns json. GPU 0 (T4) — does not fight
+  # Qwen on GPU 1.
+  whisperx:
+    image: onerahmet/openai-whisper-asr-webservice:latest-gpu
+    restart: unless-stopped
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['0']
+              capabilities: [gpu]
+    ports:
+      - "127.0.0.1:8771:9000"
+    environment:
+      ASR_MODEL: ${WHISPER_MODEL:-large-v3}
+      ASR_ENGINE: whisperx
+      ASR_DEVICE: cuda
+      HF_TOKEN: ${HF_TOKEN}
+    volumes:
+      - whisper_cache:/root/.cache
+
+  # Transcribe + AI-summary worker. Subscribes to Redis channels
+  # 'meeting:transcribe' (LiveKit recording → text + tasks) and
+  # 'tg:transcribe-voice' (TG voice messages → text appended to chat).
+  transcribe-worker:
+    image: ghcr.io/${GHCR_OWNER}/giper-transcribe-worker:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      minio:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-giper}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-giper_pm}
+      REDIS_URL: redis://redis:6379
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434/v1}
+      LLM_MODEL: ${LLM_MODEL:-qwen2.5:14b}
+      WHISPERX_BASE_URL: ${WHISPERX_BASE_URL:-http://host.docker.internal:8771}
+      WHISPER_MODEL: ${WHISPER_MODEL:-large-v3}
+      HF_TOKEN: ${HF_TOKEN}
+      STORAGE_ENDPOINT: http://minio:9000
+      STORAGE_REGION: us-east-1
+      STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY}
+      STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY}
+      STORAGE_BUCKET: ${STORAGE_BUCKET:-attachments}
+      STORAGE_FORCE_PATH_STYLE: '1'
+      TG_TOKEN_ENC_KEY: ${TG_TOKEN_ENC_KEY}
+      # TG voice transcription path uses the same xray proxy as the bot
+      # (api.telegram.org is RKN-blocked).
+      TG_PROXY_URL: ${TG_PROXY_URL:-http://host.docker.internal:10829}
+
 volumes:
   postgres_data:
   redis_data:
   minio_data:
+  whisper_cache:

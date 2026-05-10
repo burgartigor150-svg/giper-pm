@@ -85,6 +85,11 @@ model User {
   /// Personal Telegram bots (BotFather) the user connected for project harvest.
   telegramBots      UserTelegramBot[]
 
+  /// Meetings the user created (kicked off the room).
+  createdMeetings   Meeting[]            @relation("MeetingCreator")
+  /// Per-meeting participation rows (joined LiveKit rooms).
+  meetingPresence   MeetingParticipant[]
+
   @@index([role, isActive])
 }
 
@@ -296,6 +301,8 @@ model Project {
   channels      Channel[]
   /// Telegram supergroups / channels mirrored into giper-pm for harvest → tasks.
   telegramChats ProjectTelegramChat[]
+  /// Video meetings tied to this project (LiveKit + transcription).
+  meetings      Meeting[]
 
   @@unique([externalSource, externalId])
   @@index([status])
@@ -351,6 +358,97 @@ model UserTelegramBot {
 
   @@index([userId])
   @@index([isActive])
+}
+
+// ============================================================================
+// MEETINGS — встроенные групповые видеозвонки на LiveKit + транскрипт.
+// LiveKit room запускается под уникальным livekitRoomName; egress пишет
+// MP4 в MinIO под `meetings/<id>/recording.mp4`. После окончания
+// transcribe-worker качает файл, прогоняет через WhisperX (диаризация
+// спикеров) + Qwen 14B (саммари + предложения задач).
+// ============================================================================
+
+model Meeting {
+  id                    String        @id @default(cuid())
+  projectId             String?
+  project               Project?      @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  title                 String
+  status                MeetingStatus @default(PLANNED)
+  kind                  MeetingKind   @default(VIDEO_LIVEKIT)
+
+  /// Unique LiveKit room name (cuid). Used to mint JWT for participants
+  /// and to instruct egress which room to record.
+  livekitRoomName       String?       @unique
+  /// Egress job id returned by LiveKit when recording starts.
+  livekitEgressId       String?
+  /// MinIO/S3 object key for the composite mp4.
+  recordingKey          String?
+  recordingDurationSec  Int?
+
+  startedAt             DateTime?
+  endedAt               DateTime?
+  /// Last error from transcribe-worker (status === FAILED).
+  processingError       String?       @db.Text
+
+  createdById           String
+  createdBy             User          @relation("MeetingCreator", fields: [createdById], references: [id])
+
+  participants          MeetingParticipant[]
+  transcript            MeetingTranscript?
+
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+
+  @@index([projectId, status, createdAt])
+  @@index([createdById, createdAt])
+}
+
+enum MeetingStatus {
+  PLANNED       // создана, ещё не начата
+  ACTIVE        // идёт сейчас (egress пишет)
+  ENDED         // закончилась, в очереди на обработку
+  PROCESSING    // транскрибируется + AI-анализ
+  READY         // готово, можно открывать карточку
+  FAILED        // ошибка обработки (см. processingError)
+}
+
+enum MeetingKind {
+  VIDEO_LIVEKIT     // встроенный LiveKit room
+  TG_VOICE_BATCH    // batch транскрипт голосовых из TG-чата
+}
+
+model MeetingParticipant {
+  id                String    @id @default(cuid())
+  meetingId         String
+  meeting           Meeting   @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  /// null when participant is an external guest joined via invite link.
+  userId            String?
+  user              User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  /// LiveKit identity, unique per room. For internal users: "user:<id>";
+  /// for guests: "guest:<random>".
+  livekitIdentity   String
+  displayName       String
+  joinedAt          DateTime  @default(now())
+  leftAt            DateTime?
+
+  @@unique([meetingId, livekitIdentity])
+  @@index([userId, joinedAt])
+}
+
+model MeetingTranscript {
+  id          String    @id @default(cuid())
+  meetingId   String    @unique
+  meeting     Meeting   @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  /// Concatenated plain text of all segments (for full-text search).
+  fullText    String    @db.Text
+  /// JSON array of { start, end, speaker, text }.
+  segments    Json
+  /// AI-generated meeting summary in Russian (decisions, action items,
+  /// open questions). May be null while still PROCESSING.
+  summary     String?   @db.Text
+  model       String?   // e.g. "large-v3"
+  language    String?   // ISO code detected by Whisper
+  createdAt   DateTime  @default(now())
 }
 
 model TelegramProjectMessage {
