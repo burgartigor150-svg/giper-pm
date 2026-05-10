@@ -15,6 +15,7 @@
  *   LIVEKIT_PUBLIC_URL       — public WSS URL, e.g. wss://pm.since-b24-ru.ru/livekit
  */
 
+import { createHmac } from 'node:crypto';
 import {
   AccessToken,
   EgressClient,
@@ -122,6 +123,64 @@ export async function stopEgress(egressId: string): Promise<void> {
     // eslint-disable-next-line no-console
     console.warn('[livekit] stopEgress failed (already done?)', e);
   }
+}
+
+/**
+ * Per-participant TURN credentials for coturn `use-auth-secret` mode
+ * (long-term credential REST API: https://datatracker.ietf.org/doc/html/draft-uberti-behave-turn-rest-00).
+ *
+ * username = `<unix-timestamp>:<identity>` (TTL = 12 h)
+ * password = base64(HMAC-SHA1(static-secret, username))
+ *
+ * The browser plugs these into RTCPeerConnection.iceServers — coturn
+ * authenticates the request without a per-user database. Returns null
+ * when env vars are not set so callers can keep working with STUN-only.
+ *
+ * Env (host /opt/giper-pm/.env):
+ *   TURN_REST_SECRET   — must match coturn's `static-auth-secret`
+ *   TURN_HOST          — public hostname/IP of coturn (e.g. 81.29.141.119)
+ *   TURN_REALM         — coturn's `realm` (informational only)
+ *   TURN_TLS_PORT      — TLS port (default 5349)
+ *   TURN_UDP_PORT      — UDP/TCP port (default 3478)
+ */
+export type IceServer = {
+  urls: string[];
+  username?: string;
+  credential?: string;
+};
+
+export function buildTurnCredentials(opts: {
+  identity: string;
+  ttlSeconds?: number;
+}): IceServer[] {
+  const secret = process.env.TURN_REST_SECRET?.trim();
+  const host = process.env.TURN_HOST?.trim();
+  if (!secret || !host) {
+    // No TURN configured — return STUN-only (better than nothing for
+    // typical NAT, won't help symmetric NAT but won't break anything).
+    return [
+      { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
+    ];
+  }
+  const ttl = opts.ttlSeconds ?? 12 * 60 * 60;
+  const expiry = Math.floor(Date.now() / 1000) + ttl;
+  const username = `${expiry}:${opts.identity}`;
+  const credential = createHmac('sha1', secret).update(username).digest('base64');
+
+  const udpPort = process.env.TURN_UDP_PORT?.trim() || '3478';
+  const tlsPort = process.env.TURN_TLS_PORT?.trim() || '5349';
+
+  // Order matters: clients try the first URL first. We prioritise
+  // UDP (lowest latency), then TCP fallback, then TLS-on-443-style
+  // fallback for restrictive corporate firewalls.
+  const urls: string[] = [
+    `turn:${host}:${udpPort}?transport=udp`,
+    `turn:${host}:${udpPort}?transport=tcp`,
+    `turns:${host}:${tlsPort}?transport=tcp`,
+    // Bonus STUN entries — same coturn host serves STUN on the same port.
+    `stun:${host}:${udpPort}`,
+  ];
+  return [{ urls, username, credential }];
 }
 
 /**

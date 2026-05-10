@@ -85,8 +85,41 @@ async function ffmpegToWav(input: Buffer, ext: string): Promise<Buffer> {
   }
 }
 
+/**
+ * Distributed lock via Redis SETNX. With multiple worker replicas
+ * subscribed to the same `meeting:transcribe` channel, every replica
+ * receives the same message. Only the one that wins the lock proceeds;
+ * the others log and return. Lock TTL is generous (90 min) to cover
+ * 2h meetings on a slow GPU; ttl-fall-through means a crashed worker
+ * lets another replica retry the same meeting.
+ */
+const MEETING_LOCK_TTL_SEC = 90 * 60;
+async function acquireMeetingLock(meetingId: string): Promise<boolean> {
+  const r = publishRedis();
+  const res = await r.set(`lock:meeting:${meetingId}`, String(process.pid), 'EX', MEETING_LOCK_TTL_SEC, 'NX');
+  return res === 'OK';
+}
+async function releaseMeetingLock(meetingId: string): Promise<void> {
+  await publishRedis().del(`lock:meeting:${meetingId}`).catch(() => undefined);
+}
+
 async function processMeeting(payload: { meetingId: string }): Promise<void> {
   const meetingId = payload.meetingId;
+
+  if (!(await acquireMeetingLock(meetingId))) {
+    // eslint-disable-next-line no-console
+    console.log(`[transcribe-worker] meeting ${meetingId} already locked by another replica, skipping`);
+    return;
+  }
+
+  try {
+    await processMeetingInner(meetingId);
+  } finally {
+    await releaseMeetingLock(meetingId);
+  }
+}
+
+async function processMeetingInner(meetingId: string): Promise<void> {
   const meeting = await prisma.meeting.findUnique({
     where: { id: meetingId },
     select: {
@@ -109,9 +142,9 @@ async function processMeeting(payload: { meetingId: string }): Promise<void> {
     console.warn(`[transcribe-worker] meeting ${meetingId} gone`);
     return;
   }
-  if (meeting.status === 'PROCESSING' || meeting.status === 'READY') {
+  if (meeting.status === 'READY') {
     // eslint-disable-next-line no-console
-    console.log(`[transcribe-worker] meeting ${meetingId} already ${meeting.status}, skipping`);
+    console.log(`[transcribe-worker] meeting ${meetingId} already READY, skipping`);
     return;
   }
   if (!meeting.recordingKey) {

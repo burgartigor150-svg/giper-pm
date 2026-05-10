@@ -177,7 +177,17 @@ services:
 
       # WhisperX HTTP server (T4 GPU). web doesn't transcribe directly
       # but server actions can probe /health.
-      WHISPERX_BASE_URL: ${WHISPERX_BASE_URL:-http://whisperx:9000}
+      WHISPERX_BASE_URL: ${WHISPERX_BASE_URL:-http://host.docker.internal:8771}
+
+      # TURN credentials for participants behind symmetric NAT or
+      # corporate firewalls. coturn runs on the host on :3478 (UDP+TCP)
+      # and :5349 (TLS) with use-auth-secret REST mode. Web mints
+      # short-lived (12h) usernames per identity.
+      TURN_REST_SECRET: ${TURN_REST_SECRET}
+      TURN_HOST: ${TURN_HOST}
+      TURN_REALM: ${TURN_REALM}
+      TURN_UDP_PORT: ${TURN_UDP_PORT:-3478}
+      TURN_TLS_PORT: ${TURN_TLS_PORT:-5349}
 
   ws:
     image: ghcr.io/${GHCR_OWNER}/giper-ws:${IMAGE_TAG:-latest}
@@ -294,6 +304,12 @@ services:
   livekit-egress:
     image: livekit/egress:v1.8
     restart: unless-stopped
+    # Three replicas so we can record up to three meetings in parallel.
+    # Each replica registers itself with LiveKit via PSRPC over the
+    # shared compose redis (port 6380 on host); LiveKit dispatches
+    # StartEgress to whichever worker is free.
+    deploy:
+      replicas: 3
     cap_add:
       - SYS_ADMIN  # required by Chrome sandbox
     depends_on:
@@ -332,7 +348,7 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              device_ids: ['1']
+              device_ids: ['0']
               capabilities: [gpu]
     ports:
       - "127.0.0.1:8771:9000"
@@ -350,6 +366,13 @@ services:
   transcribe-worker:
     image: ghcr.io/${GHCR_OWNER}/giper-transcribe-worker:${IMAGE_TAG:-latest}
     restart: unless-stopped
+    # Two replicas. WhisperX itself is the bottleneck (single GPU
+    # instance, ~5-10× realtime), so two workers don't double the
+    # throughput — but they mean a long meeting can't block a short
+    # one indefinitely (FIFO per replica, distributed lock per
+    # meetingId via Redis SETNX prevents double-processing).
+    deploy:
+      replicas: 2
     depends_on:
       postgres:
         condition: service_healthy
@@ -367,7 +390,7 @@ services:
       REDIS_URL: redis://redis:6379
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434/v1}
       LLM_MODEL: ${LLM_MODEL:-qwen2.5:14b}
-      WHISPERX_BASE_URL: ${WHISPERX_BASE_URL:-http://whisperx:9000}
+      WHISPERX_BASE_URL: ${WHISPERX_BASE_URL:-http://host.docker.internal:8771}
       WHISPER_MODEL: ${WHISPER_MODEL:-large-v3}
       HF_TOKEN: ${HF_TOKEN}
       STORAGE_ENDPOINT: http://minio:9000

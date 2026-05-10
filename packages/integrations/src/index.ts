@@ -13,6 +13,8 @@ export {
   stopEgress,
   verifyWebhook,
   livekitPublicUrl,
+  buildTurnCredentials,
+  type IceServer,
 } from './livekit';
 export {
   transcribeAudio,

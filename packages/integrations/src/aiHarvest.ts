@@ -13,8 +13,11 @@
 const DEFAULT_BASE_URL = 'http://127.0.0.1:11434/v1';
 const DEFAULT_MODEL = 'qwen2.5:14b';
 const REQUEST_TIMEOUT_MS = Number(process.env.LLM_REQUEST_TIMEOUT_MS) > 0 ? Number(process.env.LLM_REQUEST_TIMEOUT_MS) : 600_000;
-const MAX_INPUT_BYTES = 50_000;
-const MAX_INPUT_MESSAGES = 200;
+// Force Ollama to actually use Qwen's 32k+ context. Without this it
+// silently truncates the prompt to the model's default num_ctx (4k).
+const NUM_CTX = Number(process.env.LLM_NUM_CTX) > 0 ? Number(process.env.LLM_NUM_CTX) : 32_768;
+const MAX_INPUT_BYTES = 80_000;
+const MAX_INPUT_MESSAGES = 400;
 
 export type ChatMessageInput = {
   /** TelegramProjectMessage.id — used by the model to link a proposal to source rows. */
@@ -179,6 +182,9 @@ async function callLlm(systemPrompt: string, userPrompt: string): Promise<string
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },
         ],
+        // Ollama-specific: extends context window for this call. Other
+        // OpenAI-compatible servers ignore unknown fields.
+        options: { num_ctx: NUM_CTX },
       }),
     });
     if (!res.ok) {

@@ -3,17 +3,25 @@
 import { useRouter } from 'next/navigation';
 import { useMemo, useState, useTransition } from 'react';
 import {
+  CarouselLayout,
   ControlBar,
+  FocusLayout,
+  FocusLayoutContainer,
   GridLayout,
+  LayoutContextProvider,
   LiveKitRoom,
   ParticipantTile,
   PreJoin,
   RoomAudioRenderer,
+  useCreateLayoutContext,
+  usePinnedTracks,
   useTracks,
 } from '@livekit/components-react';
 import '@livekit/components-styles';
-import { Track, type LocalUserChoices } from 'livekit-client';
+import { Track, type LocalUserChoices, type RoomConnectOptions } from 'livekit-client';
 import { endMeetingAction } from '@/actions/meetings';
+
+type IceServer = { urls: string[]; username?: string; credential?: string };
 
 /**
  * Two stages:
@@ -32,12 +40,14 @@ export function MeetingRoom({
   token,
   title,
   defaultName,
+  iceServers,
 }: {
   meetingId: string;
   serverUrl: string;
   token: string;
   title: string;
   defaultName: string;
+  iceServers?: IceServer[];
 }) {
   const router = useRouter();
   const [, startTransition] = useTransition();
@@ -56,11 +66,20 @@ export function MeetingRoom({
   // Aggressive defaults: 720p HD camera, echo cancellation + noise
   // suppression on for the mic. Browser will lower resolution
   // automatically if bandwidth doesn't keep up.
-  const connectOptions = useMemo(
+  // We also inject custom ICE servers (STUN + TURN with REST creds)
+  // via rtcConfig so clients behind symmetric NAT / corporate
+  // firewalls can connect through the TURN relay instead of timing
+  // out on direct UDP. Without rtcConfig LiveKit only uses its
+  // built-in STUN servers.
+  const connectOptions = useMemo<RoomConnectOptions>(
     () => ({
       autoSubscribe: true,
+      rtcConfig:
+        iceServers && iceServers.length > 0
+          ? { iceServers, iceTransportPolicy: 'all' }
+          : undefined,
     }),
-    [],
+    [iceServers],
   );
 
   if (!choices) {
@@ -157,7 +176,25 @@ export function MeetingRoom({
   );
 }
 
+/**
+ * Layout that scales gracefully from 2 to 30+ participants:
+ *
+ *  - When nothing is pinned and ≤ 9 participants → plain grid.
+ *  - When > 9 participants → grid still, but LiveKit's GridLayout
+ *    auto-paginates (it uses a built-in pagination control bar).
+ *  - When someone screen-shares OR a tile is pinned → focus layout:
+ *    one big tile + horizontal carousel with the rest. Carousel
+ *    auto-scrolls and unsubscribes off-screen video tracks (audio
+ *    stays subscribed) — that's what saves CPU for 20+ participant
+ *    meetings on weak laptops.
+ *
+ * `useTracks` with `onlySubscribed: false` returns placeholders for
+ * participants whose video isn't subscribed yet, so the grid count
+ * matches the participant count rather than flickering as people
+ * publish.
+ */
 function ConferenceLayout() {
+  const layoutContext = useCreateLayoutContext();
   const tracks = useTracks(
     [
       { source: Track.Source.Camera, withPlaceholder: true },
@@ -165,10 +202,30 @@ function ConferenceLayout() {
     ],
     { onlySubscribed: false },
   );
+  const focusTrack = usePinnedTracks(layoutContext)?.[0];
+  const screenShare = tracks.find((t) => t.source === Track.Source.ScreenShare);
+  const focused = focusTrack ?? screenShare;
+  const others = tracks.filter((t) => t !== focused);
+
   return (
-    <GridLayout tracks={tracks} style={{ height: 'calc(100vh - 12rem)' }}>
-      <ParticipantTile />
-    </GridLayout>
+    <LayoutContextProvider value={layoutContext}>
+      <div style={{ height: 'calc(100vh - 12rem)' }}>
+        {focused ? (
+          <FocusLayoutContainer>
+            <CarouselLayout tracks={others}>
+              <ParticipantTile />
+            </CarouselLayout>
+            <FocusLayout trackRef={focused} />
+          </FocusLayoutContainer>
+        ) : (
+          // GridLayout caps simultaneous renders at 9 by default and
+          // shows pagination dots when more participants are present.
+          <GridLayout tracks={tracks}>
+            <ParticipantTile />
+          </GridLayout>
+        )}
+      </div>
+    </LayoutContextProvider>
   );
 }
 

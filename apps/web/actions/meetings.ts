@@ -4,9 +4,11 @@ import { revalidatePath } from 'next/cache';
 import { Redis } from 'ioredis';
 import { prisma } from '@giper/db';
 import {
+  buildTurnCredentials,
   livekitPublicUrl,
   mintAccessToken,
   stopEgress,
+  type IceServer,
 } from '@giper/integrations';
 import { requireAuth } from '@/lib/auth';
 import { canManageAssignments, canSeeSettings } from '@/lib/permissions';
@@ -87,7 +89,15 @@ export async function joinMeetingAction({
 }: {
   meetingId: string;
 }): Promise<
-  | { ok: true; token: string; serverUrl: string; identity: string; displayName: string; meeting: { id: string; title: string; status: string } }
+  | {
+      ok: true;
+      token: string;
+      serverUrl: string;
+      identity: string;
+      displayName: string;
+      iceServers: IceServer[];
+      meeting: { id: string; title: string; status: string };
+    }
   | { ok: false; message: string }
 > {
   const me = await requireAuth();
@@ -136,12 +146,18 @@ export async function joinMeetingAction({
   // by the webhook handler on `participant_joined` instead — see
   // apps/web/app/api/livekit/webhook/route.ts.
 
+  // ICE servers (STUN + TURN). With TURN configured this lets clients
+  // behind symmetric NAT / corporate firewalls connect via the TURN
+  // relay (UDP, TCP, or TLS-on-5349 fallback).
+  const iceServers = buildTurnCredentials({ identity });
+
   return {
     ok: true,
     token,
     serverUrl: livekitPublicUrl(),
     identity,
     displayName,
+    iceServers,
     meeting: { id: meeting.id, title: meeting.title, status: meeting.status },
   };
 }
