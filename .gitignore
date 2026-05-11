@@ -47,3 +47,4 @@ prisma/migrations/dev.db*
 
 # misc
 *.local
+.claude/
