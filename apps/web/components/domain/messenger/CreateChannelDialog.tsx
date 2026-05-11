@@ -101,7 +101,7 @@ export function CreateChannelDialog() {
         <Plus className="size-4" />
       </button>
       {open ? (
-        <div className="absolute right-0 top-full z-30 mt-1 w-80 rounded-md border border-border bg-popover p-3 shadow-md">
+        <div className="absolute left-0 top-full z-50 mt-1 w-80 max-w-[calc(100vw-1rem)] rounded-md border border-border bg-popover p-3 shadow-lg">
           <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             Новый канал
           </div>
