@@ -197,9 +197,14 @@ export function VideoNoteRecorder({ channelId, parentId, onSent, onClose }: Prop
       fd.set('channelId', channelId);
       if (parentId) fd.set('parentId', parentId);
       // Pick extension from mime so the server stores .mp4 / .webm
-      // correctly without a transcoder hop.
-      const ext = blob.type.startsWith('video/mp4') ? 'mp4' : 'webm';
+      // correctly without a transcoder hop. We also send the mime
+      // out-of-band: React Server Action FormData transport can
+      // flatten Blob.type to text/plain on the wire, so the server
+      // would otherwise reject the upload.
+      const blobMime = blob.type || 'video/webm';
+      const ext = blobMime.startsWith('video/mp4') ? 'mp4' : 'webm';
       fd.set('file', blob, `video-note.${ext}`);
+      fd.set('mime', blobMime);
       fd.set('duration', String(elapsed));
       // We don't have the recorded video's intrinsic dimensions yet
       // (the playback element knows them only after metadata is

@@ -548,7 +548,14 @@ export async function sendVideoNoteAction(
       },
     };
   }
-  const mime = file.type || 'application/octet-stream';
+  // MIME source order: explicit form field first (the client knows
+  // best what it recorded), Blob.type second, fallback last.
+  // Server-Action's FormData serialization can flatten a Blob's
+  // Content-Type to text/plain on the way over the wire, so we
+  // don't trust file.type alone — that's why the recorder also
+  // sends a `mime` field.
+  const mimeField = String(fd.get('mime') ?? '').trim();
+  const mime = mimeField || file.type || 'application/octet-stream';
   if (!VIDEO_NOTE_ALLOWED_MIME.has(mime) && !mime.startsWith('video/')) {
     return {
       ok: false,

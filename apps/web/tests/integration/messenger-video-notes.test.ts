@@ -234,6 +234,34 @@ describe('sendVideoNoteAction — happy path', () => {
     }
   });
 
+  it('honours the explicit `mime` form field when Blob.type is flattened to text/plain', async () => {
+    // Regression for the production bug where React Server Action
+    // FormData serialization dropped the Blob's Content-Type and
+    // the server saw `text/plain` instead of `video/webm`. The
+    // recorder also passes the mime as an explicit field; this
+    // test pins that path.
+    const { channelId } = await setupChannel();
+    const r = await sendVideoNoteAction(
+      fd({
+        channelId,
+        // Blob.type is the wrong one — simulating the SA transport bug.
+        file: videoBlob({ type: 'text/plain' }),
+        mime: 'video/webm',
+        duration: '5',
+        width: '480',
+        height: '480',
+      }),
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok && r.data) {
+      const att = await prisma.messageAttachment.findFirst({
+        where: { messageId: r.data.id },
+      });
+      expect(att?.mimeType).toBe('video/webm');
+      expect(att?.storageKey.endsWith('.webm')).toBe(true);
+    }
+  });
+
   it('clamps duration to 60 even at the +0.5s grace boundary', async () => {
     const { channelId } = await setupChannel();
     const r = await sendVideoNoteAction(
