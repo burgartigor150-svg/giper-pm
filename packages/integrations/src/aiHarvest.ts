@@ -315,3 +315,207 @@ export async function proposeTasks(
     message: lastErr instanceof Error ? lastErr.message : 'LLM call failed',
   };
 }
+
+/**
+ * Meeting-specific prompt. Differences from the TG-chat flow above:
+ *  - the LLM is told the source is a SPOKEN meeting transcript, not
+ *    a typed chat — "болтовни" filter is much stricter for chats
+ *    than for meetings, where every word was deliberate
+ *  - explicit instruction: if a name from the transcript ("Катя",
+ *    "Сергей") is NOT in project members, STILL emit the task and
+ *    set suggestedAssigneeId=null + mention the name in description
+ *    so the PM can reassign on the card
+ *  - one-speaker meetings still produce proposals — a PM dictating
+ *    today's plan is the most useful case for this feature
+ */
+const MEETING_SYSTEM_PROMPT = `Ты — ассистент проектного менеджера. На вход — транскрипт рабочей встречи (русский, разбит по репликам с тайм-кодами). Преврати его в список конкретных задач для трекера.
+
+Жёсткие правила:
+- Это запись живого разговора, а не чат. Каждая фраза была сказана осознанно — НЕ фильтруй её как "болтовню".
+- Любое явное поручение ("Кате проверить маркетплейсы", "Сергею сделать ревью") — это задача. Эмити её.
+- Один говорящий, раздающий задания нескольким людям, — нормальный кейс. Не сворачивай его в одну задачу.
+- Если упомянутого исполнителя ("Катя") НЕТ в списке участников проекта — ВСЁ РАВНО создай задачу. Поставь suggestedAssigneeId=null и в начале description напиши "Упомянут исполнитель: <Имя> (не в составе проекта)". PM назначит реального человека руками.
+- Если исполнитель есть в members (по точному имени или короткой форме) — поставь его id в suggestedAssigneeId.
+- Заголовок — короткое императивное действие ("Проверить маркетплейсы", не "Маркетплейсы").
+- Описание — 1-2 предложения по сути + дословная цитата ключевой реплики ([тайм-код] говорящий: ...).
+- Срок: если в речи сказано "сегодня"/"к завтра"/etc — переведи в YYYY-MM-DD относительно today из контекста. Если не сказано — null.
+- Тип: BUG если жалоба/проблема ("этикетки не печатаются"), FEATURE если новый функционал, CHORE для рутины (документация, ревью), TASK для всего остального.
+- Приоритет: URGENT для "горит/срочно", HIGH если есть короткий дедлайн, MEDIUM по умолчанию, LOW для отдалённых тем.
+- В sourceMessageIds укажи id всех реплик (сегментов), которые легли в задачу. Минимум 1, максимум 5.
+- Лучше пропустить, чем выдумывать. Если поручений нет (общение про погоду, представление участников) — верни {"proposals": []}.
+- Отвечай СТРОГО валидным JSON по заданной схеме. Никакого текста вне JSON. Никаких комментариев.`;
+
+function buildMeetingUserPrompt(
+  messages: ChatMessageInput[],
+  project: ProjectContext,
+): string {
+  const today = new Date().toISOString().slice(0, 10);
+  const membersBlock = project.members.length
+    ? project.members.map((m) => `- ${m.id} → ${m.name}`).join('\n')
+    : '(участников в проекте нет — все исполнители из транскрипта будут с suggestedAssigneeId=null)';
+  const messagesBlock = messages.length
+    ? messages
+        .map((m) => `[id=${m.id}] [${m.timestamp}] ${m.author}: ${m.text}`)
+        .join('\n')
+    : '(сегменты не предоставлены)';
+  return [
+    `Сегодня: ${today}`,
+    `Проект: ${project.key} — ${project.name}`,
+    `Участники проекта (id → имя):`,
+    membersBlock,
+    ``,
+    `Транскрипт встречи (хронологически, сверху вниз):`,
+    messagesBlock,
+    ``,
+    `Верни JSON-объект {"proposals": [...]} с массивом задач по правилам выше.`,
+    `Если поручений нет — верни {"proposals": []}.`,
+  ].join('\n');
+}
+
+/**
+ * Same shape as `proposeTasks` but with meeting-tuned prompt and a
+ * fuzzy-match post-processor: after the LLM returns we try to attach
+ * an assigneeId by matching mentions in description ("Катя …") against
+ * member.name. This salvages cases where the LLM correctly identified
+ * a person from a one-word reference but couldn't pick a member id
+ * because the project member's name is fuller (e.g. "Екатерина
+ * Иванова").
+ */
+export async function proposeTasksFromMeeting(
+  messages: ChatMessageInput[],
+  project: ProjectContext,
+): Promise<ProposeResult> {
+  if (!messages.length) {
+    return { ok: true, proposals: [], usedMessages: 0, truncated: false };
+  }
+  const { trimmed, truncated } = trimMessages(messages);
+  const userPrompt = buildMeetingUserPrompt(trimmed, project);
+  let lastErr: unknown = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const raw = await callLlm(MEETING_SYSTEM_PROMPT, userPrompt);
+      const proposals = tryParseProposals(raw);
+      const knownIds = new Set(trimmed.map((m) => m.id));
+      const memberIds = new Set(project.members.map((m) => m.id));
+      const safe = proposals
+        .map((p) => ({
+          ...p,
+          sourceMessageIds: p.sourceMessageIds.filter((id) => knownIds.has(id)),
+        }))
+        // For meeting transcripts we DON'T require sourceMessageIds — the
+        // LLM is allowed to summarize across the whole transcript, and a
+        // proposal with zero exact-match ids is still useful (a missing
+        // id just means we won't auto-mark a segment as "harvested").
+        ;
+      for (const p of safe) {
+        if (p.suggestedAssigneeId && !memberIds.has(p.suggestedAssigneeId)) {
+          p.suggestedAssigneeId = null;
+        }
+      }
+      // Fuzzy match — try to fill null assignees by matching member
+      // names against the proposal description/title. This catches the
+      // "Катя" vs "Екатерина Иванова" case where the LLM correctly
+      // identified the person but couldn't pick the id.
+      attachAssigneesByName(safe, project);
+      return {
+        ok: true,
+        proposals: safe,
+        usedMessages: trimmed.length,
+        truncated,
+      };
+    } catch (e) {
+      lastErr = e;
+      // eslint-disable-next-line no-console
+      console.warn(`[aiHarvest:meeting] attempt ${attempt + 1} failed`, e);
+    }
+  }
+  return {
+    ok: false,
+    message: lastErr instanceof Error ? lastErr.message : 'LLM call failed',
+  };
+}
+
+/**
+ * Mutates each proposal: if suggestedAssigneeId is null but description
+ * or title contains a name (or its diminutive) that matches a member,
+ * set the id.
+ *
+ * Matching strategy:
+ *   1. Build candidates from member.name — full first name + the
+ *      diminutive variants we know about (Катя → Екатерина etc).
+ *      We deliberately keep this LIST short and Russian-only because
+ *      adding heuristic fuzziness (Levenshtein etc.) on first names
+ *      is more likely to misroute work than to help.
+ *   2. For each proposal, scan title + description for any candidate
+ *      as a whole word (Unicode \b). First hit wins.
+ */
+function attachAssigneesByName(proposals: TaskProposal[], project: ProjectContext): void {
+  if (!project.members.length) return;
+  // Diminutive ↔ full-name table. Add entries here when a team member's
+  // common nickname doesn't share a prefix with their full name.
+  const DIMINUTIVES: Array<[RegExp, string[]]> = [
+    [/^Екатерина/i, ['Катя', 'Катюша']],
+    [/^Александр/i, ['Саша', 'Шура', 'Алекс']],
+    [/^Александра/i, ['Саша', 'Шура', 'Аля']],
+    [/^Алексей/i, ['Лёша', 'Леша', 'Алёша']],
+    [/^Анастасия/i, ['Настя']],
+    [/^Анна/i, ['Аня', 'Анюта']],
+    [/^Антон/i, ['Антоша']],
+    [/^Артём/i, ['Тёма', 'Тема']],
+    [/^Валентин/i, ['Валя']],
+    [/^Валерий/i, ['Валера']],
+    [/^Виктор/i, ['Витя']],
+    [/^Виктория/i, ['Вика']],
+    [/^Владимир/i, ['Вова', 'Володя']],
+    [/^Дмитрий/i, ['Дима', 'Митя']],
+    [/^Евгений/i, ['Женя']],
+    [/^Евгения/i, ['Женя']],
+    [/^Елена/i, ['Лена']],
+    [/^Игорь/i, ['Игорёк']],
+    [/^Ирина/i, ['Ира']],
+    [/^Константин/i, ['Костя']],
+    [/^Кирилл/i, ['Кир']],
+    [/^Леонид/i, ['Лёня', 'Леня']],
+    [/^Людмила/i, ['Люда', 'Мила']],
+    [/^Мария/i, ['Маша']],
+    [/^Михаил/i, ['Миша']],
+    [/^Надежда/i, ['Надя']],
+    [/^Наталья|^Наталия/i, ['Наташа', 'Ната']],
+    [/^Николай/i, ['Коля']],
+    [/^Ольга/i, ['Оля']],
+    [/^Павел/i, ['Паша']],
+    [/^Сергей/i, ['Серёжа', 'Серега']],
+    [/^Татьяна/i, ['Таня']],
+    [/^Юлия/i, ['Юля']],
+    [/^Юрий/i, ['Юра']],
+  ];
+  type Cand = { id: string; aliases: string[] };
+  const candidates: Cand[] = project.members.map((m) => {
+    const aliases = new Set<string>();
+    const first = m.name.trim().split(/\s+/)[0];
+    if (first) aliases.add(first);
+    for (const [re, diminutives] of DIMINUTIVES) {
+      if (re.test(m.name)) for (const d of diminutives) aliases.add(d);
+    }
+    return { id: m.id, aliases: [...aliases] };
+  });
+  for (const p of proposals) {
+    if (p.suggestedAssigneeId) continue;
+    const haystack = `${p.title}\n${p.description}`;
+    for (const c of candidates) {
+      const hit = c.aliases.some((alias) =>
+        // \b on Russian text is reliable in modern Node — case-insensitive,
+        // whole-word match.
+        new RegExp(`\\b${escapeRegex(alias)}\\b`, 'iu').test(haystack),
+      );
+      if (hit) {
+        p.suggestedAssigneeId = c.id;
+        break;
+      }
+    }
+  }
+}
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}

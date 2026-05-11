@@ -18,7 +18,7 @@
 
 import {
   isVertexEnabled,
-  proposeTasks,
+  proposeTasksFromMeeting,
   vertexChat,
   type ChatMessageInput,
   type ProjectContext,
@@ -236,7 +236,7 @@ export async function proposeMeetingTasks(
     text: s.text,
     hasAttachment: false,
   }));
-  const r = await proposeTasks(messages, project);
+  const r = await proposeTasksFromMeeting(messages, project);
   if (!r.ok) return [];
   return r.proposals;
 }

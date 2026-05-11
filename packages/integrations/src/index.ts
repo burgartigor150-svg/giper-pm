@@ -2,6 +2,7 @@ export * as bitrix24 from './bitrix24';
 export { runHarvest, type HarvestResult } from './telegramHarvest';
 export {
   proposeTasks,
+  proposeTasksFromMeeting,
   type ChatMessageInput,
   type ProjectContext,
   type TaskProposal,
