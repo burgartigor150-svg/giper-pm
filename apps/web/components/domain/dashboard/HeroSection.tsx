@@ -36,16 +36,18 @@ export async function HeroSection({ userId }: { userId: string }) {
           </div>
           <Link
             href={`/projects/${active.task.project.key}/tasks/${active.task.number}`}
-            className="mt-1 flex items-center gap-2 hover:underline"
+            className="mt-1 -mx-1 flex items-center gap-2 rounded px-1 hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors duration-150"
           >
-            <span className="rounded-md bg-muted px-2 py-1 font-mono text-xs">
+            <span className="font-mono text-xs text-muted-foreground tabular-nums">
               {active.task.project.key}-{active.task.number}
             </span>
             <span className="truncate text-base font-medium">{active.task.title}</span>
           </Link>
         </div>
         <div className="flex items-center gap-4">
-          <span className="font-mono text-3xl font-semibold">
+          {/* tabular-nums keeps the digits column-aligned as the timer
+              ticks each second — without it the row jiggles. */}
+          <span className="font-mono text-3xl font-semibold tabular-nums">
             <LiveDuration startedAt={active.startedAt} />
           </span>
           <Link href={`/projects/${active.task.project.key}/tasks/${active.task.number}`}>

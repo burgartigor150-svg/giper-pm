@@ -25,8 +25,8 @@ export default async function DashboardPage() {
   const t = await getT('dashboard');
 
   return (
-    <div className="mx-auto max-w-6xl space-y-4">
-      <h1 className="text-xl font-semibold">
+    <div className="mx-auto max-w-[1400px] space-y-6 px-4 md:px-6">
+      <h1 className="text-2xl font-semibold">
         {t('greeting', { name: me.name ?? me.email ?? '' })}
       </h1>
 
@@ -40,7 +40,9 @@ export default async function DashboardPage() {
             <InProgressSection userId={me.id} />
           </Suspense>
 
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          {/* DueToday + Overdue side-by-side only at xl — at md/lg the
+              dense rows wrap badly into two narrow columns. */}
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
             <Suspense fallback={<TaskListSectionSkeleton titleWidth={32} />}>
               <DueTodaySection userId={me.id} />
             </Suspense>
