@@ -78,17 +78,24 @@ export default async function ProjectTasksListPage({
     { ownerId: project.ownerId, members: project.members },
   );
 
+  // aria-sort wants "ascending" | "descending" | "none" — derive once
+  // per header so JSX stays compact below.
+  const ariaSortFor = (field: string): 'ascending' | 'descending' | 'none' => {
+    if (filter.sort !== field) return 'none';
+    return filter.dir === 'asc' ? 'ascending' : 'descending';
+  };
+
   return (
-    <div className="mx-auto max-w-7xl space-y-4">
+    <div className="mx-auto max-w-[1400px] space-y-6 px-4 md:px-6">
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <Link
             href={`/projects/${project.key}`}
-            className="rounded-md bg-muted px-2 py-1 font-mono text-xs hover:bg-muted/70"
+            className="rounded-sm bg-muted px-2 py-1 font-mono text-xs tabular-nums transition-colors duration-150 hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             {project.key}
           </Link>
-          <h1 className="text-xl font-semibold">{t('title')}</h1>
+          <h1 className="text-2xl font-semibold">{t('title')}</h1>
         </div>
         {canCreate ? (
           <Link href={`/projects/${project.key}/tasks/new`}>
@@ -114,65 +121,86 @@ export default async function ProjectTasksListPage({
           <div className="p-6 text-sm text-muted-foreground">{t('empty')}</div>
         ) : (
           <table className="w-full text-sm">
-            <thead className="bg-muted/50 text-left">
+            <thead className="border-b border-border bg-muted/50 text-left">
               <tr>
-                <th className="px-4 py-2">
+                <th className="px-4 py-3" aria-sort={ariaSortFor('number')}>
                   <SortHeader field="number" label={tTable('number')} currentField={filter.sort} currentDir={filter.dir} />
                 </th>
-                <th className="px-4 py-2">
+                <th className="px-4 py-3" aria-sort={ariaSortFor('title')}>
                   <SortHeader field="title" label={tTable('title')} currentField={filter.sort} currentDir={filter.dir} />
                 </th>
-                <th className="px-4 py-2">
+                <th className="px-4 py-3" aria-sort={ariaSortFor('status')}>
                   <SortHeader field="status" label={tTable('status')} currentField={filter.sort} currentDir={filter.dir} />
                 </th>
-                <th className="px-4 py-2">
+                <th className="px-4 py-3" aria-sort={ariaSortFor('assignee')}>
                   <SortHeader field="assignee" label={tTable('assignee')} currentField={filter.sort} currentDir={filter.dir} />
                 </th>
-                <th className="px-4 py-2">
-                  <SortHeader field="estimateHours" label={tTable('estimate')} currentField={filter.sort} currentDir={filter.dir} />
+                {/* Numeric columns right-aligned per MASTER §9.2 */}
+                <th className="px-4 py-3 text-right" aria-sort={ariaSortFor('estimateHours')}>
+                  <SortHeader field="estimateHours" label={tTable('estimate')} currentField={filter.sort} currentDir={filter.dir} align="right" />
                 </th>
-                <th className="px-4 py-2">
-                  <SortHeader field="dueDate" label={tTable('due')} currentField={filter.sort} currentDir={filter.dir} />
+                <th className="px-4 py-3 text-right" aria-sort={ariaSortFor('dueDate')}>
+                  <SortHeader field="dueDate" label={tTable('due')} currentField={filter.sort} currentDir={filter.dir} align="right" />
                 </th>
-                <th className="px-4 py-2">
+                <th className="px-4 py-3" aria-sort={ariaSortFor('priority')}>
                   <SortHeader field="priority" label={tTable('priority')} currentField={filter.sort} currentDir={filter.dir} />
                 </th>
               </tr>
             </thead>
             <tbody>
-              {result.items.map((t) => (
-                <tr key={t.id} className="border-t border-border hover:bg-muted/30">
-                  <td className="px-4 py-2 font-mono text-xs text-muted-foreground">
-                    <Link href={`/projects/${project.key}/tasks/${t.number}`} className="hover:underline">
-                      {project.key}-{t.number}
+              {result.items.map((task) => (
+                <tr
+                  key={task.id}
+                  className="border-b border-border last:border-b-0 transition-colors duration-150 hover:bg-muted/50 focus-within:bg-muted/50"
+                >
+                  <td className="px-4 py-3 font-mono text-xs tabular-nums text-muted-foreground">
+                    <Link
+                      href={`/projects/${project.key}/tasks/${task.number}`}
+                      className="rounded hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      {project.key}-{task.number}
                     </Link>
                   </td>
-                  <td className="px-4 py-2">
-                    <Link href={`/projects/${project.key}/tasks/${t.number}`} className="hover:underline">
-                      {t.title}
+                  <td className="px-4 py-3">
+                    <Link
+                      href={`/projects/${project.key}/tasks/${task.number}`}
+                      className="rounded hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      {task.title}
                     </Link>
                   </td>
-                  <td className="px-4 py-2">
-                    <TaskStatusBadge status={t.status} />
+                  <td className="px-4 py-3">
+                    <TaskStatusBadge status={task.status} />
                   </td>
-                  <td className="px-4 py-2">
-                    {t.assignee ? (
+                  <td className="px-4 py-3">
+                    {task.assignee ? (
                       <span className="inline-flex items-center gap-2 text-muted-foreground">
-                        <Avatar src={t.assignee.image} alt={t.assignee.name} className="h-6 w-6" />
-                        {t.assignee.name}
+                        <Avatar src={task.assignee.image} alt={task.assignee.name} className="h-6 w-6" />
+                        {task.assignee.name}
                       </span>
                     ) : (
-                      <span className="text-muted-foreground">—</span>
+                      <span className="text-muted-foreground" aria-label="не назначен">—</span>
                     )}
                   </td>
-                  <td className="px-4 py-2 text-muted-foreground">
-                    {t.estimateHours ? `${t.estimateHours.toString()} ч` : '—'}
+                  <td className="px-4 py-3 text-right font-mono tabular-nums text-muted-foreground">
+                    {task.estimateHours ? (
+                      <>
+                        {task.estimateHours.toString()}
+                        <span className="ml-1 text-xs text-muted-foreground/70">ч</span>
+                      </>
+                    ) : (
+                      <span aria-label="оценка не задана">—</span>
+                    )}
                   </td>
-                  <td className="px-4 py-2 text-muted-foreground">
-                    {t.dueDate ? new Date(t.dueDate).toLocaleDateString('ru-RU') : '—'}
+                  <td className="px-4 py-3 text-right font-mono tabular-nums text-muted-foreground">
+                    {task.dueDate ? (
+                      new Date(task.dueDate).toLocaleDateString('ru-RU')
+                    ) : (
+                      <span aria-label="срок не задан">—</span>
+                    )}
                   </td>
-                  <td className="px-4 py-2">
-                    <PriorityBadge priority={t.priority} />
+                  <td className="px-4 py-3">
+                    <PriorityBadge priority={task.priority} />
                   </td>
                 </tr>
               ))}
