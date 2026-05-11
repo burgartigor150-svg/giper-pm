@@ -6,7 +6,7 @@ import { Button } from '@giper/ui/components/Button';
 import { requireAuth } from '@/lib/auth';
 import { canManageAssignments, canSeeSettings } from '@/lib/permissions';
 import { joinMeetingAction } from '@/actions/meetings';
-import { MeetingRoom } from '@/components/domain/MeetingRoom';
+import { MeetingRoomMount } from '@/components/domain/MeetingRoomMount';
 import { MeetingReadyView } from '@/components/domain/MeetingReadyView';
 import { MeetingRetryButton } from '@/components/domain/MeetingRetryButton';
 import { getSignedDownloadUrl } from '@/lib/storage/s3';
@@ -79,13 +79,14 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
       return <ErrorCard meetingId={meeting.id} title={meeting.title} message={join.message} />;
     }
     return (
-      <MeetingRoom
+      <MeetingRoomMount
         meetingId={meeting.id}
         serverUrl={join.serverUrl}
         token={join.token}
         title={meeting.title}
         defaultName={join.displayName}
         iceServers={join.iceServers}
+        channelId={null}
       />
     );
   }

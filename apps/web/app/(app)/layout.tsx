@@ -6,6 +6,8 @@ import { canSeeReports, canSeeSettings, type SessionUser } from '@/lib/permissio
 import { getActiveTimerWithHealth } from '@/lib/time';
 import { AppShell } from '@/components/domain/AppShell';
 import { PushOptInBanner } from '@/components/domain/PushOptIn';
+import { ActiveCallProvider } from '@/components/domain/ActiveCallProvider';
+import { ActiveCallContainer } from '@/components/domain/ActiveCallContainer';
 import type { NavItem } from '@/components/domain/Sidebar';
 
 function buildNav(user: SessionUser): NavItem[] {
@@ -60,8 +62,14 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       wsUrl={process.env.NEXT_PUBLIC_WS_URL ?? null}
       inboxUnread={inboxUnread}
     >
-      <PushOptInBanner />
-      {children}
+      <ActiveCallProvider>
+        <PushOptInBanner />
+        {children}
+        {/* Floating PiP — invisible when no call is active. Stays
+            mounted across navigation so the WebRTC connection
+            survives router pushes. */}
+        <ActiveCallContainer />
+      </ActiveCallProvider>
     </AppShell>
   );
 }
