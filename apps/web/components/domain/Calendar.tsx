@@ -37,6 +37,8 @@ import {
   useDroppable,
 } from '@dnd-kit/core';
 import { changeTaskDueDateAction } from '@/actions/calendar';
+import { PriorityBadge } from '@/components/domain/PriorityBadge';
+import { TaskStatusBadge } from '@/components/domain/TaskStatusBadge';
 
 // ---------------- types ----------------
 
@@ -79,25 +81,21 @@ type Props = {
 
 // ---------------- consts ----------------
 
+// Priority bar color — MASTER.md §1 priority table. Color is paired
+// with a PriorityBadge icon at the visible-row level, so the bar alone
+// never carries the signal.
 const PRIORITY_BAR: Record<string, string> = {
-  URGENT: 'bg-red-500',
-  HIGH: 'bg-orange-500',
-  MEDIUM: 'bg-blue-500',
-  LOW: 'bg-slate-400',
+  URGENT: 'bg-destructive',
+  HIGH: 'bg-amber-600 dark:bg-amber-500',
+  MEDIUM: 'bg-foreground/40',
+  LOW: 'bg-muted-foreground/40',
 };
 
-const STATUS_BG: Record<string, string> = {
-  BACKLOG: 'bg-slate-50 text-slate-700',
-  TODO: 'bg-blue-50 text-blue-800',
-  IN_PROGRESS: 'bg-amber-50 text-amber-800',
-  REVIEW: 'bg-purple-50 text-purple-800',
-  BLOCKED: 'bg-red-50 text-red-800',
-  DONE: 'bg-emerald-50 text-emerald-800',
-  CANCELED: 'bg-slate-50 text-slate-500 line-through',
-};
-
+// Status labels for the filter chip row only. Inline pills inside
+// cells/popover use <TaskStatusBadge /> from the design system so
+// the palette + icons stay consistent with the rest of the app.
 const STATUS_RU: Record<string, string> = {
-  BACKLOG: 'BACKLOG',
+  BACKLOG: 'Бэклог',
   TODO: 'К выполнению',
   IN_PROGRESS: 'Выполняется',
   REVIEW: 'На ревью',
@@ -190,6 +188,10 @@ export function Calendar({
     }),
   );
   const [activeDragItem, setActiveDragItem] = useState<DeadlineItem | null>(null);
+  // Inline error banner for failed DnD moves — replaces window.alert()
+  // which steals focus and breaks the keyboard flow. Auto-clears after
+  // 5s; aria-live="assertive" makes SR users hear it immediately.
+  const [dndError, setDndError] = useState<string | null>(null);
   const today = useMemo(() => startOfDay(new Date()), []);
   const todayKey = dayKey(today);
 
@@ -374,9 +376,12 @@ export function Calendar({
           next.delete(activeId);
           return next;
         });
-        // eslint-disable-next-line no-alert
-        alert(r.error.message);
+        setDndError(r.error.message);
+        // Auto-clear after 5s.
+        setTimeout(() => setDndError(null), 5000);
       }
+      // scroll: false preserves the user's position when the route
+      // server-renders the new task data.
       router.refresh();
     });
   }
@@ -393,10 +398,21 @@ export function Calendar({
       onDragCancel={onDragCancel}
       onDragEnd={onDragEnd}
     >
-      <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-4">
+        {/* Inline error region for DnD failures. role=alert + aria-live
+            so screen readers announce immediately. Visible but
+            inline — no focus steal. */}
+        {dndError ? (
+          <div
+            role="alert"
+            className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+          >
+            {dndError}
+          </div>
+        ) : null}
         {/* Top bar */}
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h1 className="text-xl font-semibold">{fmtRange(view, anchor)}</h1>
+          <h1 className="text-2xl font-semibold">{fmtRange(view, anchor)}</h1>
           <div className="flex flex-wrap items-center gap-1">
             {/* View switcher */}
             <div className="flex items-center gap-0.5 rounded-md border border-input bg-background p-0.5">
@@ -413,14 +429,16 @@ export function Calendar({
             <button
               type="button"
               onClick={() => setFiltersOpen((s) => !s)}
+              aria-expanded={filtersOpen}
+              aria-controls="calendar-filters"
               className={
-                'inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs ' +
+                'inline-flex h-8 items-center gap-1 rounded-md border px-2 text-xs transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ' +
                 (filtersOpen
-                  ? 'border-blue-300 bg-blue-50 text-blue-800'
-                  : 'border-input text-muted-foreground hover:bg-accent')
+                  ? 'border-foreground bg-foreground text-background'
+                  : 'border-input text-muted-foreground hover:bg-muted')
               }
             >
-              <Filter className="h-3 w-3" /> Фильтры
+              <Filter className="size-3.5" /> Фильтры
             </button>
             <input
               type="date"
@@ -533,11 +551,12 @@ export function Calendar({
                       applyFilters({ ...filters, status: [...cur] });
                     }}
                     className={
-                      'rounded-full border px-2 py-0.5 ' +
+                      'rounded-full border px-2 py-0.5 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ' +
                       (active
-                        ? 'border-blue-300 bg-blue-100 text-blue-800'
-                        : 'border-input text-muted-foreground hover:bg-accent')
+                        ? 'border-foreground bg-foreground text-background'
+                        : 'border-input text-muted-foreground hover:bg-muted')
                     }
+                    aria-pressed={active}
                   >
                     {STATUS_RU[s] ?? s}
                   </button>
@@ -605,7 +624,7 @@ export function Calendar({
         ) : null}
 
         {/* Footer hint */}
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-xs text-muted-foreground">
           Перетащите задачу на другой день, чтобы изменить дедлайн (синхронизуется
           с Bitrix24). Стрелки ←/→ — переключение, T — сегодня.
         </p>
@@ -683,7 +702,7 @@ function MonthGrid({
       {WEEKDAYS.map((d) => (
         <div
           key={d}
-          className="bg-muted px-2 py-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
+          className="bg-muted px-2 py-1 text-xs font-medium uppercase tracking-wide text-muted-foreground"
         >
           {d}
         </div>
@@ -728,7 +747,7 @@ function WeekGrid({
       {days.map((d, i) => (
         <div
           key={`h-${ymd(d)}`}
-          className="bg-muted px-2 py-1 text-center text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
+          className="bg-muted px-2 py-1 text-center text-xs font-medium uppercase tracking-wide text-muted-foreground"
         >
           {WEEKDAYS[i]}, {d.getDate()}.{String(d.getMonth() + 1).padStart(2, '0')}
         </div>
@@ -820,27 +839,31 @@ function DayCell({
         tall ? 'min-h-[280px]' : 'min-h-[120px]',
         inMonth ? '' : 'opacity-40',
         isWeekend ? 'bg-muted/40' : '',
-        overdueOpen ? 'bg-red-50' : '',
-        isToday ? 'ring-2 ring-blue-500 ring-inset' : '',
-        isSelected && !isToday ? 'ring-2 ring-purple-500 ring-inset' : '',
-        isOver ? 'outline outline-2 outline-blue-400 outline-offset-[-2px]' : '',
+        overdueOpen ? 'bg-destructive/10' : '',
+        // Today + selected + drop-target are signalled via inset rings.
+        // Color is paired with text-weight on the day number (today is
+        // bold) so the signal isn't color-only (MASTER §10/§11).
+        isToday ? 'ring-2 ring-foreground ring-inset' : '',
+        isSelected && !isToday ? 'ring-2 ring-ring ring-inset' : '',
+        isOver ? 'outline outline-2 outline-foreground outline-offset-[-2px]' : '',
       ].join(' ')}
+      aria-current={isToday ? 'date' : undefined}
     >
       <button
         type="button"
         onClick={() => onClick(day)}
-        className="flex items-center justify-between text-left"
+        className="flex items-center justify-between text-left rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         <span
           className={[
-            'text-[11px] font-mono',
-            isToday ? 'font-semibold text-blue-700' : 'text-muted-foreground',
+            'text-xs font-mono tabular-nums',
+            isToday ? 'font-semibold text-foreground' : 'text-muted-foreground',
           ].join(' ')}
         >
           {day.getDate()}
         </span>
         {items.length > 0 ? (
-          <span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px]">
+          <span className="rounded-sm bg-muted px-1.5 py-0.5 text-xs tabular-nums text-muted-foreground">
             {items.length}
           </span>
         ) : null}
@@ -853,7 +876,7 @@ function DayCell({
           <button
             type="button"
             onClick={() => onClick(day)}
-            className="px-1 text-left text-[10px] text-muted-foreground hover:underline"
+            className="px-1 text-left text-xs text-muted-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded"
           >
             +{hidden} ещё
           </button>
@@ -876,7 +899,7 @@ function DroppableDay({
   return (
     <div
       ref={setNodeRef}
-      className={[className, isOver ? 'outline outline-2 outline-blue-400' : '']
+      className={[className, isOver ? 'outline outline-2 outline-foreground' : '']
         .filter(Boolean)
         .join(' ')}
     >
@@ -952,14 +975,20 @@ function DraggableTaskCard({
   );
 }
 
+// Card in the month/week grid. Neutral background by design — the
+// calendar gets very busy with 5+ cards per day, so we don't paint
+// each card with its status color (that's MASTER §11 "noise on
+// data-dense screens"). Status lives in the popover. Priority is
+// shown as a 2px left bar PLUS a Lucide icon for non-MEDIUM (color
+// alone is forbidden by MASTER §10/§11).
 function cardClass(item: DeadlineItem, expanded: boolean | undefined): string {
-  const bg = STATUS_BG[item.internalStatus] ?? 'bg-muted';
   return [
     'cursor-grab select-none touch-none active:cursor-grabbing',
-    'flex items-center gap-1 overflow-hidden rounded-sm pl-0 pr-1 py-0.5 text-[10px]',
-    'hover:underline',
-    bg,
-    expanded ? 'p-1 text-xs' : '',
+    'flex items-center gap-1 overflow-hidden rounded-sm pl-0 pr-1.5 py-0.5 text-xs',
+    'bg-muted/60 hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors duration-150',
+    item.internalStatus === 'DONE' ? 'opacity-60' : '',
+    item.internalStatus === 'CANCELED' ? 'opacity-50 line-through' : '',
+    expanded ? 'py-1' : '',
   ].join(' ');
 }
 
@@ -970,12 +999,23 @@ function CardBody({
   item: DeadlineItem;
   expanded?: boolean;
 }) {
-  const bar = PRIORITY_BAR[item.priority] ?? 'bg-slate-400';
+  const bar = PRIORITY_BAR[item.priority] ?? 'bg-muted-foreground/40';
+  const showPriorityIcon =
+    item.priority === 'URGENT' || item.priority === 'HIGH';
   return (
     <>
-      <span className={`h-full w-1 shrink-0 self-stretch ${bar}`} />
+      <span className={`h-full w-1 shrink-0 self-stretch ${bar}`} aria-hidden="true" />
+      {showPriorityIcon ? (
+        <PriorityBadge
+          priority={item.priority as 'URGENT' | 'HIGH'}
+          iconOnly
+        />
+      ) : null}
       <span className="flex-1 truncate">
-        {item.projectKey}-{item.number} {item.title}
+        <span className="font-mono text-muted-foreground tabular-nums">
+          {item.projectKey}-{item.number}
+        </span>{' '}
+        {item.title}
       </span>
       {item.assignee && expanded ? (
         <span className="shrink-0 truncate text-muted-foreground">
@@ -1003,11 +1043,18 @@ function DayPopover({
   });
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/40 p-4"
       onClick={onClose}
+      onKeyDown={(e) => {
+        if (e.key === 'Escape') onClose();
+      }}
+      role="presentation"
     >
       <div
-        className="w-full max-w-lg overflow-hidden rounded-lg border border-border bg-background shadow-2xl"
+        role="dialog"
+        aria-modal="true"
+        aria-label={dateStr}
+        className="w-full max-w-lg overflow-hidden rounded-lg border border-border bg-background shadow-lg"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b px-4 py-2">
@@ -1030,21 +1077,16 @@ function DayPopover({
                 <li key={it.id}>
                   <Link
                     href={`/projects/${it.projectKey}/tasks/${it.number}`}
-                    className="flex items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-accent"
+                    className="flex items-center gap-2 rounded-md px-2 py-2 text-sm transition-colors duration-150 hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     <span
+                      aria-hidden="true"
                       className={`h-7 w-1 shrink-0 rounded ${
-                        PRIORITY_BAR[it.priority] ?? 'bg-slate-400'
+                        PRIORITY_BAR[it.priority] ?? 'bg-muted-foreground/40'
                       }`}
                     />
-                    <span
-                      className={`rounded px-1.5 py-0.5 text-[10px] uppercase ${
-                        STATUS_BG[it.internalStatus] ?? 'bg-muted'
-                      }`}
-                    >
-                      {STATUS_RU[it.internalStatus] ?? it.internalStatus}
-                    </span>
-                    <span className="font-mono text-xs text-muted-foreground">
+                    <TaskStatusBadge status={it.internalStatus as Parameters<typeof TaskStatusBadge>[0]['status']} />
+                    <span className="font-mono text-xs text-muted-foreground tabular-nums">
                       {it.projectKey}-{it.number}
                     </span>
                     <span className="flex-1 truncate">{it.title}</span>
@@ -1062,7 +1104,7 @@ function DayPopover({
         <div className="border-t px-4 py-2 text-right">
           <Link
             href={`/projects?dueDate=${ymd(date)}`}
-            className="text-xs text-blue-700 hover:underline"
+            className="text-xs text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded"
           >
             + Создать задачу с этим дедлайном
           </Link>
@@ -1113,8 +1155,8 @@ function UpcomingSidebar({
                 : d.toLocaleDateString('ru-RU', { weekday: 'short', day: '2-digit', month: '2-digit' });
             return (
               <li key={key} className="flex flex-col gap-1">
-                <div className="flex items-baseline justify-between text-[11px] uppercase">
-                  <span className={isToday ? 'font-semibold text-blue-700' : 'text-muted-foreground'}>
+                <div className="flex items-baseline justify-between text-xs uppercase">
+                  <span className={isToday ? 'font-semibold text-foreground' : 'text-muted-foreground'}>
                     {dayLabel}
                   </span>
                   <span className="text-muted-foreground">{list.length}</span>
@@ -1127,9 +1169,10 @@ function UpcomingSidebar({
                         className="flex items-center gap-1.5 rounded px-1 py-1 text-xs hover:bg-accent"
                       >
                         <span
-                          className={`h-4 w-1 shrink-0 rounded ${PRIORITY_BAR[it.priority] ?? 'bg-slate-400'}`}
+                          aria-hidden="true"
+                          className={`h-4 w-1 shrink-0 rounded ${PRIORITY_BAR[it.priority] ?? 'bg-muted-foreground/40'}`}
                         />
-                        <span className="font-mono text-[10px] text-muted-foreground">
+                        <span className="font-mono text-xs text-muted-foreground">
                           {it.projectKey}-{it.number}
                         </span>
                         <span

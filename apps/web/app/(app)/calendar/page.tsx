@@ -147,7 +147,7 @@ export default async function CalendarPage({
   );
 
   return (
-    <div className="mx-auto max-w-[1400px]">
+    <div className="mx-auto max-w-[1400px] px-4 md:px-6">
       <Calendar
         view={view}
         anchor={anchorIso}
