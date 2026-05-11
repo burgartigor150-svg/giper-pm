@@ -16,6 +16,9 @@ export type ChannelAccess = {
   canRead: boolean;
   canPost: boolean;
   isMember: boolean;
+  /** ADMIN / MEMBER — null when not a member. */
+  role: 'ADMIN' | 'MEMBER' | null;
+  isMuted: boolean;
   kind: 'PUBLIC' | 'PRIVATE' | 'DM' | 'GROUP_DM';
 };
 
@@ -31,15 +34,19 @@ export async function resolveChannelAccess(
 
   const member = await prisma.channelMember.findUnique({
     where: { channelId_userId: { channelId, userId } },
-    select: { userId: true },
+    select: { userId: true, role: true, isMuted: true },
   });
 
   const isMember = !!member;
+  const role = (member?.role as 'ADMIN' | 'MEMBER' | undefined) ?? null;
+  const isMuted = member?.isMuted ?? false;
   if (channel.kind === 'PUBLIC') {
     return {
       channelId,
       kind: channel.kind,
       isMember,
+      role,
+      isMuted,
       canRead: !channel.isArchived || isMember,
       canPost: !channel.isArchived,
     };
@@ -49,6 +56,8 @@ export async function resolveChannelAccess(
     channelId,
     kind: channel.kind,
     isMember,
+    role,
+    isMuted,
     canRead: isMember,
     canPost: isMember && !channel.isArchived,
   };

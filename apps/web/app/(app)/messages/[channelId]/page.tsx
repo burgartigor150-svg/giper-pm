@@ -26,6 +26,8 @@ export default async function MessagesChannelPage({ params }: { params: Params }
       mentionedUsers={loaded.mentionedUsers}
       taskPreviews={loaded.taskPreviews}
       meId={me.id}
+      myChannelRole={loaded.access.role}
+      isMuted={loaded.access.isMuted}
     />
   );
 }

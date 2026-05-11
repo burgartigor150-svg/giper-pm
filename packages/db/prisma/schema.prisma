@@ -1257,6 +1257,11 @@ model Message {
   eventPayload Json?
   editedAt    DateTime?
   deletedAt   DateTime?
+  /// Pinned by a channel ADMIN. Null = not pinned. Sorted by
+  /// pinnedAt desc for the "pinned" list, but in the main feed
+  /// pinned messages stay in their original chronological place.
+  pinnedAt    DateTime?
+  pinnedById  String?
 
   // Cached counts kept in sync by triggers / app code so the channel
   // list can show "12 replies" without a sub-query per row.
@@ -1272,6 +1277,11 @@ model Message {
   @@index([channelId, createdAt])
   @@index([parentId, createdAt])
   @@index([authorId])
+  /// Partial index conceptually — Postgres doesn't get a WHERE in
+  /// Prisma's @@index DSL, but the b-tree includes nulls cheaply
+  /// and `WHERE pinnedAt IS NOT NULL ORDER BY pinnedAt DESC` is
+  /// our only query against this column.
+  @@index([channelId, pinnedAt])
 }
 
 model MessageAttachment {

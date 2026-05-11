@@ -2,13 +2,14 @@
 
 import { useEffect, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Hash, Lock, Users, X, Search, UserPlus, UserMinus, Phone } from 'lucide-react';
+import { Hash, Lock, Users, X, Search, UserPlus, UserMinus, Phone, Bell, BellOff } from 'lucide-react';
 import { Avatar } from '@giper/ui/components/Avatar';
 import {
   listChannelMembersAction,
   inviteToChannelAction,
   removeFromChannelAction,
   searchUsersForMention,
+  setChannelMutedAction,
 } from '@/actions/messenger';
 import { startCallInChannelAction } from '@/actions/meetings';
 
@@ -39,9 +40,16 @@ type ChannelMember = {
  * - The panel is a right-side sliding overlay (not a modal) so the
  *   user can keep glancing at the chat.
  */
-export function ChannelHeader({ channel }: { channel: ChannelLite }) {
+export function ChannelHeader({
+  channel,
+  isMuted = false,
+}: {
+  channel: ChannelLite;
+  isMuted?: boolean;
+}) {
   const [panelOpen, setPanelOpen] = useState(false);
   const [callPending, startCall] = useTransition();
+  const [mutePending, startMute] = useTransition();
   const router = useRouter();
   // DM/GROUP_DM no longer hide the header — we want the call button
   // there too. We keep the title visible for context (the sidebar
@@ -69,6 +77,18 @@ export function ChannelHeader({ channel }: { channel: ChannelLite }) {
     });
   }
 
+  function toggleMute() {
+    startMute(async () => {
+      const r = await setChannelMutedAction(channel.id, !isMuted);
+      if (!r.ok) {
+        // eslint-disable-next-line no-alert
+        alert(r.error.message);
+        return;
+      }
+      router.refresh();
+    });
+  }
+
   return (
     <>
       <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-border bg-background px-4">
@@ -86,6 +106,20 @@ export function ChannelHeader({ channel }: { channel: ChannelLite }) {
           >
             <Phone className="size-3.5" aria-hidden="true" />
             {callPending ? 'Создаём…' : 'Позвонить'}
+          </button>
+          <button
+            type="button"
+            onClick={toggleMute}
+            disabled={mutePending}
+            className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors duration-150 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+            aria-label={isMuted ? 'Включить уведомления' : 'Отключить уведомления'}
+            title={isMuted ? 'Уведомления выключены' : 'Уведомления включены'}
+          >
+            {isMuted ? (
+              <BellOff className="size-3.5" aria-hidden="true" />
+            ) : (
+              <Bell className="size-3.5" aria-hidden="true" />
+            )}
           </button>
           {!isDm ? (
             <button

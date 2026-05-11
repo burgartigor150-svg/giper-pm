@@ -24,7 +24,8 @@ import { CreateChannelDialog } from './CreateChannelDialog';
 import { ChannelHeader } from './ChannelHeader';
 import { VideoNotePlayer } from './VideoNotePlayer';
 import { SystemEventCard, type SystemEvent } from './SystemEventCard';
-import { MessageSquareReply } from 'lucide-react';
+import { MessageActions } from './MessageActions';
+import { Pin, MessageSquareReply } from 'lucide-react';
 
 type ChannelKind = 'PUBLIC' | 'PRIVATE' | 'DM' | 'GROUP_DM';
 
@@ -66,6 +67,7 @@ type MessageRow = {
     | 'CHANNEL_RENAMED'
     | null;
   eventPayload?: unknown;
+  pinnedAt?: Date | string | null;
 };
 
 type MentionUser = { id: string; name: string };
@@ -84,6 +86,12 @@ type Props = {
    */
   taskPreviews?: TaskPreview[];
   meId?: string;
+  /** Caller's channel role — null when not a member. Used to gate
+   *  pin/unpin actions (ADMIN only). */
+  myChannelRole?: 'ADMIN' | 'MEMBER' | null;
+  /** Whether the caller has muted the active channel. Drives the
+   *  bell icon state in the header. */
+  isMuted?: boolean;
 };
 
 export function MessagesShell({
@@ -94,6 +102,8 @@ export function MessagesShell({
   mentionedUsers = [],
   taskPreviews = [],
   meId,
+  myChannelRole = null,
+  isMuted = false,
 }: Props) {
   const mentionsMap = new Map(mentionedUsers.map((u) => [u.id, u]));
   const previewsMap = new Map(taskPreviews.map((p) => [p.key, p]));
@@ -213,7 +223,7 @@ export function MessagesShell({
                 publicChannels.find((c) => c.id === activeChannelId);
               if (!active) return null;
               return (
-                <ChannelHeader channel={active} />
+                <ChannelHeader channel={active} isMuted={isMuted} />
               );
             })()}
             <div className="flex-1 overflow-y-auto px-4 py-4" ref={scrollRef}>
@@ -230,6 +240,8 @@ export function MessagesShell({
                       meId={meId ?? ''}
                       mentionsMap={mentionsMap}
                       previewsMap={previewsMap}
+                      canPin={myChannelRole === 'ADMIN'}
+                      onChanged={() => router.refresh()}
                       onOpenThread={() => setOpenThreadId(m.id)}
                     />
                   ))}
@@ -341,12 +353,16 @@ function MessageRow({
   meId,
   mentionsMap,
   previewsMap,
+  canPin,
+  onChanged,
   onOpenThread,
 }: {
   m: MessageRow;
   meId: string;
   mentionsMap: Map<string, { id: string; name: string }>;
   previewsMap: Map<string, TaskPreview>;
+  canPin: boolean;
+  onChanged: () => void;
   onOpenThread: () => void;
 }) {
   // Resolve task refs in this message body. We do this per-row
@@ -376,7 +392,7 @@ function MessageRow({
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline gap-2 text-xs">
           <span className="font-medium">{m.author.name}</span>
-          <span className="text-muted-foreground">
+          <span className="text-muted-foreground tabular-nums">
             {new Date(m.createdAt).toLocaleTimeString('ru-RU', {
               hour: '2-digit',
               minute: '2-digit',
@@ -385,6 +401,22 @@ function MessageRow({
           {m.editedAt ? (
             <span className="text-xs text-muted-foreground">(изм.)</span>
           ) : null}
+          {m.pinnedAt ? (
+            <span className="inline-flex items-center gap-0.5 text-xs text-muted-foreground" title="Закреплено">
+              <Pin className="size-3" aria-hidden="true" />
+              закреплено
+            </span>
+          ) : null}
+          <span className="ml-auto">
+            <MessageActions
+              messageId={m.id}
+              isAuthor={m.authorId === meId}
+              canPin={canPin}
+              pinned={!!m.pinnedAt}
+              currentBody={m.body}
+              onChanged={onChanged}
+            />
+          </span>
         </div>
         {m.body ? (
           <div className="mt-0.5 whitespace-pre-wrap break-words text-sm">

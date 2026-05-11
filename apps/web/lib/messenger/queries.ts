@@ -68,6 +68,7 @@ export async function loadChannelMessages(
       replyCount: true,
       editedAt: true,
       createdAt: true,
+      pinnedAt: true,
       reactions: {
         select: { userId: true, emoji: true },
       },

@@ -490,9 +490,20 @@ export async function postMessageAction(input: {
         const headline = channel?.kind === 'DM'
           ? `Сообщение от ${me.name ?? 'кого-то'}`
           : `${me.name ?? 'Кто-то'} упомянул вас в «${channel?.name ?? 'чате'}»`;
+        // Exclude mentioned users who muted this channel — even
+        // explicit @ doesn't override mute. They'll see the message
+        // when they open the chat, just no OS toast.
+        const mentionedNotMuted = await prisma.channelMember.findMany({
+          where: {
+            channelId: input.channelId,
+            userId: { in: validMentions.map((u) => u.id), not: me.id },
+            isMuted: false,
+          },
+          select: { userId: true },
+        });
         const { sendPushToUsers } = await import('@/lib/push/sendPush');
         await sendPushToUsers(
-          validMentions.map((u) => u.id).filter((id) => id !== me.id),
+          mentionedNotMuted.map((m) => m.userId),
           {
             title: headline,
             body: body.slice(0, 160),
@@ -761,6 +772,112 @@ export async function deleteMessageAction(messageId: string): Promise<ActionResu
     messageId,
   });
   revalidatePath('/messages');
+  return { ok: true };
+}
+
+/**
+ * Pin (or unpin) a message in its channel. Only channel ADMINs can
+ * pin — same role gate used for invite/remove. We don't cap the
+ * number of pinned messages; the UI shows them as a collapsible
+ * stack at the top of the channel.
+ */
+export async function setPinnedAction(
+  messageId: string,
+  pinned: boolean,
+): Promise<ActionResult> {
+  const me = await requireAuth();
+  const msg = await prisma.message.findUnique({
+    where: { id: messageId },
+    select: { channelId: true, deletedAt: true },
+  });
+  if (!msg || msg.deletedAt) {
+    return { ok: false, error: { code: 'NOT_FOUND', message: 'Сообщение не найдено' } };
+  }
+  const myMembership = await prisma.channelMember.findUnique({
+    where: { channelId_userId: { channelId: msg.channelId, userId: me.id } },
+    select: { role: true },
+  });
+  if (!myMembership || myMembership.role !== 'ADMIN') {
+    return {
+      ok: false,
+      error: { code: 'FORBIDDEN', message: 'Только админ канала может закреплять сообщения' },
+    };
+  }
+  await prisma.message.update({
+    where: { id: messageId },
+    data: pinned
+      ? { pinnedAt: new Date(), pinnedById: me.id }
+      : { pinnedAt: null, pinnedById: null },
+  });
+  await publishChatEvent({
+    kind: 'message.edited',
+    channelId: msg.channelId,
+    messageId,
+  });
+  revalidatePath('/messages');
+  revalidatePath(`/messages/${msg.channelId}`);
+  return { ok: true };
+}
+
+/**
+ * List currently-pinned messages for a channel. Capped at 50 — TG-
+ * level density without runaway memory if someone decides to pin
+ * a whole sprint.
+ */
+export async function listPinnedMessagesAction(channelId: string) {
+  const me = await requireAuth();
+  const access = await resolveChannelAccess(channelId, me.id);
+  if (!access?.canRead) return null;
+  const rows = await prisma.message.findMany({
+    where: { channelId, pinnedAt: { not: null }, deletedAt: null },
+    orderBy: { pinnedAt: 'desc' },
+    take: 50,
+    select: {
+      id: true,
+      body: true,
+      source: true,
+      eventKind: true,
+      eventPayload: true,
+      pinnedAt: true,
+      createdAt: true,
+      author: { select: { id: true, name: true, image: true } },
+      attachments: {
+        select: {
+          id: true,
+          kind: true,
+          mimeType: true,
+          sizeBytes: true,
+          durationSec: true,
+          width: true,
+          height: true,
+          filename: true,
+        },
+      },
+    },
+  });
+  return rows;
+}
+
+/**
+ * Toggle mute on a channel for the current user. Mute = the user
+ * stays a member, keeps reading, but stops receiving push pings
+ * AND the sidebar unread badge doesn't count new messages. (The
+ * second is checked in the listMyChannels query.)
+ */
+export async function setChannelMutedAction(
+  channelId: string,
+  muted: boolean,
+): Promise<ActionResult> {
+  const me = await requireAuth();
+  const result = await prisma.channelMember.updateMany({
+    where: { channelId, userId: me.id },
+    data: { isMuted: muted },
+  });
+  if (result.count === 0) {
+    return { ok: false, error: { code: 'NOT_FOUND', message: 'Вы не участник канала' } };
+  }
+  revalidatePath('/messages');
+  revalidatePath(`/messages/${channelId}`);
   return { ok: true };
 }
 

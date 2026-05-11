@@ -205,6 +205,10 @@ export async function startCallInChannelAction(input: {
         where: {
           channelId: input.channelId,
           userId: { not: me.id },
+          // Muted members don't get push pings. They still see the
+          // CALL_STARTED card in-channel when they open giper-pm,
+          // they just don't get the OS notification.
+          isMuted: false,
         },
         select: { userId: true },
       });
