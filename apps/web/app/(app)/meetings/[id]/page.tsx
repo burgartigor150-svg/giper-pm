@@ -112,6 +112,45 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
           ttlSeconds: 3600,
         })
       : null;
+
+    // Build SPEAKER_xx → real name mapping. WhisperX numbers speakers
+    // in voice-onset order; we approximate that with the join order of
+    // MeetingParticipant rows. Not perfect (a silent participant who
+    // joined first won't claim SPEAKER_00) but it's the right call most
+    // of the time and is correctable later via a manual UI.
+    const parts = await prisma.meetingParticipant.findMany({
+      where: { meetingId: meeting.id },
+      orderBy: { joinedAt: 'asc' },
+      select: { displayName: true, user: { select: { name: true } } },
+    });
+    const speakerMap: Record<string, string> = {};
+    parts.forEach((p, i) => {
+      const idx = String(i).padStart(2, '0');
+      speakerMap[`SPEAKER_${idx}`] = p.user?.name || p.displayName || `Участник ${i + 1}`;
+    });
+
+    // If the meeting has no project yet, surface the PM's manageable
+    // projects so they can attach the meeting after the fact and rerun
+    // the AI layer. We only load this list on the no-project branch.
+    let availableProjects: { key: string; name: string }[] = [];
+    if (!meeting.project) {
+      const projects = await prisma.project.findMany({
+        where:
+          me.role === 'ADMIN'
+            ? { status: { not: 'ARCHIVED' } }
+            : {
+                status: { not: 'ARCHIVED' },
+                OR: [
+                  { ownerId: me.id },
+                  { members: { some: { userId: me.id, role: 'LEAD' } } },
+                ],
+              },
+        select: { key: true, name: true },
+        orderBy: { name: 'asc' },
+        take: 200,
+      });
+      availableProjects = projects;
+    }
     return (
       <MeetingReadyView
         meetingId={meeting.id}
@@ -130,6 +169,8 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
           language: meeting.transcript.language,
         }}
         projectKey={meeting.project?.key ?? null}
+        speakerMap={speakerMap}
+        availableProjects={availableProjects}
       />
     );
   }

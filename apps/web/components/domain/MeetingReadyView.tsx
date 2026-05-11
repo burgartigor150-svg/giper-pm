@@ -10,6 +10,7 @@ import {
   discardMeetingProposalAction,
   getMeetingProposalsAction,
 } from '@/actions/aiMeeting';
+import { attachProjectAndRerunAiAction } from '@/actions/meetings';
 import type { ApplyOverrides } from '@/actions/aiHarvest';
 
 type Segment = { start: number; end: number; text: string; speaker?: string };
@@ -56,6 +57,8 @@ export function MeetingReadyView({
   durationSec,
   transcript,
   projectKey,
+  speakerMap,
+  availableProjects,
 }: {
   meetingId: string;
   title: string;
@@ -68,7 +71,43 @@ export function MeetingReadyView({
     language: string | null;
   };
   projectKey: string | null;
+  /**
+   * Maps WhisperX speaker labels (SPEAKER_00, SPEAKER_01, …) to the
+   * real participant names we have in MeetingParticipant. Applied
+   * both to the per-segment chip and to the AI summary text — the
+   * summary often quotes SPEAKER_00 directly.
+   */
+  speakerMap?: Record<string, string>;
+  /**
+   * Projects the current user can route a no-project meeting into.
+   * Only used when projectKey === null — surfaces an "attach to
+   * project + rerun AI" picker so the PM can salvage task proposals
+   * from a meeting they forgot to scope.
+   */
+  availableProjects?: { key: string; name: string }[];
 }) {
+  // Replace SPEAKER_xx tokens with real names anywhere a label might
+  // appear. We swap by descending key length first to avoid SPEAKER_0
+  // matching inside SPEAKER_01 (the labels themselves are zero-padded
+  // so order rarely matters, but the safe rule is free).
+  const speakerEntries = Object.entries(speakerMap ?? {}).sort(
+    (a, b) => b[0].length - a[0].length,
+  );
+  const renderSpeaker = (raw: string | undefined): string | undefined => {
+    if (!raw) return raw;
+    return speakerMap?.[raw] ?? raw;
+  };
+  const substituteInText = (text: string): string => {
+    if (speakerEntries.length === 0) return text;
+    let out = text;
+    for (const [label, name] of speakerEntries) {
+      out = out.split(label).join(name);
+    }
+    return out;
+  };
+  const summaryText = transcript.summary
+    ? substituteInText(transcript.summary)
+    : null;
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
   function jumpTo(sec: number) {
@@ -122,13 +161,13 @@ export function MeetingReadyView({
         </Card>
       )}
 
-      {transcript.summary ? (
+      {summaryText ? (
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-base">Саммари ИИ</CardTitle>
           </CardHeader>
           <CardContent className="whitespace-pre-wrap text-sm leading-relaxed">
-            {transcript.summary}
+            {summaryText}
           </CardContent>
         </Card>
       ) : null}
@@ -154,7 +193,7 @@ export function MeetingReadyView({
                   </button>
                   {s.speaker ? (
                     <span className="shrink-0 rounded bg-blue-100 px-1.5 py-0.5 text-xs font-medium text-blue-900 dark:bg-blue-950/40 dark:text-blue-100">
-                      {s.speaker}
+                      {renderSpeaker(s.speaker)}
                     </span>
                   ) : null}
                   <span className="leading-snug">{s.text}</span>
@@ -164,13 +203,25 @@ export function MeetingReadyView({
           </CardContent>
         </Card>
 
-        <MeetingTasksPanel meetingId={meetingId} />
+        <MeetingTasksPanel
+          meetingId={meetingId}
+          projectKey={projectKey}
+          availableProjects={availableProjects ?? []}
+        />
       </div>
     </div>
   );
 }
 
-function MeetingTasksPanel({ meetingId }: { meetingId: string }) {
+function MeetingTasksPanel({
+  meetingId,
+  projectKey,
+  availableProjects,
+}: {
+  meetingId: string;
+  projectKey: string | null;
+  availableProjects: { key: string; name: string }[];
+}) {
   const [pending, startTransition] = useTransition();
   const [proposals, setProposals] = useState<Proposal[] | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
@@ -198,6 +249,19 @@ function MeetingTasksPanel({ meetingId }: { meetingId: string }) {
   function discard(p: Proposal) {
     setProposals((prev) => (prev ? prev.filter((x) => x.proposalId !== p.proposalId) : prev));
     void discardMeetingProposalAction({ meetingId, proposalId: p.proposalId });
+  }
+
+  // Late-attach branch: meeting was created without a project. Show
+  // a picker + "rerun AI" button instead of an empty proposals list.
+  // We don't render the picker on permanent errors — only on the
+  // soft "no project" case that this UI is specifically here to fix.
+  if (projectKey === null) {
+    return (
+      <AttachProjectPanel
+        meetingId={meetingId}
+        availableProjects={availableProjects}
+      />
+    );
   }
 
   return (
@@ -396,5 +460,98 @@ function ProposalEditor({
         </Button>
       </div>
     </form>
+  );
+}
+
+/**
+ * Salvage UI for meetings created without a project. Lets the PM pick
+ * one of THEIR projects and rerun the AI layer on the existing
+ * transcript (cheap — no WhisperX re-run). After success the page
+ * reloads itself; the next render will see projectKey set and show
+ * the normal proposals panel.
+ */
+function AttachProjectPanel({
+  meetingId,
+  availableProjects,
+}: {
+  meetingId: string;
+  availableProjects: { key: string; name: string }[];
+}) {
+  const [selected, setSelected] = useState<string>(
+    availableProjects[0]?.key ?? '',
+  );
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const [submitted, setSubmitted] = useState(false);
+
+  function submit() {
+    if (!selected) return;
+    setError(null);
+    startTransition(async () => {
+      const r = await attachProjectAndRerunAiAction({
+        meetingId,
+        projectKey: selected,
+      });
+      if (!r.ok) {
+        setError(r.message);
+        return;
+      }
+      setSubmitted(true);
+      // The worker normally finishes the AI rerun in 5-10s on Gemini
+      // Flash. Reload after a short delay so the page re-fetches with
+      // the new projectKey + status=READY.
+      setTimeout(() => {
+        window.location.reload();
+      }, 6000);
+    });
+  }
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base">Предложенные задачи</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <p className="text-xs text-muted-foreground">
+          Встреча не привязана к проекту, поэтому ИИ не предлагал задачи. Выберите проект — ИИ
+          перечитает транскрипт и предложит задачи для него.
+        </p>
+        {availableProjects.length === 0 ? (
+          <p className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
+            У вас нет проектов, в которых можно создавать задачи. Попросите PM добавить вас.
+          </p>
+        ) : (
+          <>
+            <select
+              value={selected}
+              onChange={(e) => setSelected(e.target.value)}
+              disabled={pending || submitted}
+              className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm"
+            >
+              {availableProjects.map((p) => (
+                <option key={p.key} value={p.key}>
+                  {p.key} — {p.name}
+                </option>
+              ))}
+            </select>
+            {error ? <p className="text-xs text-red-600">{error}</p> : null}
+            {submitted ? (
+              <p className="rounded-md bg-emerald-50 px-2 py-1 text-xs text-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-100">
+                Готово, ИИ работает. Страница обновится автоматически…
+              </p>
+            ) : null}
+            <Button
+              type="button"
+              size="sm"
+              onClick={submit}
+              disabled={pending || submitted || !selected}
+              className="w-full"
+            >
+              {pending ? 'Запускаю…' : 'Привязать и сгенерировать задачи'}
+            </Button>
+          </>
+        )}
+      </CardContent>
+    </Card>
   );
 }

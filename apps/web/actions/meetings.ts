@@ -210,6 +210,78 @@ export async function endMeetingAction({
 }
 
 /**
+ * Attach a meeting to a project AFTER it has finished and re-run the
+ * AI layer (summary + task proposals) on the existing transcript.
+ *
+ * Use case: PM created a meeting without a project (e.g. quick
+ * standup), realised after the fact that those action items should
+ * land in PROJECT_X, and wants the proposal cards to appear without
+ * recording another meeting.
+ *
+ * The worker has a fast path: if a transcript already exists for the
+ * meeting, it skips WhisperX entirely and only runs Vertex AI. So
+ * this is cheap (~5s on Gemini Flash) and doesn't burn the P100.
+ */
+export async function attachProjectAndRerunAiAction({
+  meetingId,
+  projectKey,
+}: {
+  meetingId: string;
+  projectKey: string;
+}): Promise<{ ok: true } | { ok: false; message: string }> {
+  const me = await requireAuth();
+  const meeting = await prisma.meeting.findUnique({
+    where: { id: meetingId },
+    select: {
+      id: true,
+      status: true,
+      createdById: true,
+      projectId: true,
+      transcript: { select: { meetingId: true } },
+    },
+  });
+  if (!meeting) return { ok: false, message: 'Встреча не найдена' };
+  // Only the creator or an ADMIN can re-route a finished meeting —
+  // attaching it elsewhere can leak the transcript to a new audience.
+  if (me.role !== 'ADMIN' && meeting.createdById !== me.id) {
+    return { ok: false, message: 'Нет прав' };
+  }
+  if (!meeting.transcript) {
+    return { ok: false, message: 'Сначала дождитесь транскрипта' };
+  }
+
+  const project = await prisma.project.findUnique({
+    where: { key: projectKey },
+    select: {
+      id: true,
+      ownerId: true,
+      members: { select: { userId: true, role: true } },
+    },
+  });
+  if (!project) return { ok: false, message: 'Проект не найден' };
+  // The user must be able to manage that project — otherwise they
+  // could dump a stranger's meeting into someone else's workspace.
+  if (!canManageAssignments({ id: me.id, role: me.role }, project)) {
+    return { ok: false, message: 'Нет прав на этот проект' };
+  }
+
+  await prisma.meeting.update({
+    where: { id: meeting.id },
+    data: {
+      projectId: project.id,
+      // Flip status back so the worker's "already READY, skipping"
+      // guard doesn't short-circuit. The worker's transcript-reuse
+      // branch keeps the WhisperX cost off the table.
+      status: 'ENDED',
+      processingError: null,
+    },
+  });
+  await redis().publish(TRANSCRIBE_CHANNEL, JSON.stringify({ meetingId: meeting.id }));
+  revalidatePath(`/meetings/${meeting.id}`);
+  return { ok: true };
+}
+
+/**
  * Force-trigger transcription (e.g. if webhook missed). Re-publishes
  * the meeting id; worker is idempotent (status check).
  */

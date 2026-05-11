@@ -135,6 +135,12 @@ async function processMeetingInner(meetingId: string): Promise<void> {
           members: { select: { user: { select: { id: true, name: true } } } },
         },
       },
+      // Preload transcript to enable AI-only rerun: when a meeting that
+      // had no project gets one attached later, we skip the expensive
+      // WhisperX leg and just regenerate summary + task proposals.
+      transcript: {
+        select: { fullText: true, segments: true, language: true },
+      },
     },
   });
   if (!meeting) {
@@ -142,12 +148,17 @@ async function processMeetingInner(meetingId: string): Promise<void> {
     console.warn(`[transcribe-worker] meeting ${meetingId} gone`);
     return;
   }
+  // Distinguish a true "already done" run (status=READY, transcript
+  // exists) from an "AI-rerun" intent — caller flips status back to
+  // ENDED to indicate they want another pass at the AI layer only.
   if (meeting.status === 'READY') {
     // eslint-disable-next-line no-console
     console.log(`[transcribe-worker] meeting ${meetingId} already READY, skipping`);
     return;
   }
-  if (!meeting.recordingKey) {
+  const hasTranscript =
+    !!meeting.transcript && Array.isArray(meeting.transcript.segments);
+  if (!meeting.recordingKey && !hasTranscript) {
     // eslint-disable-next-line no-console
     console.warn(`[transcribe-worker] meeting ${meetingId} has no recordingKey, skipping`);
     return;
@@ -159,45 +170,60 @@ async function processMeetingInner(meetingId: string): Promise<void> {
   });
 
   try {
-    // 1. Download mp4 from MinIO.
-    // eslint-disable-next-line no-console
-    console.log(`[transcribe-worker] meeting=${meetingId} downloading ${meeting.recordingKey}`);
-    const mp4 = await downloadObject(meeting.recordingKey);
+    type Seg = { start: number; end: number; text: string; speaker?: string };
+    let segments: Seg[];
+    let fullText: string;
+    let transcriptLanguage: string | null = null;
 
-    // 2. ffmpeg → 16kHz mono WAV (Whisper-friendly).
-    const wav = await ffmpegToWav(mp4, 'mp4');
-    // eslint-disable-next-line no-console
-    console.log(`[transcribe-worker] meeting=${meetingId} wav size=${wav.length}b, calling whisperx`);
+    if (hasTranscript) {
+      // eslint-disable-next-line no-console
+      console.log(`[transcribe-worker] meeting=${meetingId} reusing existing transcript (AI rerun)`);
+      segments = meeting.transcript!.segments as unknown as Seg[];
+      fullText = meeting.transcript!.fullText;
+      transcriptLanguage = meeting.transcript!.language;
+    } else {
+      // 1. Download mp4 from MinIO.
+      // eslint-disable-next-line no-console
+      console.log(`[transcribe-worker] meeting=${meetingId} downloading ${meeting.recordingKey}`);
+      const mp4 = await downloadObject(meeting.recordingKey!);
 
-    // 3. WhisperX transcribe with diarization.
-    const transcript = await transcribeAudio({
-      audio: wav,
-      fileName: `meeting-${meetingId}.wav`,
-      language: 'ru',
-    });
-    const segments = transcript.segments;
-    const fullText = segments.map((s) => s.text).join(' ').trim();
-    // eslint-disable-next-line no-console
-    console.log(`[transcribe-worker] meeting=${meetingId} got ${segments.length} segments`);
+      // 2. ffmpeg → 16kHz mono WAV (Whisper-friendly).
+      const wav = await ffmpegToWav(mp4, 'mp4');
+      // eslint-disable-next-line no-console
+      console.log(`[transcribe-worker] meeting=${meetingId} wav size=${wav.length}b, calling whisperx`);
 
-    // 4. Persist transcript first — even if AI fails, PM has the text.
-    await prisma.meetingTranscript.upsert({
-      where: { meetingId },
-      create: {
-        meetingId,
-        fullText,
-        segments: segments as unknown as object,
-        language: transcript.language,
-        model: process.env.WHISPER_MODEL || 'large-v3',
-      },
-      update: {
-        fullText,
-        segments: segments as unknown as object,
-        language: transcript.language,
-        model: process.env.WHISPER_MODEL || 'large-v3',
-        summary: null,
-      },
-    });
+      // 3. WhisperX transcribe with diarization.
+      const transcript = await transcribeAudio({
+        audio: wav,
+        fileName: `meeting-${meetingId}.wav`,
+        language: 'ru',
+      });
+      segments = transcript.segments;
+      fullText = segments.map((s) => s.text).join(' ').trim();
+      transcriptLanguage = transcript.language;
+      // eslint-disable-next-line no-console
+      console.log(`[transcribe-worker] meeting=${meetingId} got ${segments.length} segments`);
+
+      // 4. Persist transcript first — even if AI fails, PM has the text.
+      await prisma.meetingTranscript.upsert({
+        where: { meetingId },
+        create: {
+          meetingId,
+          fullText,
+          segments: segments as unknown as object,
+          language: transcriptLanguage,
+          model: process.env.WHISPER_MODEL || 'large-v3',
+        },
+        update: {
+          fullText,
+          segments: segments as unknown as object,
+          language: transcriptLanguage,
+          model: process.env.WHISPER_MODEL || 'large-v3',
+          summary: null,
+        },
+      });
+    }
+    void transcriptLanguage;
 
     // 5. AI summary + tasks (best-effort).
     const project = meeting.project
