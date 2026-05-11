@@ -212,3 +212,133 @@ async function uniqueKey(
   }
   throw new Error(`could not allocate project key for bitrix group ${externalId}`);
 }
+
+export type SyncProjectMembersResult = {
+  /** Projects we touched (Bitrix-mirrored only). */
+  projectsScanned: number;
+  /** Distinct (project, bitrixUserId) pairs after sync. */
+  membershipsTotal: number;
+  /** New rows inserted on this run. */
+  membershipsAdded: number;
+  /** Rows removed because the user left the workgroup. */
+  membershipsRemoved: number;
+};
+
+/**
+ * Mirror Bitrix sonet_group membership into ProjectBitrixMember.
+ *
+ * Designed to be called AFTER `syncProjects` so the local Project
+ * rows already exist. For every Bitrix-mirrored Project we fetch
+ * `sonet_group.user.get` (returns all members of that group),
+ * resolve each Bitrix user to a local User by `bitrixUserId`, and
+ * upsert ProjectBitrixMember.
+ *
+ * Removals: any local membership row whose bitrixUserId is no longer
+ * present in the upstream group is deleted — the user really did
+ * leave the workgroup. Without this leg, our visibility list would
+ * drift wider than Bitrix's over time.
+ *
+ * Cost: one `sonet_group.user.get` per project per run. With ~50
+ * Bitrix groups and the client's built-in 3-RPS throttle that's
+ * ~17 seconds — fine for a nightly job, ok for an on-demand sync.
+ */
+export async function syncProjectBitrixMembers(
+  prisma: PrismaClient,
+  client: Bitrix24Client,
+  opts: { projectIds?: string[] } = {},
+): Promise<SyncProjectMembersResult> {
+  // Either an explicit subset (used by per-user sync to limit scope)
+  // or every Bitrix-mirrored Project in the DB.
+  const projects = await prisma.project.findMany({
+    where: {
+      externalSource: 'bitrix24',
+      externalId: { not: null },
+      ...(opts.projectIds ? { id: { in: opts.projectIds } } : {}),
+    },
+    select: { id: true, externalId: true },
+  });
+
+  const stats: SyncProjectMembersResult = {
+    projectsScanned: projects.length,
+    membershipsTotal: 0,
+    membershipsAdded: 0,
+    membershipsRemoved: 0,
+  };
+  if (projects.length === 0) return stats;
+
+  // Pre-load every User with a bitrixUserId so we can resolve in
+  // memory without N+1 lookups per member.
+  const linkedUsers = await prisma.user.findMany({
+    where: { bitrixUserId: { not: null } },
+    select: { id: true, bitrixUserId: true },
+  });
+  const userIdByBitrixId = new Map(
+    linkedUsers
+      .filter((u): u is typeof u & { bitrixUserId: string } => !!u.bitrixUserId)
+      .map((u) => [u.bitrixUserId, u.id]),
+  );
+
+  type BxGroupUser = { USER_ID: string; ROLE?: string };
+
+  for (const p of projects) {
+    if (!p.externalId) continue;
+    let members: BxGroupUser[];
+    try {
+      members = await client.all<BxGroupUser>('sonet_group.user.get', {
+        ID: p.externalId,
+      });
+    } catch (e) {
+      // Don't fail the whole run on one bad group — log and skip.
+      // eslint-disable-next-line no-console
+      console.warn(`[bitrix:syncMembers] sonet_group.user.get failed for group ${p.externalId}:`, e);
+      continue;
+    }
+
+    // Existing rows for this project.
+    const existing = await prisma.projectBitrixMember.findMany({
+      where: { projectId: p.id },
+      select: { id: true, bitrixUserId: true },
+    });
+    const existingByBitrixId = new Map(existing.map((r) => [r.bitrixUserId, r.id]));
+    const upstreamBitrixIds = new Set(members.map((m) => String(m.USER_ID)));
+
+    // Upsert each upstream member.
+    for (const m of members) {
+      const bxId = String(m.USER_ID);
+      if (!bxId) continue;
+      const localUserId = userIdByBitrixId.get(bxId) ?? null;
+      if (existingByBitrixId.has(bxId)) {
+        // Re-link userId / refresh role on every run — cheap and
+        // catches the case where the local User was created/linked
+        // after the previous sync.
+        await prisma.projectBitrixMember.update({
+          where: {
+            projectId_bitrixUserId: { projectId: p.id, bitrixUserId: bxId },
+          },
+          data: { userId: localUserId, role: m.ROLE ?? null, syncedAt: new Date() },
+        });
+      } else {
+        await prisma.projectBitrixMember.create({
+          data: {
+            projectId: p.id,
+            bitrixUserId: bxId,
+            userId: localUserId,
+            role: m.ROLE ?? null,
+          },
+        });
+        stats.membershipsAdded++;
+      }
+      stats.membershipsTotal++;
+    }
+
+    // Remove rows for users who left the workgroup upstream.
+    const toRemove = existing.filter((r) => !upstreamBitrixIds.has(r.bitrixUserId));
+    if (toRemove.length) {
+      await prisma.projectBitrixMember.deleteMany({
+        where: { id: { in: toRemove.map((r) => r.id) } },
+      });
+      stats.membershipsRemoved += toRemove.length;
+    }
+  }
+  return stats;
+}

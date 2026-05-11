@@ -52,6 +52,9 @@ model User {
   agentDevices      AgentDevice[]
   ownedProjects     Project[]            @relation("ProjectOwner")
   memberProjects    ProjectMember[]
+  /// Bitrix-mirror project memberships. Used by visibility checks
+  /// alongside task stakes (see ProjectBitrixMember).
+  bitrixMemberProjects ProjectBitrixMember[]
   assignedTasks     Task[]               @relation("TaskAssignee")
   createdTasks      Task[]               @relation("TaskCreator")
   reviewerTasks     Task[]               @relation("TaskReviewer")
@@ -295,6 +298,10 @@ model Project {
   archivedAt    DateTime?
 
   members       ProjectMember[]
+  /// Mirrored membership from Bitrix sonet_group. Drives visibility
+  /// (see ProjectBitrixMember docstring) — a user appears here as
+  /// soon as Bitrix sync sees them in the workgroup.
+  bitrixMembers ProjectBitrixMember[]
   tasks         Task[]
   integrations  ProjectIntegration[]
   tags          Tag[]
@@ -487,9 +494,45 @@ model ProjectMember {
   user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   role        MemberRole  @default(CONTRIBUTOR)
   addedAt     DateTime    @default(now())
-  
+
   @@unique([projectId, userId])
   @@index([userId])
+}
+
+/// Membership mirrored from the upstream Bitrix sonet_group.
+///
+/// Separate from ProjectMember on purpose:
+///   - ProjectMember is *our* internal team-role assignment (LEAD,
+///     CONTRIBUTOR, REVIEWER, OBSERVER) and may be edited inside
+///     giper-pm independently of Bitrix.
+///   - ProjectBitrixMember is the read-only mirror of who is actually
+///     in the Bitrix workgroup. It's the source of truth for
+///     visibility decisions ("can this user see the project") so a
+///     user added to the Bitrix group sees the project the moment we
+///     sync, even before they have a single task assigned to them.
+///
+/// We store bitrixUserId raw; userId is the local link when we can
+/// resolve them (most users do have it via syncUsers). Rows with a
+/// null userId still help backfill once the user is created.
+model ProjectBitrixMember {
+  id            String   @id @default(cuid())
+  projectId     String
+  project       Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  bitrixUserId  String
+  /// Resolved local user. Nullable because the upstream Bitrix
+  /// member may not yet exist as a giper-pm user (long-tail of
+  /// external contractors etc). Sync re-resolves on every run.
+  userId        String?
+  user          User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  /// "A" = owner, "E" = moderator, "K" = user, "B" = ban (per Bitrix).
+  /// We don't enforce semantics here — just mirror so future filters
+  /// can use the role if needed.
+  role          String?
+  syncedAt      DateTime @default(now())
+
+  @@unique([projectId, bitrixUserId])
+  @@index([userId])
+  @@index([projectId])
 }
 
 enum MemberRole {

@@ -17,12 +17,19 @@ export type ProjectForPerm = {
   members?: { userId: string; role: MemberRole }[];
   /**
    * Optional precomputed signal that *this user* has at least one task
-   * (as assignee, creator, or accomplice) in the project. Bitrix-mirror
-   * projects don't have ProjectMember rows for our users, but everyone
-   * who got a task assigned in Bitrix should still see the project.
-   * Callers fill this from a single COUNT query alongside the fetch.
+   * (as creator/assignee/reviewer/co-assignee/watcher) in the project.
+   * Catches manually-created projects + edge cases where Bitrix
+   * membership sync is lagging behind a task assignment.
    */
   hasTaskForCurrentUser?: boolean;
+  /**
+   * Optional precomputed signal that *this user* is mirrored in the
+   * Bitrix sonet_group for this project (ProjectBitrixMember row).
+   * Primary source of truth for visibility on Bitrix-mirrored
+   * projects — a user sees the project the moment Bitrix sync adds
+   * them, even before any task is assigned.
+   */
+  isBitrixMemberForCurrentUser?: boolean;
 };
 
 export type TaskForPerm = {
@@ -70,10 +77,17 @@ export function canManageAssignments(
 }
 
 /**
- * View project: visibility is per-stake for EVERYONE (incl. ADMIN/PM).
- * A user must be the owner, an explicit member, OR own at least one
- * task in the project (the last leg covers Bitrix-mirror groups
- * where membership lives in task assignments rather than ProjectMember).
+ * View project — STRICT per-stake for everyone (incl. ADMIN/PM).
+ *
+ * A user sees a project iff ANY of these is true:
+ *   - they are the project owner (covers freshly-created projects)
+ *   - they are a ProjectMember (internal team-role assignment)
+ *   - they are mirrored in the Bitrix sonet_group for this project
+ *     (`isBitrixMemberForCurrentUser`) — primary signal for Bitrix-
+ *     mirrored projects
+ *   - they have a task stake in the project
+ *     (`hasTaskForCurrentUser`) — backup signal that covers manually-
+ *     created projects and Bitrix-sync lag
  *
  * Admin-grade access (audit log, user management, global settings)
  * goes through `canSeeSettings` and friends — not here.
@@ -81,6 +95,7 @@ export function canManageAssignments(
 export function canViewProject(user: SessionUser, project: ProjectForPerm): boolean {
   if (project.ownerId === user.id) return true;
   if (project.members?.some((m) => m.userId === user.id)) return true;
+  if (project.isBitrixMemberForCurrentUser) return true;
   if (project.hasTaskForCurrentUser) return true;
   return false;
 }

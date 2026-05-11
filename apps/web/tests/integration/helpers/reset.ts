@@ -54,6 +54,7 @@ const TABLES_IN_DELETE_ORDER = [
   // Task references Project + User.
   'Task',
   'ProjectMember',
+  'ProjectBitrixMember',
   'Project',
   // PM/team graph.
   'PmTeamMember',

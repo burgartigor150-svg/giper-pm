@@ -4,12 +4,16 @@ import type { SessionUser } from '../permissions';
 
 export type ListFilter = {
   /**
-   * 'mine' (default) → projects where MY TEAM is doing the work,
-   *                    not just any project where I'm a stake-holder
-   *                    on a single task. The team gate matches the
-   *                    calendar's behaviour: assignee ∈ {me, my
-   *                    PmTeamMember rows}.
-   * 'all'           → admin/PM only — every visible project.
+   * Visibility scope:
+   *
+   *   'mine' (default for everyone) — projects the caller is on:
+   *     Bitrix sonet_group member OR has a task stake (creator /
+   *     assignee / reviewer / co-assignee / watcher). Strict —
+   *     applied to ADMIN/PM too. Empty workgroups are hidden.
+   *
+   *   'all' (ADMIN/PM only) — the entire org. Used by the project
+   *     directory / admin tooling, NOT the default list view.
+   *     Anyone else asking for 'all' silently falls back to 'mine'.
    */
   scope?: 'mine' | 'all';
   /** Filter by exact status. If omitted, archived are excluded. */
@@ -17,30 +21,6 @@ export type ListFilter = {
   /** Include archived in result (default false). */
   includeArchived?: boolean;
 };
-
-async function resolveTeammateIds(uid: string): Promise<string[]> {
-  const [asPm, asMember] = await Promise.all([
-    prisma.pmTeamMember.findMany({
-      where: { pmId: uid },
-      select: { memberId: true },
-    }),
-    prisma.pmTeamMember.findMany({
-      where: { memberId: uid },
-      select: { pmId: true },
-    }),
-  ]);
-  const ids = new Set<string>([uid]);
-  for (const r of asPm) ids.add(r.memberId);
-  for (const r of asMember) ids.add(r.pmId);
-  if (asMember.length) {
-    const peers = await prisma.pmTeamMember.findMany({
-      where: { pmId: { in: asMember.map((r) => r.pmId) } },
-      select: { memberId: true },
-    });
-    for (const r of peers) ids.add(r.memberId);
-  }
-  return [...ids];
-}
 
 export async function listProjectsForUser(user: SessionUser, filter: ListFilter = {}) {
   const where: Prisma.ProjectWhereInput = {};
@@ -50,19 +30,42 @@ export async function listProjectsForUser(user: SessionUser, filter: ListFilter 
   if (wantAll) {
     // No visibility filter — admin/PM browsing the whole org.
   } else {
-    const teammateIds = await resolveTeammateIds(user.id);
-    // Project must have at least one task whose assignee is on my
-    // team. Empty Bitrix-mirrored workgroups (owner=me but no tasks)
-    // are intentionally HIDDEN — "если в проекте 0 задач, мне нечего
-    // там делать". Owning the project alone isn't enough.
-    where.tasks = {
-      some: {
-        OR: [
-          { assigneeId: { in: teammateIds } },
-          { assigneeId: null, creatorId: user.id },
-        ],
+    // Visibility = (Bitrix sonet_group member) OR (task stake).
+    //
+    // Bitrix-mirrored projects carry their membership in
+    // ProjectBitrixMember (synced from sonet_group.users.get). The
+    // moment Bitrix adds someone to the workgroup, we want them to
+    // see the project — even before any task is assigned. That's the
+    // "никто не должен видеть проект если не состоит в Битриксе"
+    // requirement.
+    //
+    // Task stake is the second leg: a user creator/assignee/
+    // reviewer/co-assignee/watcher on any task in the project also
+    // sees it. This covers manually-created (non-Bitrix) projects
+    // and edge cases where Bitrix membership sync is lagging behind
+    // a task assignment.
+    //
+    // Strict for everyone, including ADMIN/PM — no role bypass.
+    // Admin-grade access (audit log, settings) is gated separately.
+    where.OR = [
+      // Bitrix-group membership: either directly resolved (userId)
+      // or matched against a Bitrix id we already know is theirs.
+      { bitrixMembers: { some: { userId: user.id } } },
+      // Task stake.
+      {
+        tasks: {
+          some: {
+            OR: [
+              { creatorId: user.id },
+              { assigneeId: user.id },
+              { reviewerId: user.id },
+              { assignments: { some: { userId: user.id } } },
+              { watchers: { some: { userId: user.id } } },
+            ],
+          },
+        },
       },
-    };
+    ];
   }
 
   // Status filter

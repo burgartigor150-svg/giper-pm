@@ -39,20 +39,36 @@ export async function getProject(projectKey: string, user: SessionUser) {
   });
   if (!project) throw new DomainError('NOT_FOUND', 404, 'Проект не найден');
 
-  // Implicit-membership probe: a single COUNT to know whether the
-  // current user has any task in this project (Bitrix-mirror groups
-  // typically have no ProjectMember rows for our users).
-  const userTaskCount = await prisma.task.count({
-    where: {
-      projectId: project.id,
-      OR: [
-        { creatorId: user.id },
-        { assigneeId: user.id },
-        { assignments: { some: { userId: user.id } } },
-      ],
-    },
-  });
-  const projectForPerm = { ...project, hasTaskForCurrentUser: userTaskCount > 0 };
+  // Visibility probes — two cheap parallel queries:
+  //  1. Bitrix-group membership: synced from sonet_group.users.get.
+  //     This is the primary source of truth for who can see a
+  //     Bitrix-mirrored project. A user in the group sees the
+  //     project even before any task is assigned to them.
+  //  2. Task stake: catches manually-created projects and edge
+  //     cases where Bitrix membership sync is behind.
+  const [userTaskCount, bitrixMembership] = await Promise.all([
+    prisma.task.count({
+      where: {
+        projectId: project.id,
+        OR: [
+          { creatorId: user.id },
+          { assigneeId: user.id },
+          { reviewerId: user.id },
+          { assignments: { some: { userId: user.id } } },
+          { watchers: { some: { userId: user.id } } },
+        ],
+      },
+    }),
+    prisma.projectBitrixMember.findFirst({
+      where: { projectId: project.id, userId: user.id },
+      select: { id: true },
+    }),
+  ]);
+  const projectForPerm = {
+    ...project,
+    hasTaskForCurrentUser: userTaskCount > 0,
+    isBitrixMemberForCurrentUser: !!bitrixMembership,
+  };
   if (!canViewProject(user, projectForPerm)) {
     throw new DomainError('INSUFFICIENT_PERMISSIONS', 403);
   }

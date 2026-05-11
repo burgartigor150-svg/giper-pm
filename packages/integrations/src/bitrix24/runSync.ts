@@ -1,7 +1,12 @@
 import type { PrismaClient } from '@giper/db';
 import { Bitrix24Client } from './client';
 import { syncUsers, type SyncUsersResult } from './syncUsers';
-import { syncProjects, type SyncProjectsResult } from './syncProjects';
+import {
+  syncProjects,
+  syncProjectBitrixMembers,
+  type SyncProjectsResult,
+  type SyncProjectMembersResult,
+} from './syncProjects';
 import { syncTasks, type SyncTasksResult } from './syncTasks';
 
 export type RunSyncResult = {
@@ -10,6 +15,8 @@ export type RunSyncResult = {
   durationMs: number;
   users: SyncUsersResult;
   projects: SyncProjectsResult;
+  /** sonet_group → ProjectBitrixMember mirror stats. */
+  members: SyncProjectMembersResult;
   tasks: SyncTasksResult;
   ok: boolean;
   error?: string;
@@ -72,6 +79,12 @@ export async function runBitrix24Sync(
     updated: 0,
     skipped: 0,
   };
+  let members: SyncProjectMembersResult = {
+    projectsScanned: 0,
+    membershipsTotal: 0,
+    membershipsAdded: 0,
+    membershipsRemoved: 0,
+  };
   let tasks: SyncTasksResult = {
     totalSeen: 0,
     created: 0,
@@ -116,6 +129,20 @@ export async function runBitrix24Sync(
       projects = await syncProjects(prisma, client);
       tasks = await syncTasks(prisma, client, { since: opts.since ?? null });
     }
+
+    // Always mirror sonet_group membership after projects are
+    // resolved. This is the source of truth for project visibility —
+    // skipping it means users keep losing/gaining the wrong
+    // workgroups in the UI.
+    try {
+      members = await syncProjectBitrixMembers(prisma, client);
+    } catch (e) {
+      // Don't fail the whole run on membership sync — it's an
+      // additive sync, the next run will catch it up. But surface
+      // the error in the log.
+      // eslint-disable-next-line no-console
+      console.warn('[bitrix:runSync] syncProjectBitrixMembers failed:', e);
+    }
   } catch (e) {
     ok = false;
     error = e instanceof Error ? e.message : String(e);
@@ -155,7 +182,7 @@ export async function runBitrix24Sync(
     },
   });
 
-  return { startedAt, finishedAt, durationMs, users, projects, tasks, ok, error };
+  return { startedAt, finishedAt, durationMs, users, projects, members, tasks, ok, error };
 }
 
 /**
