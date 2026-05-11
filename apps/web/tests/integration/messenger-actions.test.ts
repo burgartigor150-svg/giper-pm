@@ -175,7 +175,7 @@ describe('inviteToChannelAction', () => {
     mockMe.id = owner.id;
     const r = await inviteToChannelAction(channelId, [newbie.id]);
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.data.added).toBe(1);
+    if (r.ok) expect(r.data?.added).toBe(1);
     const row = await prisma.channelMember.findUnique({
       where: { channelId_userId: { channelId, userId: newbie.id } },
     });
@@ -200,7 +200,7 @@ describe('inviteToChannelAction', () => {
     mockMe.id = owner.id;
     const r = await inviteToChannelAction(channelId, [seed.id]);
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.data.added).toBe(0);
+    if (r.ok) expect(r.data?.added).toBe(0);
     const stillAdmin = await prisma.channelMember.findUnique({
       where: { channelId_userId: { channelId, userId: seed.id } },
     });

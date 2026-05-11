@@ -94,9 +94,18 @@ export async function getSignedDownloadUrl(opts: {
   return getSignedUrl(getClient(), cmd, { expiresIn: opts.ttlSeconds ?? 300 });
 }
 
-export async function getObjectStream(key: string) {
+export async function getObjectStream(
+  key: string,
+  opts: { range?: string } = {},
+) {
   const res = await getClient().send(
-    new GetObjectCommand({ Bucket: bucket(), Key: key }),
+    new GetObjectCommand({
+      Bucket: bucket(),
+      Key: key,
+      // S3 forwards Range natively; pass through unmodified so <video>
+      // seek works for large attachments (video-notes etc.).
+      ...(opts.range ? { Range: opts.range } : {}),
+    }),
   );
   return res;
 }
@@ -123,4 +132,22 @@ export function buildAttachmentKey(taskId: string, filename: string): string {
     .replace(/[^\w.\-]+/g, '_')
     .slice(0, 80);
   return `tasks/${taskId}/${yyyy}/${mm}/${rand}-${safe}`;
+}
+
+/**
+ * Key layout for messenger video-notes (and any future audio-notes).
+ * Partitioned by channel + year-month so a per-channel data export
+ * stays cheap, and S3 list-prefix scans on hot channels don't hit
+ * pagination limits.
+ *
+ * Extension is chosen by the caller from the browser-recorded MIME
+ * type — Safari ships .mp4, Chrome/Firefox ship .webm by default;
+ * we don't transcode so the original container is preserved.
+ */
+export function buildVideoNoteKey(channelId: string, ext: 'webm' | 'mp4'): string {
+  const now = new Date();
+  const yyyy = now.getUTCFullYear();
+  const mm = String(now.getUTCMonth() + 1).padStart(2, '0');
+  const rand = Math.random().toString(36).slice(2, 12);
+  return `messages/${channelId}/${yyyy}/${mm}/video-note-${rand}.${ext}`;
 }

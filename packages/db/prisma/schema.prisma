@@ -1236,9 +1236,30 @@ model MessageAttachment {
   sizeBytes   Int
   // S3-compatible (MinIO in prod) object key.
   storageKey  String
+  // Discriminator: FILE is the generic attachment, VIDEO_NOTE is the
+  // round-mask short video recorded inline in the composer.
+  // AUDIO_NOTE / IMAGE / etc. will land here as we add them.
+  kind        MessageAttachmentKind @default(FILE)
+  // Only set for VIDEO_NOTE / AUDIO_NOTE: duration in whole seconds.
+  // Hard-capped at 60 at write time so the client can't smuggle a
+  // 2-hour "video note".
+  durationSec Int?
+  /// Pixel dimensions for visual attachments (VIDEO_NOTE/IMAGE).
+  /// Used by the player to set aspect-ratio so the layout doesn't
+  /// shift after the first frame loads.
+  width       Int?
+  height      Int?
   uploadedAt  DateTime @default(now())
 
   @@index([messageId])
+  @@index([kind])
+}
+
+enum MessageAttachmentKind {
+  FILE
+  VIDEO_NOTE
+  AUDIO_NOTE
+  IMAGE
 }
 
 enum MessageSource {

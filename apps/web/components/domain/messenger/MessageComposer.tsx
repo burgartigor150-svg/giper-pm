@@ -7,10 +7,11 @@ import {
   useTransition,
   type KeyboardEvent,
 } from 'react';
-import { Send } from 'lucide-react';
+import { Send, Camera } from 'lucide-react';
 import { Avatar } from '@giper/ui/components/Avatar';
 import { Button } from '@giper/ui/components/Button';
 import { searchUsersForMention } from '@/actions/messenger';
+import { VideoNoteRecorder } from './VideoNoteRecorder';
 
 type MentionUser = {
   id: string;
@@ -23,6 +24,17 @@ type Props = {
   placeholder: string;
   disabled?: boolean;
   onSend: (body: string) => Promise<void> | void;
+  /**
+   * Context required by attachments-style sub-flows (currently just
+   * video-notes). When omitted the camera button is hidden — DM
+   * /redirect pages and other "use the composer as text input"
+   * call-sites pass only `onSend` and skip these.
+   */
+  channelId?: string;
+  parentId?: string | null;
+  /** Called after a video-note finishes uploading. Same intent as
+   *  `onSend` returning — caller revalidates / refreshes. */
+  onVideoNoteSent?: () => void;
 };
 
 /**
@@ -32,9 +44,17 @@ type Props = {
  * replaces "@<filter>" with "@<userId> " (the canonical mention token
  * understood by the server-side parser and the renderer).
  */
-export function MessageComposer({ placeholder, disabled, onSend }: Props) {
+export function MessageComposer({
+  placeholder,
+  disabled,
+  onSend,
+  channelId,
+  parentId = null,
+  onVideoNoteSent,
+}: Props) {
   const [draft, setDraft] = useState('');
   const [pending, startTransition] = useTransition();
+  const [recorderOpen, setRecorderOpen] = useState(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
 
   const [mentionState, setMentionState] = useState<{
@@ -163,6 +183,23 @@ export function MessageComposer({ placeholder, disabled, onSend }: Props) {
     });
   }
 
+  // Recorder takes over the whole composer area while active. Once
+  // the upload finishes we tear it down and bubble the "refresh"
+  // signal up so the chat list re-renders the new message.
+  if (recorderOpen && channelId) {
+    return (
+      <VideoNoteRecorder
+        channelId={channelId}
+        parentId={parentId}
+        onSent={() => {
+          setRecorderOpen(false);
+          onVideoNoteSent?.();
+        }}
+        onClose={() => setRecorderOpen(false)}
+      />
+    );
+  }
+
   return (
     <form
       onSubmit={(e) => {
@@ -213,12 +250,25 @@ export function MessageComposer({ placeholder, disabled, onSend }: Props) {
           </div>
         ) : null}
       </div>
+      {channelId ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          disabled={pending || disabled}
+          onClick={() => setRecorderOpen(true)}
+          aria-label="Записать видеосообщение"
+          title="Видеосообщение (до 60 сек)"
+        >
+          <Camera className="size-4" />
+        </Button>
+      ) : null}
       <Button
         type="submit"
         disabled={pending || disabled || !draft.trim()}
         size="icon"
       >
-        <Send className="h-4 w-4" />
+        <Send className="size-4" />
       </Button>
     </form>
   );

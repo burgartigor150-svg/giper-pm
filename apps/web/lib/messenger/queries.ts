@@ -71,6 +71,21 @@ export async function loadChannelMessages(
       mentions: {
         select: { userId: true },
       },
+      // Attachments — video-notes/files/etc. Filtered to non-deleted
+      // (cascade-on-message-delete handles deletion; we don't have
+      // a per-attachment soft-delete column).
+      attachments: {
+        select: {
+          id: true,
+          kind: true,
+          mimeType: true,
+          sizeBytes: true,
+          durationSec: true,
+          width: true,
+          height: true,
+          filename: true,
+        },
+      },
     },
   });
 

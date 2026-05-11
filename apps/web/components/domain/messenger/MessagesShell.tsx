@@ -22,6 +22,7 @@ import { MessageComposer } from './MessageComposer';
 import { TaskPreviewCard } from './TaskPreviewCard';
 import { CreateChannelDialog } from './CreateChannelDialog';
 import { ChannelHeader } from './ChannelHeader';
+import { VideoNotePlayer } from './VideoNotePlayer';
 import { MessageSquareReply } from 'lucide-react';
 
 type ChannelKind = 'PUBLIC' | 'PRIVATE' | 'DM' | 'GROUP_DM';
@@ -34,6 +35,17 @@ type ChannelLite = {
   projectId: string | null;
 };
 
+type MessageAttachmentLite = {
+  id: string;
+  kind: 'FILE' | 'VIDEO_NOTE' | 'AUDIO_NOTE' | 'IMAGE';
+  mimeType: string;
+  sizeBytes: number;
+  durationSec: number | null;
+  width: number | null;
+  height: number | null;
+  filename: string;
+};
+
 type MessageRow = {
   id: string;
   body: string;
@@ -44,6 +56,7 @@ type MessageRow = {
   editedAt: Date | null;
   createdAt: Date;
   reactions: Array<{ userId: string; emoji: string }>;
+  attachments?: MessageAttachmentLite[];
 };
 
 type MentionUser = { id: string; name: string };
@@ -217,6 +230,8 @@ export function MessagesShell({
             <div className="border-t border-border bg-background p-3">
               <MessageComposer
                 placeholder="Написать сообщение… (@ — упомянуть пользователя, Enter — отправить)"
+                channelId={activeChannelId ?? undefined}
+                onVideoNoteSent={() => router.refresh()}
                 onSend={async (body) => {
                   if (!activeChannelId) return;
                   // Optimistic append.
@@ -346,9 +361,41 @@ function MessageRow({
             <span className="text-xs text-muted-foreground">(изм.)</span>
           ) : null}
         </div>
-        <div className="mt-0.5 whitespace-pre-wrap break-words text-sm">
-          {renderRichText(m.body, { mentions: mentionsMap })}
-        </div>
+        {m.body ? (
+          <div className="mt-0.5 whitespace-pre-wrap break-words text-sm">
+            {renderRichText(m.body, { mentions: mentionsMap })}
+          </div>
+        ) : null}
+        {/* Attachments above task previews — video-notes are the
+            primary content of their message, not an annotation. */}
+        {m.attachments && m.attachments.length > 0 ? (
+          <div className="mt-1 flex flex-wrap gap-2">
+            {m.attachments.map((a) => {
+              if (a.kind === 'VIDEO_NOTE') {
+                return (
+                  <VideoNotePlayer
+                    key={a.id}
+                    attachmentId={a.id}
+                    durationSec={a.durationSec}
+                  />
+                );
+              }
+              // FILE / AUDIO_NOTE / IMAGE → generic download link
+              // for now. Specialised renderers can land later.
+              return (
+                <a
+                  key={a.id}
+                  href={`/api/messages/attachments/${a.id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 rounded-md border border-border bg-muted/40 px-3 py-1.5 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  📎 {a.filename}
+                </a>
+              );
+            })}
+          </div>
+        ) : null}
         {refs.length > 0 ? (
           <div className="mt-1 flex flex-col gap-1">
             {refs.map((r) => {

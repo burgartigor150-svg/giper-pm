@@ -12,6 +12,18 @@ import type { TaskPreview } from '@/lib/tasks/loadTaskPreviews';
 import { MessageReactions } from './MessageReactions';
 import { MessageComposer } from './MessageComposer';
 import { TaskPreviewCard } from './TaskPreviewCard';
+import { VideoNotePlayer } from './VideoNotePlayer';
+
+type MessageAttachmentLite = {
+  id: string;
+  kind: 'FILE' | 'VIDEO_NOTE' | 'AUDIO_NOTE' | 'IMAGE';
+  mimeType: string;
+  sizeBytes: number;
+  durationSec: number | null;
+  width: number | null;
+  height: number | null;
+  filename: string;
+};
 
 type MessageRow = {
   id: string;
@@ -23,6 +35,7 @@ type MessageRow = {
   editedAt: Date | null;
   createdAt: Date;
   reactions: Array<{ userId: string; emoji: string }>;
+  attachments?: MessageAttachmentLite[];
 };
 
 type Props = {
@@ -123,6 +136,9 @@ export function ThreadPane({ rootMessageId, meId, onClose }: Props) {
         <MessageComposer
           placeholder="Ответить в треде… (@ — упомянуть)"
           disabled={!data}
+          channelId={data?.channelId}
+          parentId={rootMessageId}
+          onVideoNoteSent={reload}
           onSend={async (body) => {
             if (!data) return;
             const res = await postMessageAction({
@@ -173,9 +189,37 @@ function ThreadRow({
             </span>
           ) : null}
         </div>
-        <div className="mt-0.5 whitespace-pre-wrap break-words text-sm">
-          {renderRichText(m.body, { mentions: mentionsMap })}
-        </div>
+        {m.body ? (
+          <div className="mt-0.5 whitespace-pre-wrap break-words text-sm">
+            {renderRichText(m.body, { mentions: mentionsMap })}
+          </div>
+        ) : null}
+        {m.attachments && m.attachments.length > 0 ? (
+          <div className="mt-1 flex flex-wrap gap-2">
+            {m.attachments.map((a) => {
+              if (a.kind === 'VIDEO_NOTE') {
+                return (
+                  <VideoNotePlayer
+                    key={a.id}
+                    attachmentId={a.id}
+                    durationSec={a.durationSec}
+                  />
+                );
+              }
+              return (
+                <a
+                  key={a.id}
+                  href={`/api/messages/attachments/${a.id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 rounded-md border border-border bg-muted/40 px-3 py-1.5 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  📎 {a.filename}
+                </a>
+              );
+            })}
+          </div>
+        ) : null}
         {refs.length > 0 ? (
           <div className="mt-1 flex flex-col gap-1">
             {refs.map((r) => {
