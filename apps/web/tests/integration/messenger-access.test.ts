@@ -16,7 +16,7 @@ import { makeUser } from './helpers/factories';
 
 let chSeq = 0;
 async function makeChannel(args: {
-  kind: 'PUBLIC' | 'PRIVATE' | 'DM' | 'GROUP_DM';
+  kind: 'PUBLIC' | 'PRIVATE' | 'DM' | 'GROUP_DM' | 'BROADCAST';
   isArchived?: boolean;
   createdById: string;
   slug?: string;
@@ -140,5 +140,52 @@ describe('resolveChannelAccess — edge cases', () => {
   it('returns null for an unknown channel', async () => {
     const u = await makeUser();
     expect(await resolveChannelAccess('00000000-0000-0000-0000-000000000000', u.id)).toBeNull();
+  });
+});
+
+describe('resolveChannelAccess — BROADCAST', () => {
+  it('anyone can read; non-admin cannot post', async () => {
+    const owner = await makeUser();
+    const reader = await makeUser();
+    const ch = await makeChannel({ kind: 'BROADCAST', createdById: owner.id });
+    const a = await resolveChannelAccess(ch.id, reader.id);
+    expect(a?.kind).toBe('BROADCAST');
+    expect(a?.canRead).toBe(true);
+    expect(a?.canPost).toBe(false);
+  });
+
+  it('subscribed MEMBER still cannot post', async () => {
+    const owner = await makeUser();
+    const reader = await makeUser();
+    const ch = await makeChannel({ kind: 'BROADCAST', createdById: owner.id });
+    await ensureMembership(ch.id, reader.id);
+    const a = await resolveChannelAccess(ch.id, reader.id);
+    expect(a?.isMember).toBe(true);
+    expect(a?.role).toBe('MEMBER');
+    expect(a?.canPost).toBe(false);
+  });
+
+  it('ADMIN member can post', async () => {
+    const owner = await makeUser();
+    const admin = await makeUser();
+    const ch = await makeChannel({ kind: 'BROADCAST', createdById: owner.id });
+    await prisma.channelMember.create({
+      data: { channelId: ch.id, userId: admin.id, role: 'ADMIN' },
+    });
+    const a = await resolveChannelAccess(ch.id, admin.id);
+    expect(a?.canPost).toBe(true);
+  });
+
+  it('archived BROADCAST: nobody posts; non-member loses read', async () => {
+    const owner = await makeUser();
+    const reader = await makeUser();
+    const ch = await makeChannel({
+      kind: 'BROADCAST',
+      createdById: owner.id,
+      isArchived: true,
+    });
+    const a = await resolveChannelAccess(ch.id, reader.id);
+    expect(a?.canRead).toBe(false);
+    expect(a?.canPost).toBe(false);
   });
 });

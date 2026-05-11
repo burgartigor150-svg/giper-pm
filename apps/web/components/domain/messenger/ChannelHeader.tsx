@@ -16,6 +16,7 @@ import {
   Link as LinkIcon,
   Copy,
   Trash2,
+  Megaphone,
 } from 'lucide-react';
 import { Avatar } from '@giper/ui/components/Avatar';
 import {
@@ -34,7 +35,7 @@ type ChannelLite = {
   id: string;
   name: string;
   slug: string;
-  kind: 'PUBLIC' | 'PRIVATE' | 'DM' | 'GROUP_DM';
+  kind: 'PUBLIC' | 'PRIVATE' | 'DM' | 'GROUP_DM' | 'BROADCAST';
 };
 
 type ChannelMember = {
@@ -74,9 +75,11 @@ export function ChannelHeader({
   const Icon =
     channel.kind === 'PRIVATE'
       ? Lock
-      : channel.kind === 'DM' || channel.kind === 'GROUP_DM'
-        ? Users
-        : Hash;
+      : channel.kind === 'BROADCAST'
+        ? Megaphone
+        : channel.kind === 'DM' || channel.kind === 'GROUP_DM'
+          ? Users
+          : Hash;
   const isDm = channel.kind === 'DM' || channel.kind === 'GROUP_DM';
 
   function call() {
@@ -168,7 +171,7 @@ function MembersPanel({
   onClose,
 }: {
   channelId: string;
-  channelKind: 'PUBLIC' | 'PRIVATE' | 'DM' | 'GROUP_DM';
+  channelKind: 'PUBLIC' | 'PRIVATE' | 'DM' | 'GROUP_DM' | 'BROADCAST';
   onClose: () => void;
 }) {
   const [data, setData] = useState<{ members: ChannelMember[]; canManage: boolean } | null>(null);

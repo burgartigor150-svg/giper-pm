@@ -1209,6 +1209,7 @@ enum ChannelKind {
   PRIVATE     // invite-only
   DM          // exactly 2 members; auto-created on first DM
   GROUP_DM    // 3+ members, named optionally
+  BROADCAST   // org-wide readable, only channel ADMINs may post (announcements)
 }
 
 model ChannelMember {

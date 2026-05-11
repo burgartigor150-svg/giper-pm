@@ -3,12 +3,16 @@ import { prisma } from '@giper/db';
 /**
  * Permission helpers for messenger. Visibility rules:
  *   PUBLIC      — anyone in the org may read/post
+ *   BROADCAST   — anyone in the org may read; only channel ADMINs may post
  *   PRIVATE     — only ChannelMember
  *   DM/GROUP_DM — only ChannelMember
  *
  * Posting also requires membership for PRIVATE/DM/GROUP_DM. For PUBLIC
  * we lazily auto-join the user when they post for the first time —
  * keeps the UX of "type and send" without an explicit Join click.
+ * For BROADCAST, post is admin-only; we DON'T auto-join non-admins on
+ * post attempts because they have nothing to post (and we want a clear
+ * "no permission" error rather than a silent membership upgrade).
  */
 
 export type ChannelAccess = {
@@ -19,7 +23,7 @@ export type ChannelAccess = {
   /** ADMIN / MEMBER — null when not a member. */
   role: 'ADMIN' | 'MEMBER' | null;
   isMuted: boolean;
-  kind: 'PUBLIC' | 'PRIVATE' | 'DM' | 'GROUP_DM';
+  kind: 'PUBLIC' | 'PRIVATE' | 'DM' | 'GROUP_DM' | 'BROADCAST';
 };
 
 export async function resolveChannelAccess(
@@ -49,6 +53,18 @@ export async function resolveChannelAccess(
       isMuted,
       canRead: !channel.isArchived || isMember,
       canPost: !channel.isArchived,
+    };
+  }
+  if (channel.kind === 'BROADCAST') {
+    // Org-wide read; post = admin-only.
+    return {
+      channelId,
+      kind: channel.kind,
+      isMember,
+      role,
+      isMuted,
+      canRead: !channel.isArchived || isMember,
+      canPost: isMember && role === 'ADMIN' && !channel.isArchived,
     };
   }
   // PRIVATE / DM / GROUP_DM — must be a member.

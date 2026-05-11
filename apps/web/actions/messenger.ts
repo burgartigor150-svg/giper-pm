@@ -54,7 +54,9 @@ export async function listMyChannels() {
       },
     }),
     prisma.channel.findMany({
-      where: { kind: 'PUBLIC', isArchived: false },
+      // BROADCAST shares PUBLIC's discoverability — anyone in the org
+      // can see and read it. Only posting is restricted.
+      where: { kind: { in: ['PUBLIC', 'BROADCAST'] }, isArchived: false },
       orderBy: { name: 'asc' },
       select: {
         id: true,
@@ -70,14 +72,14 @@ export async function listMyChannels() {
 
 export async function createChannelAction(input: {
   name: string;
-  kind: 'PUBLIC' | 'PRIVATE';
+  kind: 'PUBLIC' | 'PRIVATE' | 'BROADCAST';
   projectId?: string | null;
   description?: string;
   /**
    * Initial invitees added as MEMBER alongside the creator (ADMIN).
    * Required for PRIVATE — a channel that nobody but the creator can
    * see is functionally a draft and is rejected at validation. For
-   * PUBLIC the list is optional (anyone can self-join).
+   * PUBLIC/BROADCAST the list is optional (anyone can self-join).
    */
   memberUserIds?: string[];
 }): Promise<ActionResult<{ id: string; slug: string }>> {
@@ -119,6 +121,10 @@ export async function createChannelAction(input: {
     }
   }
   const slug = slugify(name);
+  // For BROADCAST channels, invitees are co-authors (they need post
+  // permission), so seed them as ADMIN. For PUBLIC/PRIVATE the picker
+  // adds plain MEMBERs.
+  const inviteeRole: 'ADMIN' | 'MEMBER' = input.kind === 'BROADCAST' ? 'ADMIN' : 'MEMBER';
   try {
     const channel = await prisma.channel.create({
       data: {
@@ -131,7 +137,7 @@ export async function createChannelAction(input: {
         members: {
           create: [
             { userId: me.id, role: 'ADMIN' },
-            ...validInviteeIds.map((userId) => ({ userId, role: 'MEMBER' as const })),
+            ...validInviteeIds.map((userId) => ({ userId, role: inviteeRole })),
           ],
         },
       },
@@ -1306,7 +1312,7 @@ export async function previewChannelInviteAction(
       data: {
         channelId: string;
         channelName: string;
-        channelKind: 'PUBLIC' | 'PRIVATE' | 'DM' | 'GROUP_DM';
+        channelKind: 'PUBLIC' | 'PRIVATE' | 'DM' | 'GROUP_DM' | 'BROADCAST';
         memberCount: number;
         isValid: boolean;
         reason?: string;

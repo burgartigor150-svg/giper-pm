@@ -36,6 +36,7 @@ import {
   inviteToChannelAction,
   removeFromChannelAction,
   listChannelMembersAction,
+  postMessageAction,
 } from '@/actions/messenger';
 import { makeUser } from './helpers/factories';
 
@@ -333,5 +334,82 @@ describe('listChannelMembersAction', () => {
     mockMe.id = stranger.id;
     const r = await listChannelMembersAction(res.data.id);
     expect(r).toMatchObject({ ok: false, error: { code: 'FORBIDDEN' } });
+  });
+});
+
+describe('BROADCAST channels', () => {
+  it('createChannelAction seeds invitees as ADMIN (co-authors)', async () => {
+    const owner = await makeUser();
+    const coAuthor = await makeUser();
+    mockMe.id = owner.id;
+    const res = await createChannelAction({
+      name: `bc-${Date.now()}`,
+      kind: 'BROADCAST',
+      memberUserIds: [coAuthor.id],
+    });
+    expect(res.ok).toBe(true);
+    if (!res.ok || !res.data) return;
+    const member = await prisma.channelMember.findUnique({
+      where: { channelId_userId: { channelId: res.data.id, userId: coAuthor.id } },
+    });
+    expect(member?.role).toBe('ADMIN');
+  });
+
+  it('postMessageAction in BROADCAST: non-admin reader → FORBIDDEN', async () => {
+    const owner = await makeUser();
+    const reader = await makeUser();
+    mockMe.id = owner.id;
+    const res = await createChannelAction({
+      name: `bc-${Date.now()}`,
+      kind: 'BROADCAST',
+    });
+    if (!res.ok || !res.data) throw new Error('setup');
+    // Subscribe reader as MEMBER (not admin).
+    await prisma.channelMember.create({
+      data: { channelId: res.data.id, userId: reader.id, role: 'MEMBER' },
+    });
+    mockMe.id = reader.id;
+    const r = await postMessageAction({
+      channelId: res.data.id,
+      body: 'hi',
+    });
+    expect(r).toMatchObject({ ok: false, error: { code: 'FORBIDDEN' } });
+  });
+
+  it('postMessageAction in BROADCAST: admin author → ok', async () => {
+    const owner = await makeUser();
+    mockMe.id = owner.id;
+    const res = await createChannelAction({
+      name: `bc-${Date.now()}`,
+      kind: 'BROADCAST',
+    });
+    if (!res.ok || !res.data) throw new Error('setup');
+    const r = await postMessageAction({
+      channelId: res.data.id,
+      body: 'announcement',
+    });
+    expect(r.ok).toBe(true);
+  });
+
+  it('postMessageAction in BROADCAST: non-member also FORBIDDEN (no lazy-join)', async () => {
+    const owner = await makeUser();
+    const stranger = await makeUser();
+    mockMe.id = owner.id;
+    const res = await createChannelAction({
+      name: `bc-${Date.now()}`,
+      kind: 'BROADCAST',
+    });
+    if (!res.ok || !res.data) throw new Error('setup');
+    mockMe.id = stranger.id;
+    const r = await postMessageAction({
+      channelId: res.data.id,
+      body: 'spam',
+    });
+    expect(r).toMatchObject({ ok: false, error: { code: 'FORBIDDEN' } });
+    // Confirm we did NOT silently auto-join the user (only PUBLIC does that).
+    const member = await prisma.channelMember.findUnique({
+      where: { channelId_userId: { channelId: res.data.id, userId: stranger.id } },
+    });
+    expect(member).toBeNull();
   });
 });

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Hash, Lock, MessageSquare } from 'lucide-react';
+import { Hash, Lock, MessageSquare, Megaphone } from 'lucide-react';
 import { Avatar } from '@giper/ui/components/Avatar';
 import { Button } from '@giper/ui/components/Button';
 import { cn } from '@giper/ui/cn';
@@ -27,7 +27,7 @@ import { SystemEventCard, type SystemEvent } from './SystemEventCard';
 import { MessageActions } from './MessageActions';
 import { Pin, MessageSquareReply } from 'lucide-react';
 
-type ChannelKind = 'PUBLIC' | 'PRIVATE' | 'DM' | 'GROUP_DM';
+type ChannelKind = 'PUBLIC' | 'PRIVATE' | 'DM' | 'GROUP_DM' | 'BROADCAST';
 
 type ChannelLite = {
   id: string;
@@ -144,7 +144,9 @@ export function MessagesShell({
   });
 
   const memberDms = memberChannels.filter((c) => c.kind === 'DM' || c.kind === 'GROUP_DM');
-  const memberRooms = memberChannels.filter((c) => c.kind === 'PUBLIC' || c.kind === 'PRIVATE');
+  const memberRooms = memberChannels.filter(
+    (c) => c.kind === 'PUBLIC' || c.kind === 'PRIVATE' || c.kind === 'BROADCAST',
+  );
   const joinable = publicChannels.filter(
     (c) => !memberChannels.some((mc) => mc.id === c.id),
   );
@@ -213,19 +215,25 @@ export function MessagesShell({
             Выбери канал или начни разговор слева
           </div>
         ) : (
-          <>
-            {(() => {
-              // Resolve the active channel's metadata for the header.
-              // The shell already has both member + public lists in
-              // props — no need for a server fetch just to show name.
-              const active =
-                memberChannels.find((c) => c.id === activeChannelId) ??
-                publicChannels.find((c) => c.id === activeChannelId);
-              if (!active) return null;
-              return (
-                <ChannelHeader channel={active} isMuted={isMuted} />
-              );
-            })()}
+          (() => {
+            // Resolve the active channel's metadata for the header +
+            // composer permissions. The shell already has both
+            // member + public lists in props — no need for a server
+            // fetch just to show name.
+            const active =
+              memberChannels.find((c) => c.id === activeChannelId) ??
+              publicChannels.find((c) => c.id === activeChannelId);
+            // BROADCAST channels: only admins (the channel's
+            // co-authors) get the composer. Everyone else reads.
+            const canPost =
+              active?.kind === 'BROADCAST'
+                ? myChannelRole === 'ADMIN'
+                : true;
+            return (
+              <>
+                {active ? (
+                  <ChannelHeader channel={active} isMuted={isMuted} />
+                ) : null}
             <div className="flex-1 overflow-y-auto px-4 py-4" ref={scrollRef}>
               {messages.length === 0 ? (
                 <div className="text-sm text-muted-foreground">
@@ -248,42 +256,50 @@ export function MessagesShell({
                 </ul>
               )}
             </div>
-            <div className="border-t border-border bg-background p-3">
-              <MessageComposer
-                placeholder="Написать сообщение… (@ — упомянуть пользователя, Enter — отправить)"
-                channelId={activeChannelId ?? undefined}
-                onVideoNoteSent={() => router.refresh()}
-                onSend={async (body) => {
-                  if (!activeChannelId) return;
-                  // Optimistic append.
-                  const tempId = `temp-${Date.now()}`;
-                  setMessages((prev) => [
-                    ...prev,
-                    {
-                      id: tempId,
+            {canPost ? (
+              <div className="border-t border-border bg-background p-3">
+                <MessageComposer
+                  placeholder="Написать сообщение… (@ — упомянуть пользователя, Enter — отправить)"
+                  channelId={activeChannelId ?? undefined}
+                  onVideoNoteSent={() => router.refresh()}
+                  onSend={async (body) => {
+                    if (!activeChannelId) return;
+                    // Optimistic append.
+                    const tempId = `temp-${Date.now()}`;
+                    setMessages((prev) => [
+                      ...prev,
+                      {
+                        id: tempId,
+                        body,
+                        authorId: meId ?? '',
+                        author: { id: meId ?? '', name: 'Вы', image: null },
+                        parentId: null,
+                        replyCount: 0,
+                        editedAt: null,
+                        createdAt: new Date(),
+                        reactions: [],
+                      },
+                    ]);
+                    const res = await postMessageAction({
+                      channelId: activeChannelId,
                       body,
-                      authorId: meId ?? '',
-                      author: { id: meId ?? '', name: 'Вы', image: null },
-                      parentId: null,
-                      replyCount: 0,
-                      editedAt: null,
-                      createdAt: new Date(),
-                      reactions: [],
-                    },
-                  ]);
-                  const res = await postMessageAction({
-                    channelId: activeChannelId,
-                    body,
-                  });
-                  if (!res.ok) {
-                    setMessages((prev) => prev.filter((m) => m.id !== tempId));
-                    throw new Error(res.error.message);
-                  }
-                  router.refresh();
-                }}
-              />
-            </div>
-          </>
+                    });
+                    if (!res.ok) {
+                      setMessages((prev) => prev.filter((m) => m.id !== tempId));
+                      throw new Error(res.error.message);
+                    }
+                    router.refresh();
+                  }}
+                />
+              </div>
+            ) : (
+              <div className="border-t border-border bg-background p-3 text-center text-xs text-muted-foreground">
+                В этот канал можно только читать
+              </div>
+            )}
+              </>
+            );
+          })()
         )}
       </section>
 
@@ -325,9 +341,11 @@ function ChannelLink({
   const Icon =
     channel.kind === 'PRIVATE'
       ? Lock
-      : channel.kind === 'DM' || channel.kind === 'GROUP_DM'
-        ? MessageSquare
-        : Hash;
+      : channel.kind === 'BROADCAST'
+        ? Megaphone
+        : channel.kind === 'DM' || channel.kind === 'GROUP_DM'
+          ? MessageSquare
+          : Hash;
   return (
     <li>
       <Link

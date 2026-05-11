@@ -33,7 +33,7 @@ export function CreateChannelDialog() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
-  const [kind, setKind] = useState<'PUBLIC' | 'PRIVATE'>('PUBLIC');
+  const [kind, setKind] = useState<'PUBLIC' | 'PRIVATE' | 'BROADCAST'>('PUBLIC');
   const [picked, setPicked] = useState<UserHit[]>([]);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -67,7 +67,7 @@ export function CreateChannelDialog() {
   }, [open]);
 
   const canSubmit =
-    !!name.trim() && (kind === 'PUBLIC' || picked.length > 0) && !pending;
+    !!name.trim() && (kind !== 'PRIVATE' || picked.length > 0) && !pending;
 
   function submit() {
     if (!canSubmit) return;
@@ -113,7 +113,7 @@ export function CreateChannelDialog() {
             autoFocus
             maxLength={60}
           />
-          <fieldset className="mb-2 flex gap-3 text-xs">
+          <fieldset className="mb-2 flex flex-wrap gap-3 text-xs">
             <legend className="sr-only">Тип канала</legend>
             <label className="flex items-center gap-1.5">
               <input
@@ -131,6 +131,14 @@ export function CreateChannelDialog() {
               />
               Приватный
             </label>
+            <label className="flex items-center gap-1.5" title="Только админ может писать">
+              <input
+                type="radio"
+                checked={kind === 'BROADCAST'}
+                onChange={() => setKind('BROADCAST')}
+              />
+              Канал (broadcast)
+            </label>
           </fieldset>
           <div className="mb-2">
             <label className="mb-1 block text-xs font-medium text-muted-foreground">
@@ -142,6 +150,9 @@ export function CreateChannelDialog() {
               ) : null}
               {kind === 'PUBLIC' ? (
                 <span className="ml-1 text-muted-foreground">(необязательно — кто угодно может присоединиться)</span>
+              ) : null}
+              {kind === 'BROADCAST' ? (
+                <span className="ml-1 text-muted-foreground">(подписаться сможет любой — здесь только соавторы-админы)</span>
               ) : null}
             </label>
             <UserPicker picked={picked} onChange={setPicked} />
