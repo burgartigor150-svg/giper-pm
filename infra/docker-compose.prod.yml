@@ -374,8 +374,11 @@ services:
 
   # Whisper ASR webservice (https://github.com/ahmetoner/whisper-asr-webservice).
   # Supports ASR_ENGINE=whisperx for diarization (needs HF_TOKEN). HTTP
-  # POST /asr accepts audio + returns json. GPU 0 (T4) — does not fight
-  # Qwen on GPU 1.
+  # POST /asr accepts audio + returns json. Pinned to GPU 1 (P100, 16GB)
+  # because GPU 0 (T4, 15GB) is permanently saturated by jarvis embed_server
+  # and other host-level workloads, causing CUDA OOM on every large-v3
+  # transcribe. Ollama was retired in favour of Vertex AI for the summary
+  # step, so nothing competes for GPU 1.
   whisperx:
     image: onerahmet/openai-whisper-asr-webservice:latest-gpu
     restart: unless-stopped
@@ -385,7 +388,7 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              device_ids: ['0']
+              device_ids: ['1']
               capabilities: [gpu]
     ports:
       - "127.0.0.1:8771:9000"
