@@ -57,9 +57,10 @@ describe('stripBitrixHtml', () => {
   it('decodes basic entities', () => {
     expect(stripBitrixHtml('&lt;ok&gt;&amp;&nbsp;done')).toBe('<ok>& done');
   });
-  it('clamps to 20k chars', () => {
-    const big = 'x'.repeat(25000);
-    expect(stripBitrixHtml(big).length).toBe(20000);
+  it('clamps long input to the 50k-char ceiling', () => {
+    // No markup → length passes through, then sliced at 50_000.
+    const big = 'x'.repeat(60_000);
+    expect(stripBitrixHtml(big).length).toBe(50_000);
   });
 });
 

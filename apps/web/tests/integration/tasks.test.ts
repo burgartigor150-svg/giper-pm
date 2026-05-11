@@ -48,11 +48,27 @@ describe('createTask', () => {
     expect(await auditCount(created.id, 'task.create')).toBe(1);
   });
 
-  it('first task gets number 1; ADMIN creates outside membership', async () => {
-    const { project } = await scaffold();
-    const admin = await makeUser({ role: 'ADMIN' });
-    const t = await createTask({ projectKey: project.key, title: 'first', tags: [] }, sessionUser(admin));
+  it('first task gets number 1; project owner can create even with no other tasks', async () => {
+    // Permission to create is per-stake — admin role does NOT bypass.
+    // Project owner is on the project, so they can always create.
+    const owner = await makeUser({ role: 'ADMIN' });
+    const project = await makeProject({ ownerId: owner.id });
+    const t = await createTask(
+      { projectKey: project.key, title: 'first', tags: [] },
+      sessionUser(owner),
+    );
     expect(t.number).toBe(1);
+  });
+
+  it('non-member ADMIN cannot create (per-stake gate)', async () => {
+    const { project } = await scaffold();
+    const stranger = await makeUser({ role: 'ADMIN' });
+    await expect(
+      createTask(
+        { projectKey: project.key, title: 'x', tags: [] },
+        sessionUser(stranger),
+      ),
+    ).rejects.toMatchObject({ code: 'INSUFFICIENT_PERMISSIONS' });
   });
 
   it('VIEWER role → 403', async () => {
@@ -226,12 +242,23 @@ describe('changeTaskStatus', () => {
 // assignTask
 // ============================================================================
 describe('assignTask', () => {
-  it('assigning a non-member → VALIDATION 400', async () => {
+  it('assigning a non-existent user → VALIDATION 400', async () => {
+    // Formal project membership is no longer required (Bitrix-mirror
+    // groups have no ProjectMember rows). Only the user's existence
+    // is validated now.
+    const { owner, project } = await scaffold();
+    const task = await makeTask({ projectId: project.id, creatorId: owner.id });
+    await expect(
+      assignTask(task.id, '00000000-0000-0000-0000-000000000000', sessionUser(owner)),
+    ).rejects.toMatchObject({ code: 'VALIDATION', status: 400 });
+  });
+
+  it('assigning a non-member but existing user is now allowed', async () => {
     const { owner, project } = await scaffold();
     const stranger = await makeUser();
     const task = await makeTask({ projectId: project.id, creatorId: owner.id });
-    await expect(assignTask(task.id, stranger.id, sessionUser(owner)))
-      .rejects.toMatchObject({ code: 'VALIDATION', status: 400 });
+    const out = await assignTask(task.id, stranger.id, sessionUser(owner));
+    expect(out.assigneeId).toBe(stranger.id);
   });
 
   it('same assignee → no-op (no audit)', async () => {
@@ -273,11 +300,13 @@ describe('assignTask', () => {
 // addComment
 // ============================================================================
 describe('addComment', () => {
-  it('VIEWER project member can comment', async () => {
+  it('VIEWER on the task (watcher) can comment', async () => {
+    // canViewTask is per-stake: viewer must be on the task itself.
+    // ProjectMember alone no longer grants comment rights.
     const { owner, project } = await scaffold();
     const viewer = await makeUser({ role: 'VIEWER' });
-    await addMember(project.id, viewer.id, 'OBSERVER');
     const task = await makeTask({ projectId: project.id, creatorId: owner.id });
+    await prisma.taskWatcher.create({ data: { taskId: task.id, userId: viewer.id } });
     const out = await addComment(task.id, 'hi', sessionUser(viewer));
     expect(out.body).toBe('hi');
     const row = await prisma.comment.findUnique({ where: { id: out.id } });
@@ -285,14 +314,15 @@ describe('addComment', () => {
     expect(row?.source).toBe('WEB');
   });
 
-  it('non-member → 403; passes through custom source; task not found → NOT_FOUND', async () => {
+  it('non-stake → 403; passes through custom source; task not found → NOT_FOUND', async () => {
     const { owner, project } = await scaffold();
     const stranger = await makeUser({ role: 'MEMBER' });
     const admin = await makeUser({ role: 'ADMIN' });
     const task = await makeTask({ projectId: project.id, creatorId: owner.id });
     await expect(addComment(task.id, 'no', sessionUser(stranger)))
       .rejects.toMatchObject({ code: 'INSUFFICIENT_PERMISSIONS' });
-    const out = await addComment(task.id, 'tg', sessionUser(owner), 'TELEGRAM');
+    // addComment takes an `opts` object now, not a positional source.
+    const out = await addComment(task.id, 'tg', sessionUser(owner), { source: 'TELEGRAM' });
     const row = await prisma.comment.findUnique({ where: { id: out.id } });
     expect(row?.source).toBe('TELEGRAM');
     await expect(addComment('nope', 'x', sessionUser(admin)))
@@ -463,15 +493,24 @@ describe('listTasksForProject', () => {
 // listTasksForBoard
 // ============================================================================
 describe('listTasksForBoard', () => {
-  it('returns only non-CANCELED; embeds project info; non-viewer → 403', async () => {
+  it('returns only non-CANCELED (by internalStatus); embeds project info; non-viewer → 403', async () => {
+    // Board now buckets by internalStatus (the team's track), not the
+    // Bitrix-mirror `status` field. Update one task's internalStatus
+    // directly since makeTask sets `status` only.
     const { owner, project } = await scaffold();
     const stranger = await makeUser({ role: 'MEMBER' });
     await makeTask({ projectId: project.id, creatorId: owner.id, status: 'TODO' });
     await makeTask({ projectId: project.id, creatorId: owner.id, status: 'DONE' });
-    await makeTask({ projectId: project.id, creatorId: owner.id, status: 'CANCELED' });
+    const cancelled = await makeTask({
+      projectId: project.id, creatorId: owner.id, status: 'CANCELED',
+    });
+    await prisma.task.update({
+      where: { id: cancelled.id },
+      data: { internalStatus: 'CANCELED' },
+    });
     const out = await listTasksForBoard(project.key, {}, sessionUser(owner));
     expect(out.tasks).toHaveLength(2);
-    expect(out.tasks.every((t) => t.status !== 'CANCELED')).toBe(true);
+    expect(out.tasks.every((t) => t.internalStatus !== 'CANCELED')).toBe(true);
     expect(out.project.key).toBe(project.key);
     await expect(listTasksForBoard(project.key, {}, sessionUser(stranger)))
       .rejects.toMatchObject({ code: 'INSUFFICIENT_PERMISSIONS' });
@@ -508,14 +547,16 @@ describe('listTasksForBoard', () => {
 // listRecentTasksForProject
 // ============================================================================
 describe('listRecentTasksForProject', () => {
-  it('returns up to limit, ordered by updatedAt desc', async () => {
+  it('returns up to limit, per-stake, ordered by updatedAt desc', async () => {
+    // Filtered by per-stake visibility — caller is the project owner
+    // and creator of every task, so all of them are visible.
     const { owner, project } = await scaffold();
     await makeTask({ projectId: project.id, creatorId: owner.id });
     await new Promise((r) => setTimeout(r, 5));
     const t2 = await makeTask({ projectId: project.id, creatorId: owner.id });
     await new Promise((r) => setTimeout(r, 5));
     const t3 = await makeTask({ projectId: project.id, creatorId: owner.id });
-    const out = await listRecentTasksForProject(project.id, 2);
+    const out = await listRecentTasksForProject(project.id, owner.id, 2);
     expect(out).toHaveLength(2);
     expect(out[0]?.id).toBe(t3.id);
     expect(out[1]?.id).toBe(t2.id);
@@ -526,8 +567,18 @@ describe('listRecentTasksForProject', () => {
     for (let i = 0; i < 7; i++) {
       await makeTask({ projectId: project.id, creatorId: owner.id });
     }
-    const out = await listRecentTasksForProject(project.id);
+    const out = await listRecentTasksForProject(project.id, owner.id);
     expect(out).toHaveLength(5);
+  });
+
+  it('returns empty for a non-stake user even if other tasks exist', async () => {
+    const { owner, project } = await scaffold();
+    const stranger = await makeUser();
+    for (let i = 0; i < 3; i++) {
+      await makeTask({ projectId: project.id, creatorId: owner.id });
+    }
+    const out = await listRecentTasksForProject(project.id, stranger.id);
+    expect(out).toHaveLength(0);
   });
 });
 
@@ -544,14 +595,24 @@ describe('getTask', () => {
       .rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
 
-  it('non-viewer → INSUFFICIENT_PERMISSIONS; PM can view any project task', async () => {
+  it('non-stake → INSUFFICIENT_PERMISSIONS — PM role does NOT bypass per-stake', async () => {
+    // Strict per-stake: even PM/ADMIN must personally be on the task.
+    // The "see everything" privilege lives in admin pages, not here.
     const { owner, project } = await scaffold();
     const stranger = await makeUser({ role: 'MEMBER' });
-    const pm = await makeUser({ role: 'PM' });
+    const pmStranger = await makeUser({ role: 'PM' });
+    const pmReviewer = await makeUser({ role: 'PM' });
     const task = await makeTask({ projectId: project.id, creatorId: owner.id, number: 1 });
+    await prisma.task.update({
+      where: { id: task.id },
+      data: { reviewerId: pmReviewer.id },
+    });
     await expect(getTask(project.key, task.number, sessionUser(stranger)))
       .rejects.toMatchObject({ code: 'INSUFFICIENT_PERMISSIONS' });
-    const detail = await getTask(project.key, 1, sessionUser(pm));
+    await expect(getTask(project.key, task.number, sessionUser(pmStranger)))
+      .rejects.toMatchObject({ code: 'INSUFFICIENT_PERMISSIONS' });
+    // PM who IS on the task (here as reviewer) can see it.
+    const detail = await getTask(project.key, 1, sessionUser(pmReviewer));
     expect(detail.number).toBe(1);
   });
 

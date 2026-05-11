@@ -14,6 +14,11 @@ export async function addComment(
       id: true,
       creatorId: true,
       assigneeId: true,
+      reviewerId: true,
+      // canViewTask is per-stake: load every edge that grants
+      // visibility so a watcher / co-assignee can comment too.
+      assignments: { select: { userId: true } },
+      watchers: { select: { userId: true } },
       project: {
         select: { ownerId: true, members: { select: { userId: true, role: true } } },
       },

@@ -6,8 +6,10 @@ import {
   canViewProject,
   canCreateTask,
   canEditTask,
+  canEditTaskInternal,
   canViewTask,
   canDeleteTask,
+  canManageAssignments,
   canViewUserTime,
   canEditTimeEntry,
   canViewUserActivity,
@@ -86,12 +88,33 @@ describe('canEditProject', () => {
 });
 
 describe('canViewProject', () => {
-  it('ADMIN sees any project', () => {
-    expect(canViewProject(u('ADMIN', 'a'), project('owner-1'))).toBe(true);
+  // Per-stake visibility: even ADMIN/PM must be on the project to see
+  // it. The "see everything" privilege lives in admin sections
+  // (audit log, settings), not in domain visibility helpers.
+  it('non-member ADMIN does NOT see project', () => {
+    expect(canViewProject(u('ADMIN', 'a'), project('owner-1'))).toBe(false);
   });
 
-  it('PM sees any project', () => {
-    expect(canViewProject(u('PM', 'p'), project('owner-1'))).toBe(true);
+  it('non-member PM does NOT see project', () => {
+    expect(canViewProject(u('PM', 'p'), project('owner-1'))).toBe(false);
+  });
+
+  it('ADMIN who owns the project sees it', () => {
+    expect(canViewProject(u('ADMIN', 'owner-1'), project('owner-1'))).toBe(true);
+  });
+
+  it('PM who is a project member sees it', () => {
+    const p = project('owner-1', [{ userId: 'pm-1', role: 'LEAD' }]);
+    expect(canViewProject(u('PM', 'pm-1'), p)).toBe(true);
+  });
+
+  it('Bitrix-mirror project visible to user who has a task there', () => {
+    const p: ProjectForPerm = {
+      ownerId: 'owner-1',
+      members: [],
+      hasTaskForCurrentUser: true,
+    };
+    expect(canViewProject(u('MEMBER', 'stranger'), p)).toBe(true);
   });
 
   it('owner sees own project', () => {
@@ -115,12 +138,24 @@ describe('canViewProject', () => {
 });
 
 describe('canCreateTask', () => {
-  it('ADMIN can always create', () => {
-    expect(canCreateTask(u('ADMIN', 'a'), project('owner-1'))).toBe(true);
+  // canCreateTask requires canViewProject — so even ADMIN/PM must
+  // first be on the project (per-stake). Project access is the gate,
+  // role only adds a veto for VIEWER.
+  it('non-member ADMIN cannot create on a project they’re not on', () => {
+    expect(canCreateTask(u('ADMIN', 'a'), project('owner-1'))).toBe(false);
   });
 
-  it('PM can always create', () => {
-    expect(canCreateTask(u('PM', 'p'), project('owner-1'))).toBe(true);
+  it('non-member PM cannot create on a project they’re not on', () => {
+    expect(canCreateTask(u('PM', 'p'), project('owner-1'))).toBe(false);
+  });
+
+  it('owner ADMIN can create', () => {
+    expect(canCreateTask(u('ADMIN', 'owner-1'), project('owner-1'))).toBe(true);
+  });
+
+  it('PM who is a project member can create', () => {
+    const p = project('owner-1', [{ userId: 'pm-1', role: 'LEAD' }]);
+    expect(canCreateTask(u('PM', 'pm-1'), p)).toBe(true);
   });
 
   it('VIEWER cannot create even if project member', () => {
@@ -188,10 +223,34 @@ describe('canEditTask', () => {
 });
 
 describe('canViewTask', () => {
-  it('mirrors canViewProject — ADMIN ok', () => {
+  // Strict per-stake: a user must personally be on the task (creator,
+  // assignee, reviewer, co-assignee, or watcher). Role does NOT bypass
+  // — admins/PMs don't get to peek at unrelated tasks. Project-level
+  // shortcuts (owner/LEAD) are intentionally NOT applied either, so a
+  // Bitrix-mirror project doesn't leak every group task to the lead.
+  it('non-stake ADMIN cannot view', () => {
     expect(
       canViewTask(u('ADMIN', 'a'), task({ project: project('owner-1') })),
-    ).toBe(true);
+    ).toBe(false);
+  });
+
+  it('non-stake project owner cannot view (per-stake is the rule)', () => {
+    expect(
+      canViewTask(
+        u('MEMBER', 'owner-1'),
+        task({ creatorId: 'someone-else', project: project('owner-1') }),
+      ),
+    ).toBe(false);
+  });
+
+  it('non-stake LEAD cannot view', () => {
+    const p = project('owner-1', [{ userId: 'lead-1', role: 'LEAD' }]);
+    expect(
+      canViewTask(
+        u('MEMBER', 'lead-1'),
+        task({ creatorId: 'someone-else', project: p }),
+      ),
+    ).toBe(false);
   });
 
   it('non-member MEMBER cannot view', () => {
@@ -200,9 +259,55 @@ describe('canViewTask', () => {
     ).toBe(false);
   });
 
-  it('member can view', () => {
-    const p = project('owner-1', [{ userId: 'm-1', role: 'OBSERVER' }]);
-    expect(canViewTask(u('MEMBER', 'm-1'), task({ project: p }))).toBe(true);
+  it('creator can view', () => {
+    expect(
+      canViewTask(
+        u('MEMBER', 'c-1'),
+        task({ creatorId: 'c-1', project: project('owner-1') }),
+      ),
+    ).toBe(true);
+  });
+
+  it('assignee can view', () => {
+    expect(
+      canViewTask(
+        u('MEMBER', 'as-1'),
+        task({ assigneeId: 'as-1', project: project('owner-1') }),
+      ),
+    ).toBe(true);
+  });
+
+  it('reviewer can view', () => {
+    expect(
+      canViewTask(u('MEMBER', 'rv-1'), {
+        creatorId: 'c-1',
+        assigneeId: null,
+        reviewerId: 'rv-1',
+        project: project('owner-1'),
+      }),
+    ).toBe(true);
+  });
+
+  it('co-assignee can view', () => {
+    expect(
+      canViewTask(u('MEMBER', 'co-1'), {
+        creatorId: 'c-1',
+        assigneeId: null,
+        project: project('owner-1'),
+        assignments: [{ userId: 'co-1' }],
+      }),
+    ).toBe(true);
+  });
+
+  it('watcher can view', () => {
+    expect(
+      canViewTask(u('MEMBER', 'w-1'), {
+        creatorId: 'c-1',
+        assigneeId: null,
+        project: project('owner-1'),
+        watchers: [{ userId: 'w-1' }],
+      }),
+    ).toBe(true);
   });
 });
 
@@ -343,6 +448,71 @@ describe('canSeeReports', () => {
     ['VIEWER', false],
   ] as const)('role %s → %s', (role, expected) => {
     expect(canSeeReports(u(role))).toBe(expected);
+  });
+});
+
+describe('canManageAssignments', () => {
+  // Resource management (assignee, reviewer, co-assignees) is a PM/LEAD
+  // concern. Regular MEMBERs can comment/edit their own tasks but not
+  // reassign work to others.
+  it('ADMIN globally', () => {
+    expect(canManageAssignments(u('ADMIN', 'a'), project('owner-1'))).toBe(true);
+  });
+  it('PM globally — even on projects they aren’t on', () => {
+    expect(canManageAssignments(u('PM', 'p'), project('owner-1'))).toBe(true);
+  });
+  it('project owner', () => {
+    expect(canManageAssignments(u('MEMBER', 'owner-1'), project('owner-1'))).toBe(true);
+  });
+  it('LEAD member', () => {
+    const p = project('owner-1', [{ userId: 'l', role: 'LEAD' }]);
+    expect(canManageAssignments(u('MEMBER', 'l'), p)).toBe(true);
+  });
+  it.each(['CONTRIBUTOR', 'REVIEWER', 'OBSERVER'] as const)(
+    'non-LEAD %s member — no',
+    (mr) => {
+      const p = project('owner-1', [{ userId: 'm', role: mr }]);
+      expect(canManageAssignments(u('MEMBER', 'm'), p)).toBe(false);
+    },
+  );
+  it('VIEWER member — no', () => {
+    const p = project('owner-1', [{ userId: 'v', role: 'OBSERVER' }]);
+    expect(canManageAssignments(u('VIEWER', 'v'), p)).toBe(false);
+  });
+});
+
+describe('canEditTaskInternal', () => {
+  // Mirror tasks (externalSource set) ARE editable on the internal
+  // track even though canEditTask vetoes them.
+  it('ADMIN edits internal track of a mirrored task', () => {
+    expect(
+      canEditTaskInternal(u('ADMIN', 'a'), {
+        creatorId: 'x',
+        assigneeId: null,
+        externalSource: 'bitrix24',
+        project: project('owner-1'),
+      }),
+    ).toBe(true);
+  });
+  it('creator edits internal track even when assigneeId is null', () => {
+    expect(
+      canEditTaskInternal(u('MEMBER', 'c'), {
+        creatorId: 'c',
+        assigneeId: null,
+        externalSource: 'bitrix24',
+        project: project('owner-1'),
+      }),
+    ).toBe(true);
+  });
+  it('contributor without creator/assignee — no', () => {
+    const p = project('owner-1', [{ userId: 'c', role: 'CONTRIBUTOR' }]);
+    expect(
+      canEditTaskInternal(u('MEMBER', 'c'), {
+        creatorId: 'x',
+        assigneeId: 'y',
+        project: p,
+      }),
+    ).toBe(false);
   });
 });
 

@@ -1,4 +1,4 @@
-import { prisma } from '@giper/db';
+import { prisma, type Prisma } from '@giper/db';
 import type { SessionUser } from '../permissions';
 
 export type DeadlineItem = {
@@ -32,16 +32,15 @@ export type DeadlineFilters = {
   status?: string[];
 };
 
-const PER_STAKE = (uid: string) =>
-  ({
-    OR: [
-      { creatorId: uid },
-      { assigneeId: uid },
-      { reviewerId: uid },
-      { assignments: { some: { userId: uid } } },
-      { watchers: { some: { userId: uid } } },
-    ],
-  }) as const;
+const PER_STAKE = (uid: string): Prisma.TaskWhereInput => ({
+  OR: [
+    { creatorId: uid },
+    { assigneeId: uid },
+    { reviewerId: uid },
+    { assignments: { some: { userId: uid } } },
+    { watchers: { some: { userId: uid } } },
+  ],
+});
 
 /**
  * Resolve "my team" for the calendar's default scope:
@@ -105,7 +104,7 @@ export async function getDeadlinesInRange(
   //   - 'team' (privileged opt-in)  → drops PER_STAKE, but the team
   //     gate stays: shows EVERY task assigned to my teammates,
   //     regardless of whether I'm personally on it.
-  const teamGate = {
+  const teamGate: Prisma.TaskWhereInput = {
     OR: [
       // Unassigned tasks I created — keep them visible.
       { assigneeId: null, creatorId: user.id },
@@ -113,12 +112,15 @@ export async function getDeadlinesInRange(
       { assigneeId: { in: teammateIds } },
     ],
   };
-  const where: Parameters<typeof prisma.task.findMany>[0]['where'] = teamWide
-    ? { dueDate: { gte: from, lt: to }, ...teamGate }
-    : {
-        dueDate: { gte: from, lt: to },
-        AND: [PER_STAKE(user.id), teamGate],
-      };
+  // Compose via AND so spreading teamGate's OR doesn't collide with
+  // the discriminated-union form Prisma.TaskWhereInput uses for top-
+  // level filters (TS can't widen `...spread` into the union).
+  const where: Prisma.TaskWhereInput = {
+    dueDate: { gte: from, lt: to },
+    AND: teamWide
+      ? [teamGate]
+      : [PER_STAKE(user.id), teamGate],
+  };
 
   // Apply additional UI filters on top of the visibility decision.
   if (filters.projectKey) {

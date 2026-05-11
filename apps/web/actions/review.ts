@@ -3,7 +3,6 @@
 import { revalidatePath } from 'next/cache';
 import { prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
-import { addComment } from '@/lib/tasks/addComment';
 import {
   createNotification,
   fanoutToTaskAudience,
@@ -51,13 +50,19 @@ export async function approveTaskAction(
     where: { id: taskId },
     data: { internalStatus: 'DONE', completedAt: new Date() },
   });
-  // Internal comment so the timeline records the decision.
-  await addComment(
-    taskId,
-    `✅ Одобрено${note?.trim() ? `: ${note.trim()}` : ''}`,
-    { id: me.id, role: me.role },
-    { visibility: 'INTERNAL' },
-  );
+  // Internal comment so the timeline records the decision. We've
+  // already validated authorization above (reviewer/ADMIN/PM), so we
+  // bypass addComment's per-stake canViewTask check — the action's own
+  // gate is the source of truth for review decisions.
+  await prisma.comment.create({
+    data: {
+      taskId,
+      authorId: me.id,
+      body: `✅ Одобрено${note?.trim() ? `: ${note.trim()}` : ''}`,
+      source: 'WEB',
+      visibility: 'INTERNAL',
+    },
+  });
   // Closing the task may free up dependants.
   await autoUnblockDependents(taskId, me.id);
   // Ping assignee + creator that approval landed.
@@ -133,12 +138,18 @@ export async function rejectTaskAction(
     where: { id: taskId },
     data: { internalStatus: 'IN_PROGRESS' },
   });
-  await addComment(
-    taskId,
-    `↩️ Возврат на доработку: ${text}`,
-    { id: me.id, role: me.role },
-    { visibility: 'INTERNAL' },
-  );
+  // Same reasoning as approveTaskAction — the action gate is the
+  // authority for review decisions; addComment's per-stake check would
+  // wrongly veto ADMIN/PM fallbacks.
+  await prisma.comment.create({
+    data: {
+      taskId,
+      authorId: me.id,
+      body: `↩️ Возврат на доработку: ${text}`,
+      source: 'WEB',
+      visibility: 'INTERNAL',
+    },
+  });
   const link = `/projects/${projectKey}/tasks/${taskNumber}`;
   if (task.assigneeId && task.assigneeId !== me.id) {
     await createNotification({

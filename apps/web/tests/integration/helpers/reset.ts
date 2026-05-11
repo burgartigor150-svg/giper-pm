@@ -27,10 +27,37 @@ const TABLES_IN_DELETE_ORDER = [
   'IntegrationSyncLog',
   'ProjectIntegration',
   'Integration',
+  // Messenger graph (Reaction → Mention → Attachment → Message → Member → Channel).
+  'MessageReaction',
+  'MessageMention',
+  'MessageAttachment',
+  'Message',
+  'ChannelMember',
+  'Channel',
+  // Meetings graph.
+  'MeetingTranscript',
+  'MeetingParticipant',
+  'Meeting',
+  // Telegram glue.
+  'TelegramProjectMessage',
+  'ProjectTelegramChat',
+  'UserTelegramBot',
+  // Task graph (assignments / tags / deps / watchers / PR-links / checklists).
+  'TaskAssignment',
+  'TaskTag',
+  'Tag',
+  'TaskDependency',
+  'TaskWatcher',
+  'TaskPullRequest',
+  'ChecklistItem',
+  'Checklist',
   // Task references Project + User.
   'Task',
   'ProjectMember',
   'Project',
+  // PM/team graph.
+  'PmTeamMember',
+  'UserPosition',
   // Auth tables reference User.
   'Session',
   'Account',

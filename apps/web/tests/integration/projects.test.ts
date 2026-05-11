@@ -10,7 +10,7 @@ import {
   addProjectMember,
   removeProjectMember,
 } from '@/lib/projects';
-import { makeUser, makeProject, addMember, sessionUser } from './helpers/factories';
+import { makeUser, makeProject, makeTask, addMember, sessionUser } from './helpers/factories';
 
 const baseInput = {
   name: 'Some Project',
@@ -192,39 +192,61 @@ describe('listProjectsForUser', () => {
     expect(list).toHaveLength(2);
   });
 
-  it('ADMIN scope=mine sees only owned/member', async () => {
+  it('ADMIN scope=mine sees only projects where THEY have a task stake', async () => {
+    // Visibility is per-stake even for ADMIN. Owning a project alone
+    // isn't enough — there has to be at least one task with assignee
+    // ∈ {me, my team} (or an unassigned task I created).
     const admin = await makeUser({ role: 'ADMIN' });
     const stranger = await makeUser({ role: 'MEMBER' });
-    await makeProject({ ownerId: admin.id, key: 'AC' });
+    const mine = await makeProject({ ownerId: admin.id, key: 'AC' });
     await makeProject({ ownerId: stranger.id, key: 'AD' });
+    await makeTask({ projectId: mine.id, creatorId: admin.id, assigneeId: admin.id });
     const list = await listProjectsForUser(sessionUser(admin), { scope: 'mine' });
     expect(list).toHaveLength(1);
     expect(list[0]!.key).toBe('AC');
   });
 
-  it('MEMBER scope=all is ignored — only owned/member visible', async () => {
+  it('MEMBER scope=all is ignored — only stake-of-mine visible', async () => {
     const owner = await makeUser({ role: 'MEMBER' });
     const stranger = await makeUser({ role: 'MEMBER' });
     await makeProject({ ownerId: stranger.id, key: 'AE' });
     const mine = await makeProject({ ownerId: owner.id, key: 'AF' });
+    // Owner needs a task to surface the project in the per-stake list.
+    await makeTask({ projectId: mine.id, creatorId: owner.id, assigneeId: owner.id });
     const list = await listProjectsForUser(sessionUser(owner), { scope: 'all' });
     expect(list).toHaveLength(1);
     expect(list[0]!.id).toBe(mine.id);
   });
 
-  it('MEMBER sees projects where they’re a member', async () => {
+  it('MEMBER sees projects where a task is assigned to them', async () => {
+    // ProjectMember alone no longer surfaces the project — task-level
+    // stake does. This matches how Bitrix-mirror groups work: no
+    // ProjectMember rows, just task assignees.
     const owner = await makeUser();
     const member = await makeUser();
     const p = await makeProject({ ownerId: owner.id });
     await addMember(p.id, member.id, 'CONTRIBUTOR');
+    await makeTask({ projectId: p.id, creatorId: owner.id, assigneeId: member.id });
     const list = await listProjectsForUser(sessionUser(member));
     expect(list).toHaveLength(1);
+  });
+
+  it('member of empty project does NOT see it (no task stake)', async () => {
+    // Bitrix-mirror workgroup with zero tasks should be hidden — owning
+    // it or being a member without any task assignment buys nothing.
+    const owner = await makeUser();
+    const member = await makeUser();
+    const p = await makeProject({ ownerId: owner.id });
+    await addMember(p.id, member.id, 'CONTRIBUTOR');
+    expect(await listProjectsForUser(sessionUser(member))).toHaveLength(0);
   });
 
   it('includeArchived=false (default) hides ARCHIVED', async () => {
     const owner = await makeUser({ role: 'ADMIN' });
     const live = await makeProject({ ownerId: owner.id, key: 'AG' });
     const dead = await makeProject({ ownerId: owner.id, key: 'AH' });
+    await makeTask({ projectId: live.id, creatorId: owner.id, assigneeId: owner.id });
+    await makeTask({ projectId: dead.id, creatorId: owner.id, assigneeId: owner.id });
     await prisma.project.update({
       where: { id: dead.id },
       data: { status: 'ARCHIVED', archivedAt: new Date() },
@@ -235,8 +257,10 @@ describe('listProjectsForUser', () => {
 
   it('status filter applies and overrides default ARCHIVED hiding', async () => {
     const owner = await makeUser({ role: 'ADMIN' });
-    await makeProject({ ownerId: owner.id, key: 'AI' });
+    const live = await makeProject({ ownerId: owner.id, key: 'AI' });
     const dead = await makeProject({ ownerId: owner.id, key: 'AJ' });
+    await makeTask({ projectId: live.id, creatorId: owner.id, assigneeId: owner.id });
+    await makeTask({ projectId: dead.id, creatorId: owner.id, assigneeId: owner.id });
     await prisma.project.update({
       where: { id: dead.id },
       data: { status: 'ARCHIVED', archivedAt: new Date() },
@@ -246,11 +270,12 @@ describe('listProjectsForUser', () => {
     expect(list[0]!.id).toBe(dead.id);
   });
 
-  it('VIEWER who is member sees the project', async () => {
+  it('VIEWER sees the project iff they have a task stake in it', async () => {
     const owner = await makeUser();
     const v = await makeUser({ role: 'VIEWER' });
     const p = await makeProject({ ownerId: owner.id });
     await addMember(p.id, v.id, 'OBSERVER');
+    await makeTask({ projectId: p.id, creatorId: owner.id, assigneeId: v.id });
     const list = await listProjectsForUser(sessionUser(v));
     expect(list).toHaveLength(1);
     expect(list[0]!.id).toBe(p.id);
@@ -258,15 +283,21 @@ describe('listProjectsForUser', () => {
 });
 
 describe('getProject', () => {
-  it('member, owner, and PM can all view', async () => {
+  it('member, owner, and PM-member can all view; PM stranger CANNOT', async () => {
+    // Visibility is per-stake — PM role does NOT bypass project
+    // membership. A PM gets in only when they're owner, ProjectMember,
+    // or have a task stake in the project.
     const owner = await makeUser();
     const m = await makeUser();
-    const pm = await makeUser({ role: 'PM' });
+    const pmMember = await makeUser({ role: 'PM' });
+    const pmStranger = await makeUser({ role: 'PM' });
     const p = await makeProject({ ownerId: owner.id, key: 'GP' });
     await addMember(p.id, m.id, 'CONTRIBUTOR');
+    await addMember(p.id, pmMember.id, 'LEAD');
     expect((await getProject(p.key, sessionUser(owner))).id).toBe(p.id);
     expect((await getProject(p.key, sessionUser(m))).id).toBe(p.id);
-    expect((await getProject(p.key, sessionUser(pm))).id).toBe(p.id);
+    expect((await getProject(p.key, sessionUser(pmMember))).id).toBe(p.id);
+    await expectDomain(getProject(p.key, sessionUser(pmStranger)), 'INSUFFICIENT_PERMISSIONS');
   });
 
   it('non-member MEMBER → INSUFFICIENT_PERMISSIONS', async () => {
@@ -274,6 +305,16 @@ describe('getProject', () => {
     const stranger = await makeUser({ role: 'MEMBER' });
     const p = await makeProject({ ownerId: owner.id, key: 'GR' });
     await expectDomain(getProject(p.key, sessionUser(stranger)), 'INSUFFICIENT_PERMISSIONS');
+  });
+
+  it('user with implicit task-stake (Bitrix mirror) sees the project', async () => {
+    const owner = await makeUser();
+    const bxUser = await makeUser({ role: 'MEMBER' });
+    const p = await makeProject({ ownerId: owner.id, key: 'GBX' });
+    // No ProjectMember row — just an assigned task, like a Bitrix
+    // workgroup we synced where membership is implicit in tasks.
+    await makeTask({ projectId: p.id, creatorId: owner.id, assigneeId: bxUser.id });
+    expect((await getProject(p.key, sessionUser(bxUser))).id).toBe(p.id);
   });
 
   it('non-existent → NOT_FOUND', async () => {

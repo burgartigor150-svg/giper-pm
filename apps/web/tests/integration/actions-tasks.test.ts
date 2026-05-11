@@ -258,14 +258,17 @@ describe('assignTaskAction', () => {
     expect(updated?.assigneeId).toBe(null);
   });
 
-  it('returns VALIDATION when assignee is non-member', async () => {
+  it('returns VALIDATION when assignee id does not match any user', async () => {
+    // ProjectMember requirement was dropped (Bitrix-mirror groups have
+    // no member rows) — only user existence is validated now.
     const owner = await makeUser({ role: 'ADMIN' });
-    const stranger = await makeUser({ role: 'MEMBER' });
     mockMe.id = owner.id;
     const p = await makeProject({ ownerId: owner.id, key: 'ASS' });
     const t = await makeTask({ projectId: p.id, creatorId: owner.id });
 
-    const res = await assignTaskAction(t.id, 'ASS', t.number, stranger.id);
+    const res = await assignTaskAction(
+      t.id, 'ASS', t.number, '00000000-0000-0000-0000-000000000000',
+    );
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.error.code).toBe('VALIDATION');
   });
