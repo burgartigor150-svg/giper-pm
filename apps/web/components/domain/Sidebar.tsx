@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
@@ -16,10 +16,14 @@ import {
   Send,
   Video,
   X,
+  PanelLeftClose,
+  PanelLeft,
 } from 'lucide-react';
 import { cn } from '@giper/ui/cn';
 import { Button } from '@giper/ui/components/Button';
 import { useT } from '@/lib/useT';
+
+const COLLAPSED_KEY = 'giper-pm.sidebar.collapsed';
 
 export type NavKey =
   | 'dashboard'
@@ -63,6 +67,27 @@ type SidebarProps = {
 export function Sidebar({ items, open, onClose }: SidebarProps) {
   const pathname = usePathname();
   const t = useT('nav');
+  // Desktop-only collapse to an icons-only rail. Persisted in
+  // localStorage as a UI preference (not business data).
+  const [collapsed, setCollapsed] = useState(false);
+  useEffect(() => {
+    try {
+      setCollapsed(localStorage.getItem(COLLAPSED_KEY) === '1');
+    } catch {
+      /* SSR/privacy mode — leave default */
+    }
+  }, []);
+  function toggleCollapsed() {
+    setCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(COLLAPSED_KEY, next ? '1' : '0');
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  }
 
   return (
     <>
@@ -78,16 +103,52 @@ export function Sidebar({ items, open, onClose }: SidebarProps) {
 
       <aside
         className={cn(
-          'fixed inset-y-0 left-0 z-40 flex w-60 flex-col border-r border-border bg-background transition-transform',
+          'fixed inset-y-0 left-0 z-40 flex flex-col border-r border-border bg-background transition-[width,transform] duration-200',
+          // Mobile drawer is always full width (60); only desktop
+          // honours the collapsed state.
+          'w-60',
           'md:static md:translate-x-0',
+          collapsed ? 'md:w-14' : 'md:w-60',
           open ? 'translate-x-0' : '-translate-x-full md:translate-x-0',
         )}
         aria-label="Sidebar"
       >
-        <div className="flex h-14 items-center justify-between border-b border-border px-4">
-          <Link href="/dashboard" className="text-sm font-semibold tracking-tight">
-            giper-pm
-          </Link>
+        <div
+          className={cn(
+            'flex h-14 shrink-0 items-center border-b border-border',
+            collapsed ? 'md:justify-center md:px-2' : 'px-4',
+            'justify-between',
+          )}
+        >
+          {!collapsed ? (
+            <Link href="/dashboard" className="text-sm font-semibold tracking-tight">
+              giper-pm
+            </Link>
+          ) : (
+            <Link
+              href="/dashboard"
+              className="hidden text-sm font-semibold tracking-tight md:block"
+              title="giper-pm"
+            >
+              g
+            </Link>
+          )}
+          {/* Desktop collapse toggle. Hidden on mobile where the X
+              close button takes the same slot. */}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="hidden md:inline-flex"
+            onClick={toggleCollapsed}
+            aria-label={collapsed ? 'Развернуть меню' : 'Свернуть меню'}
+            title={collapsed ? 'Развернуть меню' : 'Свернуть меню'}
+          >
+            {collapsed ? (
+              <PanelLeft className="h-5 w-5" />
+            ) : (
+              <PanelLeftClose className="h-5 w-5" />
+            )}
+          </Button>
           <Button
             variant="ghost"
             size="icon"
@@ -105,20 +166,25 @@ export function Sidebar({ items, open, onClose }: SidebarProps) {
               const Icon = ICONS[item.key];
               const isActive =
                 pathname === item.href || pathname.startsWith(`${item.href}/`);
+              const label = t(item.key);
               return (
                 <li key={item.key}>
                   <Link
                     href={item.href}
                     onClick={onClose}
+                    title={collapsed ? label : undefined}
                     className={cn(
-                      'flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors',
+                      'flex items-center rounded-md text-sm transition-colors',
+                      collapsed
+                        ? 'md:justify-center md:px-2 md:py-2 gap-3 px-3 py-2'
+                        : 'gap-3 px-3 py-2',
                       isActive
                         ? 'bg-accent text-accent-foreground'
                         : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
                     )}
                   >
-                    <Icon className="h-4 w-4" />
-                    <span>{t(item.key)}</span>
+                    <Icon className="h-4 w-4 shrink-0" />
+                    <span className={cn(collapsed ? 'md:hidden' : '')}>{label}</span>
                   </Link>
                 </li>
               );
