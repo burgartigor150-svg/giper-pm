@@ -23,6 +23,7 @@ const TABLES_IN_DELETE_ORDER = [
   'Screenshot',
   'AgentDevice',
   'UserConsent',
+  'PushSubscription',
   'UserIntegrationLink',
   'IntegrationSyncLog',
   'ProjectIntegration',

@@ -49,6 +49,9 @@ model User {
 
   // Domain relations
   consents          UserConsent[]
+  /// Per-browser Web Push subscriptions. One row per device/browser
+  /// the user opted-in from.
+  pushSubscriptions PushSubscription[]
   agentDevices      AgentDevice[]
   ownedProjects     Project[]            @relation("ProjectOwner")
   memberProjects    ProjectMember[]
@@ -227,8 +230,36 @@ model UserConsent {
   revokedAt   DateTime?
   ipAddress   String?       // для аудита
   userAgent   String?
-  
+
   @@unique([userId, type])
+  @@index([userId])
+}
+
+/// Web Push subscription. One row per browser+device the user opted in
+/// from (so one user can have a desktop Chrome subscription AND a
+/// mobile Safari one). `endpoint` is globally unique — that's the
+/// upsert key when the same browser re-subscribes (e.g. service-worker
+/// re-registration after a domain change).
+///
+/// Cleanup: when web-push.sendNotification returns 410 Gone (Apple,
+/// Mozilla, Google all use this for unsubscribed endpoints) we delete
+/// the row so we don't keep sending into the void.
+model PushSubscription {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Push service URL the browser handed us. Globally unique.
+  endpoint  String   @unique
+  /// Public key half of the ECDH pair used to encrypt the payload.
+  p256dh    String
+  /// HMAC auth secret derived during subscribe.
+  authSec   String
+  /// User-Agent at subscribe time. Just for diagnostics in the
+  /// settings panel ("Chrome 125 / macOS"); not used for routing.
+  userAgent String?
+  createdAt DateTime @default(now())
+  lastUsedAt DateTime?
+
   @@index([userId])
 }
 

@@ -474,6 +474,40 @@ export async function postMessageAction(input: {
     { notifyUserIds: validMentions.map((u) => u.id) },
   );
 
+  // Push to mentioned users — minus the author (who already saw
+  // what they typed).
+  if (validMentions.length > 0) {
+    void (async () => {
+      try {
+        const channel = await prisma.channel.findUnique({
+          where: { id: input.channelId },
+          select: { name: true, kind: true },
+        });
+        const url =
+          channel?.kind === 'DM' || channel?.kind === 'GROUP_DM'
+            ? `/messages/${input.channelId}`
+            : `/messages/${input.channelId}`;
+        const headline = channel?.kind === 'DM'
+          ? `Сообщение от ${me.name ?? 'кого-то'}`
+          : `${me.name ?? 'Кто-то'} упомянул вас в «${channel?.name ?? 'чате'}»`;
+        const { sendPushToUsers } = await import('@/lib/push/sendPush');
+        await sendPushToUsers(
+          validMentions.map((u) => u.id).filter((id) => id !== me.id),
+          {
+            title: headline,
+            body: body.slice(0, 160),
+            url,
+            tag: `mention:${created.id}`,
+            data: { messageId: created.id, channelId: input.channelId },
+          },
+        );
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn('[messenger] mention push failed:', e);
+      }
+    })();
+  }
+
   revalidatePath('/messages');
   return { ok: true, data: { id: created.id } };
 }

@@ -149,6 +149,13 @@ services:
       # the existing xray HTTP proxy on the host (gparser-xray service).
       TG_PROXY_URL: ${TG_PROXY_URL:-http://host.docker.internal:10829}
 
+      # Web Push (browser notifications). See apps/web/.env.example
+      # for generation instructions. Keep these stable — rotating
+      # invalidates every existing subscription.
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:postmaster@since-b24-ru.ru}
+
       # GitHub webhook
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET}
 

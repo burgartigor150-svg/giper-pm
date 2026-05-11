@@ -59,5 +59,32 @@ export async function assignTask(
     userId: user.id,
   });
 
+  // Push to the new assignee. Only fire when assigneeId actually
+  // changed (the early-return above already guards the same-value
+  // case) AND we're assigning to someone other than the caller
+  // (no need to ping yourself).
+  if (updated.assigneeId && updated.assigneeId !== user.id) {
+    void (async () => {
+      try {
+        const fresh = await prisma.task.findUnique({
+          where: { id: taskId },
+          select: { number: true, title: true, project: { select: { key: true } } },
+        });
+        if (!fresh) return;
+        const { sendPushToUser } = await import('@/lib/push/sendPush');
+        await sendPushToUser(updated.assigneeId!, {
+          title: 'Вам назначена задача',
+          body: `${fresh.project.key}-${fresh.number} ${fresh.title}`,
+          url: `/projects/${fresh.project.key}/tasks/${fresh.number}`,
+          tag: `task:${taskId}`,
+          data: { taskId },
+        });
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn('[tasks] assign push failed:', e);
+      }
+    })();
+  }
+
   return updated;
 }

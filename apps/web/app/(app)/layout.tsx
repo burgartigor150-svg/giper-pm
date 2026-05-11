@@ -5,6 +5,7 @@ import { requireAuth } from '@/lib/auth';
 import { canSeeReports, canSeeSettings, type SessionUser } from '@/lib/permissions';
 import { getActiveTimerWithHealth } from '@/lib/time';
 import { AppShell } from '@/components/domain/AppShell';
+import { PushOptInBanner } from '@/components/domain/PushOptIn';
 import type { NavItem } from '@/components/domain/Sidebar';
 
 function buildNav(user: SessionUser): NavItem[] {
@@ -59,6 +60,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       wsUrl={process.env.NEXT_PUBLIC_WS_URL ?? null}
       inboxUnread={inboxUnread}
     >
+      <PushOptInBanner />
       {children}
     </AppShell>
   );

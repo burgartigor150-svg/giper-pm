@@ -194,6 +194,37 @@ export async function startCallInChannelAction(input: {
     authorId: me.id,
     parentId: null,
   });
+
+  // Fan-out push to every channel member except the caller. Best-
+  // effort: if any subscription is dead or VAPID isn't configured,
+  // the call itself still proceeds (push errors are swallowed
+  // inside sendPushToUsers).
+  void (async () => {
+    try {
+      const recipients = await prisma.channelMember.findMany({
+        where: {
+          channelId: input.channelId,
+          userId: { not: me.id },
+        },
+        select: { userId: true },
+      });
+      const { sendPushToUsers } = await import('@/lib/push/sendPush');
+      await sendPushToUsers(
+        recipients.map((r) => r.userId),
+        {
+          title: `${me.name ?? 'Кто-то'} зовёт на звонок`,
+          body: title,
+          url: `/meetings/${created.meetingId}`,
+          tag: `call:${created.meetingId}`,
+          data: { meetingId: created.meetingId },
+        },
+      );
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn('[meetings] push fan-out failed:', e);
+    }
+  })();
+
   revalidatePath(`/messages/${input.channelId}`);
   revalidatePath('/meetings');
   return { ok: true, meetingId: created.meetingId };
