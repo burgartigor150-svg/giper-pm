@@ -130,7 +130,15 @@ export async function joinMeetingAction({
       canManageAssignments({ id: me.id, role: me.role }, meeting.project));
   if (!allowed) return { ok: false, message: 'Нет прав на эту встречу' };
 
-  const identity = `user:${me.id}`;
+  // Identity must be UNIQUE per session, not per user. The page
+  // (`/meetings/[id]`) is a force-dynamic Server Component — every
+  // render mints a fresh token. If two renders end up with the same
+  // identity, LiveKit kicks the older socket ("identity reused")
+  // and the user gets "выкидывает через минуту". Suffix a short
+  // nonce so each WebRTC connect is its own participant; the webhook
+  // strips the suffix to recover the underlying userId.
+  const nonce = Math.random().toString(36).slice(2, 10);
+  const identity = `user:${me.id}:${nonce}`;
   const displayName = (me.name || me.email || 'PM').slice(0, 80);
   const token = await mintAccessToken({
     roomName: meeting.livekitRoomName,

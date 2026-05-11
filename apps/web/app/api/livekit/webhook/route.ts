@@ -35,14 +35,41 @@ type LkParticipant = { identity?: string; name?: string };
 // LiveKit can serialize EgressStatus as either the protobuf string
 // ("EGRESS_COMPLETE") or its numeric enum value depending on the
 // webhook serializer version. We accept both.
+// `duration` is reported in NANOSECONDS as a 64-bit integer — current
+// SDK versions serialize that as a JS BigInt, which throws on
+// Math.round(). Accept number | bigint | string and normalize below.
 type LkEgressInfo = {
   egress_id?: string;
   egressId?: string;
   status?: string | number;
-  file?: { filename?: string; duration?: number };
-  file_results?: { filename?: string; duration?: number }[];
-  fileResults?: { filename?: string; duration?: number }[];
+  file?: { filename?: string; duration?: number | bigint | string };
+  file_results?: { filename?: string; duration?: number | bigint | string }[];
+  fileResults?: { filename?: string; duration?: number | bigint | string }[];
 };
+
+/**
+ * Egress reports duration in nanoseconds. SDK ≥ 2 serializes 64-bit
+ * fields as JS BigInt; pre-2 serializes them as plain numbers. We
+ * accept either and return whole seconds (rounded).
+ */
+function durationNsToSeconds(
+  raw: number | bigint | string | null | undefined,
+): number | null {
+  if (raw == null) return null;
+  let nanos: number;
+  if (typeof raw === 'bigint') {
+    // bigint nanos / 1e9 fits in a double up to ~104 days; fine for meetings.
+    nanos = Number(raw);
+  } else if (typeof raw === 'string') {
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed)) return null;
+    nanos = parsed;
+  } else {
+    nanos = raw;
+  }
+  if (!Number.isFinite(nanos) || nanos <= 0) return null;
+  return Math.round(nanos / 1_000_000_000);
+}
 
 const EGRESS_STATUS_BY_NUM: Record<number, string> = {
   0: 'EGRESS_STARTING',
@@ -159,7 +186,14 @@ export async function POST(req: Request) {
       if (m && ident) {
         // Best-effort: link to a giper-pm user if identity follows our
         // "user:<id>" convention. Otherwise it's a guest row.
-        const userId = ident.startsWith('user:') ? ident.slice(5) : null;
+        // Identity shape: "user:<userId>" or "user:<userId>:<nonce>".
+        // joinMeetingAction adds a per-session nonce so two renders of
+        // the meeting page don't collide on identity (which would kick
+        // the older socket). Strip everything after the second ':' to
+        // recover the userId for participant attribution.
+        const userId = ident.startsWith('user:')
+          ? ident.slice(5).split(':')[0] || null
+          : null;
         try {
           await prisma.meetingParticipant.upsert({
             where: {
@@ -284,7 +318,7 @@ export async function POST(req: Request) {
         const fileResult =
           eg?.file_results?.[0] || eg?.fileResults?.[0] || eg?.file || null;
         const recordingKey = fileResult?.filename || m.recordingKey;
-        const durationSec = fileResult?.duration ? Math.round(fileResult.duration) : null;
+        const durationSec = durationNsToSeconds(fileResult?.duration);
 
         // The filename LiveKit returns for S3 uploads can be either the
         // bare object key (what we want) or "s3://bucket/object". Strip
