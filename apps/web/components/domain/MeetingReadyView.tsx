@@ -9,6 +9,7 @@ import {
   applyMeetingProposalAction,
   discardMeetingProposalAction,
   getMeetingProposalsAction,
+  searchCandidateAssigneesAction,
 } from '@/actions/aiMeeting';
 import { attachProjectAndRerunAiAction } from '@/actions/meetings';
 import type { ApplyOverrides } from '@/actions/aiHarvest';
@@ -419,11 +420,6 @@ function MentionedAssigneePicker({
     if (candidates !== null) return;
     setError(null);
     startTransition(async () => {
-      // Lazy import to avoid pulling the server-action bundle on cards
-      // that never need disambiguation.
-      const { searchCandidateAssigneesAction } = await import(
-        '@/actions/aiMeeting'
-      );
       const r = await searchCandidateAssigneesAction({
         meetingId,
         mentionedName,

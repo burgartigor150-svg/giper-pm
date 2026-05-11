@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Camera, Square, X, Send, RotateCcw } from 'lucide-react';
+import { sendVideoNoteAction } from '@/actions/messenger';
 
 const MAX_DURATION_SEC = 60;
 // Target a square viewport — Telegram-style round notes. Mobile front
@@ -221,8 +222,20 @@ export function VideoNoteRecorder({ channelId, parentId, onSent, onClose }: Prop
       fd.set('width', String(side));
       fd.set('height', String(sideH));
 
-      const { sendVideoNoteAction } = await import('@/actions/messenger');
+      // NB: import sendVideoNoteAction statically at the top of the
+      // file. Dynamic import() of a server-action module from a
+      // client component breaks the SA wire format — the function
+      // resolves to a different shape (no { ok } envelope) and we
+      // get "undefined is not an object" at runtime.
       const res = await sendVideoNoteAction(fd);
+      // Defensive: an unexpected non-envelope (timeout / framework
+      // misbehaviour) should not crash the UI with TypeError. Show a
+      // generic retry-friendly message instead.
+      if (!res || typeof res !== 'object' || !('ok' in res)) {
+        setError('Ошибка отправки. Попробуйте ещё раз.');
+        setState('preview');
+        return;
+      }
       if (!res.ok) {
         setError(res.error.message);
         setState('preview');
