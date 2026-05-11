@@ -1,5 +1,7 @@
 import { prisma } from '@giper/db';
 import { resolveChannelAccess } from './access';
+import { extractTaskRefs } from '@/lib/text/taskRefs';
+import { loadTaskPreviewsForRefs, type TaskPreview } from '@/lib/tasks/loadTaskPreviews';
 
 export type LoadMessagesOptions = {
   /**
@@ -84,5 +86,28 @@ export async function loadChannelMessages(
       })
     : [];
 
-  return { access, messages: rows, mentionedUsers };
+  // Extract task references (GPM-142, /projects/GPM/tasks/142, full
+  // URLs) from every visible message body in one pass. Visibility of
+  // each task is per-viewer — see loadTaskPreviewsForRefs.
+  const allRefs = rows.flatMap((m) => extractTaskRefs(m.body));
+  const uniqueRefs = Array.from(
+    new Map(allRefs.map((r) => [`${r.key}-${r.number}`, r])).values(),
+  );
+  const taskPreviews = uniqueRefs.length
+    ? await loadTaskPreviewsForRefs(uniqueRefs, userId)
+    : new Map<string, TaskPreview>();
+
+  return {
+    access,
+    messages: rows,
+    mentionedUsers,
+    /**
+     * Flat lookup: "GPM-142" → TaskPreview. The shell builds per-row
+     * cards by re-running extractTaskRefs on the body and resolving
+     * here. We don't pre-attach refs to each message because the
+     * client renderer already has the body string and can do it once
+     * — avoids shipping the same preview multiple times across rows.
+     */
+    taskPreviews: Array.from(taskPreviews.values()),
+  };
 }

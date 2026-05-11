@@ -15,9 +15,12 @@ import {
   createChannelAction,
 } from '@/actions/messenger';
 import { renderRichText } from '@/lib/text/renderRichText';
+import { extractTaskRefs } from '@/lib/text/taskRefs';
+import type { TaskPreview } from '@/lib/tasks/loadTaskPreviews';
 import { MessageReactions } from './MessageReactions';
 import { ThreadPane } from './ThreadPane';
 import { MessageComposer } from './MessageComposer';
+import { TaskPreviewCard } from './TaskPreviewCard';
 import { MessageSquareReply } from 'lucide-react';
 
 type ChannelKind = 'PUBLIC' | 'PRIVATE' | 'DM' | 'GROUP_DM';
@@ -50,6 +53,13 @@ type Props = {
   activeChannelId: string | null;
   initialMessages?: MessageRow[];
   mentionedUsers?: MentionUser[];
+  /**
+   * Flat task previews resolved on the server for every task ref in
+   * the visible messages. The renderer extracts refs from each body
+   * on the fly and reads from this lookup; visibility is already
+   * applied per-viewer upstream.
+   */
+  taskPreviews?: TaskPreview[];
   meId?: string;
 };
 
@@ -59,9 +69,11 @@ export function MessagesShell({
   activeChannelId,
   initialMessages = [],
   mentionedUsers = [],
+  taskPreviews = [],
   meId,
 }: Props) {
   const mentionsMap = new Map(mentionedUsers.map((u) => [u.id, u]));
+  const previewsMap = new Map(taskPreviews.map((p) => [p.key, p]));
   const router = useRouter();
   const [messages, setMessages] = useState<MessageRow[]>(initialMessages);
   const [openThreadId, setOpenThreadId] = useState<string | null>(null);
@@ -182,6 +194,7 @@ export function MessagesShell({
                       m={m}
                       meId={meId ?? ''}
                       mentionsMap={mentionsMap}
+                      previewsMap={previewsMap}
                       onOpenThread={() => setOpenThreadId(m.id)}
                     />
                   ))}
@@ -290,13 +303,20 @@ function MessageRow({
   m,
   meId,
   mentionsMap,
+  previewsMap,
   onOpenThread,
 }: {
   m: MessageRow;
   meId: string;
   mentionsMap: Map<string, { id: string; name: string }>;
+  previewsMap: Map<string, TaskPreview>;
   onOpenThread: () => void;
 }) {
+  // Resolve task refs in this message body. We do this per-row
+  // (not pre-attached per message in the server payload) because
+  // the same task can be referenced by many rows — flat lookup
+  // avoids shipping duplicates.
+  const refs = extractTaskRefs(m.body);
   return (
     <li className="group relative flex gap-3">
       <Avatar src={m.author.image} alt={m.author.name} className="h-8 w-8 shrink-0" />
@@ -310,12 +330,22 @@ function MessageRow({
             })}
           </span>
           {m.editedAt ? (
-            <span className="text-[10px] text-muted-foreground">(изм.)</span>
+            <span className="text-xs text-muted-foreground">(изм.)</span>
           ) : null}
         </div>
         <div className="mt-0.5 whitespace-pre-wrap break-words text-sm">
           {renderRichText(m.body, { mentions: mentionsMap })}
         </div>
+        {refs.length > 0 ? (
+          <div className="mt-1 flex flex-col gap-1">
+            {refs.map((r) => {
+              const key = `${r.key}-${r.number}`;
+              const preview = previewsMap.get(key);
+              if (!preview) return null;
+              return <TaskPreviewCard key={key} preview={preview} />;
+            })}
+          </div>
+        ) : null}
         <MessageReactions
           messageId={m.id}
           reactions={m.reactions}

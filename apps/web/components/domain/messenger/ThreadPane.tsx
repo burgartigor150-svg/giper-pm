@@ -7,8 +7,11 @@ import { useRealtime } from '@giper/realtime/client';
 import { channelForChat } from '@giper/realtime';
 import { loadThreadAction, postMessageAction } from '@/actions/messenger';
 import { renderRichText } from '@/lib/text/renderRichText';
+import { extractTaskRefs } from '@/lib/text/taskRefs';
+import type { TaskPreview } from '@/lib/tasks/loadTaskPreviews';
 import { MessageReactions } from './MessageReactions';
 import { MessageComposer } from './MessageComposer';
+import { TaskPreviewCard } from './TaskPreviewCard';
 
 type MessageRow = {
   id: string;
@@ -39,6 +42,7 @@ export function ThreadPane({ rootMessageId, meId, onClose }: Props) {
     replies: MessageRow[];
     channelId: string;
     mentionedUsers: Array<{ id: string; name: string }>;
+    taskPreviews: TaskPreview[];
   } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -50,6 +54,7 @@ export function ThreadPane({ rootMessageId, meId, onClose }: Props) {
         replies: res.replies as MessageRow[],
         channelId: res.channelId,
         mentionedUsers: res.mentionedUsers,
+        taskPreviews: res.taskPreviews ?? [],
       });
     } else {
       setData(null);
@@ -95,6 +100,7 @@ export function ThreadPane({ rootMessageId, meId, onClose }: Props) {
               m={data.root}
               meId={meId}
               mentionsMap={new Map(data.mentionedUsers.map((u) => [u.id, u]))}
+              previewsMap={new Map((data.taskPreviews ?? []).map((p) => [p.key, p]))}
               isRoot
             />
             {data.replies.length > 0 ? (
@@ -106,6 +112,7 @@ export function ThreadPane({ rootMessageId, meId, onClose }: Props) {
                 m={m}
                 meId={meId}
                 mentionsMap={new Map(data.mentionedUsers.map((u) => [u.id, u]))}
+              previewsMap={new Map((data.taskPreviews ?? []).map((p) => [p.key, p]))}
               />
             ))}
           </ul>
@@ -135,13 +142,16 @@ function ThreadRow({
   m,
   meId,
   mentionsMap,
+  previewsMap,
   isRoot,
 }: {
   m: MessageRow;
   meId: string;
   mentionsMap: Map<string, { id: string; name: string }>;
+  previewsMap: Map<string, TaskPreview>;
   isRoot?: boolean;
 }) {
+  const refs = extractTaskRefs(m.body);
   return (
     <li className="group flex gap-3">
       <Avatar src={m.author.image} alt={m.author.name} className="h-8 w-8 shrink-0" />
@@ -155,10 +165,10 @@ function ThreadRow({
             })}
           </span>
           {m.editedAt ? (
-            <span className="text-[10px] text-muted-foreground">(изм.)</span>
+            <span className="text-xs text-muted-foreground">(изм.)</span>
           ) : null}
           {isRoot ? (
-            <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+            <span className="text-xs uppercase tracking-wide text-muted-foreground">
               Исходное
             </span>
           ) : null}
@@ -166,6 +176,16 @@ function ThreadRow({
         <div className="mt-0.5 whitespace-pre-wrap break-words text-sm">
           {renderRichText(m.body, { mentions: mentionsMap })}
         </div>
+        {refs.length > 0 ? (
+          <div className="mt-1 flex flex-col gap-1">
+            {refs.map((r) => {
+              const key = `${r.key}-${r.number}`;
+              const preview = previewsMap.get(key);
+              if (!preview) return null;
+              return <TaskPreviewCard key={key} preview={preview} />;
+            })}
+          </div>
+        ) : null}
         <MessageReactions messageId={m.id} reactions={m.reactions} meId={meId} />
       </div>
     </li>

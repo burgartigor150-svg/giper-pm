@@ -5,6 +5,8 @@ import { prisma, Prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
 import { ensureMembership, resolveChannelAccess } from '@/lib/messenger/access';
 import { publishChatEvent } from '@/lib/realtime/publishChat';
+import { extractTaskRefs } from '@/lib/text/taskRefs';
+import { loadTaskPreviewsForRefs } from '@/lib/tasks/loadTaskPreviews';
 
 type ActionResult<T = unknown> =
   | { ok: true; data?: T }
@@ -412,7 +414,21 @@ export async function loadThreadAction(rootMessageId: string) {
       })
     : [];
 
-  return { root, replies, channelId: root.channelId, mentionedUsers };
+  // Same task-ref extraction as loadChannelMessages — visibility is
+  // applied per viewer (me.id) inside loadTaskPreviewsForRefs.
+  const allRefs = [
+    ...extractTaskRefs(root.body),
+    ...replies.flatMap((r) => extractTaskRefs(r.body)),
+  ];
+  const uniqueRefs = Array.from(
+    new Map(allRefs.map((r) => [`${r.key}-${r.number}`, r])).values(),
+  );
+  const taskPreviewsMap = uniqueRefs.length
+    ? await loadTaskPreviewsForRefs(uniqueRefs, me.id)
+    : null;
+  const taskPreviews = taskPreviewsMap ? Array.from(taskPreviewsMap.values()) : [];
+
+  return { root, replies, channelId: root.channelId, mentionedUsers, taskPreviews };
 }
 
 /**
