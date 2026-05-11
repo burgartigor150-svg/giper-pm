@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, useTransition } from 'react';
+import { useEffect, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Plus, Search, X } from 'lucide-react';
 import { Avatar } from '@giper/ui/components/Avatar';
@@ -17,17 +17,13 @@ type UserHit = {
 };
 
 /**
- * Channel creation popover.
+ * Channel creation dialog.
  *
- * Replaces the previous tiny one-shot form (name + kind radio). For
- * PRIVATE channels the picker is mandatory — a private channel with
- * no invitees is functionally a draft, so the server rejects it and
- * the client requires ≥1 selected user before enabling submit.
- *
- * Why not a fully-modal dialog: this is invoked from the sidebar
- * header and stays anchored next to the +-button so the user keeps
- * their place in the chat list. The popover closes on outside-click
- * (sibling effect from a tiny global listener) and Esc.
+ * Centered modal with a darkening overlay — the previous inline
+ * popover collided with the global sidebar in the narrow messenger
+ * column. PRIVATE channels require ≥1 invitee (rejected server-side
+ * otherwise); PUBLIC/BROADCAST allow zero. Closes on Esc or
+ * overlay click.
  */
 export function CreateChannelDialog() {
   const router = useRouter();
@@ -37,7 +33,6 @@ export function CreateChannelDialog() {
   const [picked, setPicked] = useState<UserHit[]>([]);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const rootRef = useRef<HTMLDivElement>(null);
 
   function reset() {
     setName('');
@@ -46,24 +41,16 @@ export function CreateChannelDialog() {
     setError(null);
   }
 
-  // Close on outside click and Esc. We attach the listeners only
-  // while open so we don't leak handlers on every render.
+  // Close on Esc. Outside-click is handled by clicking the modal
+  // overlay below (more reliable than a global mousedown listener,
+  // which fires while the user is selecting text inside the dialog).
   useEffect(() => {
     if (!open) return;
-    function onClick(e: MouseEvent) {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    }
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') setOpen(false);
     }
-    document.addEventListener('mousedown', onClick);
     document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onClick);
-      document.removeEventListener('keydown', onKey);
-    };
+    return () => document.removeEventListener('keydown', onKey);
   }, [open]);
 
   const canSubmit =
@@ -90,7 +77,7 @@ export function CreateChannelDialog() {
   }
 
   return (
-    <div className="relative" ref={rootRef}>
+    <div>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -101,10 +88,25 @@ export function CreateChannelDialog() {
         <Plus className="size-4" />
       </button>
       {open ? (
-        <div className="absolute left-0 top-full z-50 mt-1 w-80 max-w-[calc(100vw-1rem)] rounded-md border border-border bg-popover p-3 shadow-lg">
-          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Новый канал
-          </div>
+        // Centered modal — overlay darkens the entire app (sidebar +
+        // chat list included) so the dialog clearly owns the screen
+        // and there's nothing else to click by accident.
+        <div
+          className="fixed inset-0 z-[70] flex items-start justify-center bg-foreground/40 p-4 pt-[10vh]"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Новый канал"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setOpen(false);
+              reset();
+            }
+          }}
+        >
+          <div className="w-full max-w-sm rounded-lg border border-border bg-popover p-4 shadow-2xl">
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Новый канал
+            </div>
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -179,6 +181,7 @@ export function CreateChannelDialog() {
             >
               {pending ? 'Создаю…' : 'Создать'}
             </button>
+          </div>
           </div>
         </div>
       ) : null}
