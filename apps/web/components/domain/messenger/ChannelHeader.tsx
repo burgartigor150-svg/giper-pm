@@ -2,7 +2,21 @@
 
 import { useEffect, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Hash, Lock, Users, X, Search, UserPlus, UserMinus, Phone, Bell, BellOff } from 'lucide-react';
+import {
+  Hash,
+  Lock,
+  Users,
+  X,
+  Search,
+  UserPlus,
+  UserMinus,
+  Phone,
+  Bell,
+  BellOff,
+  Link as LinkIcon,
+  Copy,
+  Trash2,
+} from 'lucide-react';
 import { Avatar } from '@giper/ui/components/Avatar';
 import {
   listChannelMembersAction,
@@ -10,6 +24,9 @@ import {
   removeFromChannelAction,
   searchUsersForMention,
   setChannelMutedAction,
+  createChannelInviteAction,
+  listChannelInvitesAction,
+  revokeChannelInviteAction,
 } from '@/actions/messenger';
 import { startCallInChannelAction } from '@/actions/meetings';
 
@@ -135,7 +152,11 @@ export function ChannelHeader({
         </div>
       </header>
       {panelOpen ? (
-        <MembersPanel channelId={channel.id} onClose={() => setPanelOpen(false)} />
+        <MembersPanel
+          channelId={channel.id}
+          channelKind={channel.kind}
+          onClose={() => setPanelOpen(false)}
+        />
       ) : null}
     </>
   );
@@ -143,9 +164,11 @@ export function ChannelHeader({
 
 function MembersPanel({
   channelId,
+  channelKind,
   onClose,
 }: {
   channelId: string;
+  channelKind: 'PUBLIC' | 'PRIVATE' | 'DM' | 'GROUP_DM';
   onClose: () => void;
 }) {
   const [data, setData] = useState<{ members: ChannelMember[]; canManage: boolean } | null>(null);
@@ -264,7 +287,7 @@ function MembersPanel({
           )}
         </div>
         {data?.canManage ? (
-          <div className="border-t border-border p-3">
+          <div className="border-t border-border p-3 space-y-2">
             {!inviteOpen ? (
               <button
                 type="button"
@@ -285,6 +308,9 @@ function MembersPanel({
                 onCancel={() => setInviteOpen(false)}
               />
             )}
+            {channelKind === 'PRIVATE' ? (
+              <InviteLinksSection channelId={channelId} />
+            ) : null}
           </div>
         ) : null}
       </aside>
@@ -409,6 +435,141 @@ function InviteForm({
           {pending ? 'Добавляю…' : `Добавить (${picked.size})`}
         </button>
       </div>
+    </div>
+  );
+}
+
+type InviteRow = {
+  id: string;
+  token: string;
+  expiresAt: Date | null;
+  maxUses: number | null;
+  useCount: number;
+  revokedAt: Date | null;
+  createdAt: Date;
+  createdBy: { id: string; name: string };
+};
+
+function InviteLinksSection({ channelId }: { channelId: string }) {
+  const [invites, setInvites] = useState<InviteRow[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+  const [copied, setCopied] = useState<string | null>(null);
+
+  function reload() {
+    startTransition(async () => {
+      const r = await listChannelInvitesAction(channelId);
+      if (r.ok) {
+        setInvites(r.data);
+        setError(null);
+      } else {
+        setError(r.error.message);
+      }
+    });
+  }
+
+  useEffect(() => {
+    reload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [channelId]);
+
+  function create() {
+    setError(null);
+    startTransition(async () => {
+      const r = await createChannelInviteAction(channelId);
+      if (!r.ok) {
+        setError(r.error.message);
+        return;
+      }
+      reload();
+    });
+  }
+
+  function revoke(id: string) {
+    startTransition(async () => {
+      const r = await revokeChannelInviteAction(id);
+      if (!r.ok) {
+        setError(r.error.message);
+        return;
+      }
+      reload();
+    });
+  }
+
+  function inviteUrl(token: string): string {
+    if (typeof window === 'undefined') return `/i/${token}`;
+    return `${window.location.origin}/i/${token}`;
+  }
+
+  async function copy(token: string) {
+    const url = inviteUrl(token);
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(token);
+      setTimeout(() => setCopied((c) => (c === token ? null : c)), 1500);
+    } catch {
+      // Fallback: show the URL in an alert so the user can copy manually.
+      // eslint-disable-next-line no-alert
+      prompt('Скопируйте ссылку:', url);
+    }
+  }
+
+  const active = (invites ?? []).filter((i) => !i.revokedAt);
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-medium text-muted-foreground">
+          Ссылки-приглашения
+        </span>
+        <button
+          type="button"
+          onClick={create}
+          disabled={pending}
+          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+        >
+          <LinkIcon className="size-3" />
+          Создать
+        </button>
+      </div>
+      {error ? <p className="text-xs text-destructive">{error}</p> : null}
+      {active.length === 0 ? (
+        <p className="text-xs text-muted-foreground">
+          Нет активных ссылок
+        </p>
+      ) : (
+        <ul className="space-y-1">
+          {active.map((inv) => (
+            <li
+              key={inv.id}
+              className="flex items-center gap-1.5 rounded-md border border-border bg-background/50 px-2 py-1.5"
+            >
+              <code className="flex-1 truncate font-mono text-[11px] text-muted-foreground">
+                {inviteUrl(inv.token)}
+              </code>
+              <button
+                type="button"
+                onClick={() => copy(inv.token)}
+                className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                aria-label="Скопировать ссылку"
+                title={copied === inv.token ? 'Скопировано' : 'Скопировать'}
+              >
+                <Copy className="size-3" />
+              </button>
+              <button
+                type="button"
+                onClick={() => revoke(inv.id)}
+                disabled={pending}
+                className="rounded-md p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+                aria-label="Отозвать"
+                title="Отозвать"
+              >
+                <Trash2 className="size-3" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

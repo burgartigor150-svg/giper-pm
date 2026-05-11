@@ -1130,3 +1130,304 @@ export async function searchMessagesAction(input: {
   `);
   return rows;
 }
+
+// ---------------------------------------------------------------------------
+// Invite links — Telegram-style /i/<token>. PRIVATE channels only.
+// PUBLIC = anyone-in-org joins, DM/GROUP_DM = explicit pair, so neither
+// needs a link.
+// ---------------------------------------------------------------------------
+
+const INVITE_TOKEN_BYTES = 18; // 24 base64url chars — short enough to share.
+
+function generateInviteToken(): string {
+  // URL-safe random. Node's randomUUID gives 22 base64 chars after stripping
+  // dashes; we prefer raw 18 bytes → base64url for an 24-char token without
+  // padding ("=").
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { randomBytes } = require('node:crypto') as typeof import('node:crypto');
+  return randomBytes(INVITE_TOKEN_BYTES)
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+}
+
+/**
+ * Create an invite link for a PRIVATE channel. Only channel admins can.
+ * Optional expiry (ms) and maxUses mirror Telegram semantics.
+ */
+export async function createChannelInviteAction(
+  channelId: string,
+  opts: { expiresAt?: Date | null; maxUses?: number | null } = {},
+): Promise<ActionResult<{ id: string; token: string }>> {
+  const me = await requireAuth();
+  const channel = await prisma.channel.findUnique({
+    where: { id: channelId },
+    select: { id: true, kind: true, isArchived: true },
+  });
+  if (!channel) return { ok: false, error: { code: 'NOT_FOUND', message: 'Канал не найден' } };
+  if (channel.kind !== 'PRIVATE') {
+    return {
+      ok: false,
+      error: { code: 'VALIDATION', message: 'Ссылка-приглашение только для приватных каналов' },
+    };
+  }
+  if (channel.isArchived) {
+    return { ok: false, error: { code: 'GONE', message: 'Канал в архиве' } };
+  }
+  const myMembership = await prisma.channelMember.findUnique({
+    where: { channelId_userId: { channelId, userId: me.id } },
+    select: { role: true },
+  });
+  if (!myMembership || myMembership.role !== 'ADMIN') {
+    return { ok: false, error: { code: 'FORBIDDEN', message: 'Только админ канала' } };
+  }
+  if (opts.maxUses != null && (opts.maxUses < 1 || !Number.isInteger(opts.maxUses))) {
+    return { ok: false, error: { code: 'VALIDATION', message: 'maxUses должно быть положительным целым' } };
+  }
+  if (opts.expiresAt && opts.expiresAt.getTime() <= Date.now()) {
+    return { ok: false, error: { code: 'VALIDATION', message: 'Срок истёк ещё до создания' } };
+  }
+
+  // Retry once on the astronomically-unlikely token collision.
+  let invite: { id: string; token: string } | null = null;
+  for (let attempt = 0; attempt < 3 && !invite; attempt++) {
+    const token = generateInviteToken();
+    try {
+      const row = await prisma.channelInvite.create({
+        data: {
+          channelId,
+          token,
+          createdById: me.id,
+          expiresAt: opts.expiresAt ?? null,
+          maxUses: opts.maxUses ?? null,
+        },
+        select: { id: true, token: true },
+      });
+      invite = row;
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') continue;
+      throw e;
+    }
+  }
+  if (!invite) {
+    return { ok: false, error: { code: 'INTERNAL', message: 'Не удалось создать ссылку' } };
+  }
+  revalidatePath(`/messages/${channelId}`);
+  return { ok: true, data: invite };
+}
+
+/**
+ * Revoke an invite link. The link becomes unusable immediately.
+ * Admin-only. Idempotent on already-revoked rows.
+ */
+export async function revokeChannelInviteAction(
+  inviteId: string,
+): Promise<ActionResult> {
+  const me = await requireAuth();
+  const invite = await prisma.channelInvite.findUnique({
+    where: { id: inviteId },
+    select: { id: true, channelId: true, revokedAt: true },
+  });
+  if (!invite) return { ok: false, error: { code: 'NOT_FOUND', message: 'Ссылка не найдена' } };
+  const myMembership = await prisma.channelMember.findUnique({
+    where: { channelId_userId: { channelId: invite.channelId, userId: me.id } },
+    select: { role: true },
+  });
+  if (!myMembership || myMembership.role !== 'ADMIN') {
+    return { ok: false, error: { code: 'FORBIDDEN', message: 'Только админ канала' } };
+  }
+  if (!invite.revokedAt) {
+    await prisma.channelInvite.update({
+      where: { id: inviteId },
+      data: { revokedAt: new Date() },
+    });
+  }
+  revalidatePath(`/messages/${invite.channelId}`);
+  return { ok: true };
+}
+
+/**
+ * List active + revoked invites for a channel (admins manage them via UI).
+ */
+export async function listChannelInvitesAction(
+  channelId: string,
+): Promise<
+  | {
+      ok: true;
+      data: Array<{
+        id: string;
+        token: string;
+        expiresAt: Date | null;
+        maxUses: number | null;
+        useCount: number;
+        revokedAt: Date | null;
+        createdAt: Date;
+        createdBy: { id: string; name: string };
+      }>;
+    }
+  | { ok: false; error: { code: string; message: string } }
+> {
+  const me = await requireAuth();
+  const myMembership = await prisma.channelMember.findUnique({
+    where: { channelId_userId: { channelId, userId: me.id } },
+    select: { role: true },
+  });
+  if (!myMembership || myMembership.role !== 'ADMIN') {
+    return { ok: false, error: { code: 'FORBIDDEN', message: 'Только админ канала' } };
+  }
+  const rows = await prisma.channelInvite.findMany({
+    where: { channelId },
+    orderBy: { createdAt: 'desc' },
+    select: {
+      id: true,
+      token: true,
+      expiresAt: true,
+      maxUses: true,
+      useCount: true,
+      revokedAt: true,
+      createdAt: true,
+      createdBy: { select: { id: true, name: true } },
+    },
+  });
+  return { ok: true, data: rows };
+}
+
+/**
+ * Preview an invite by token (public — used by /i/[token] landing page).
+ * Returns minimal channel info so the user can decide whether to join.
+ * Caller must still be authenticated to actually accept.
+ */
+export async function previewChannelInviteAction(
+  token: string,
+): Promise<
+  | {
+      ok: true;
+      data: {
+        channelId: string;
+        channelName: string;
+        channelKind: 'PUBLIC' | 'PRIVATE' | 'DM' | 'GROUP_DM';
+        memberCount: number;
+        isValid: boolean;
+        reason?: string;
+      };
+    }
+  | { ok: false; error: { code: string; message: string } }
+> {
+  await requireAuth();
+  const invite = await prisma.channelInvite.findUnique({
+    where: { token },
+    select: {
+      id: true,
+      channelId: true,
+      expiresAt: true,
+      maxUses: true,
+      useCount: true,
+      revokedAt: true,
+      channel: {
+        select: { id: true, name: true, kind: true, isArchived: true, _count: { select: { members: true } } },
+      },
+    },
+  });
+  if (!invite) return { ok: false, error: { code: 'NOT_FOUND', message: 'Ссылка не найдена' } };
+
+  let isValid = true;
+  let reason: string | undefined;
+  if (invite.revokedAt) {
+    isValid = false;
+    reason = 'Ссылка отозвана';
+  } else if (invite.expiresAt && invite.expiresAt.getTime() <= Date.now()) {
+    isValid = false;
+    reason = 'Срок ссылки истёк';
+  } else if (invite.maxUses != null && invite.useCount >= invite.maxUses) {
+    isValid = false;
+    reason = 'Лимит использований исчерпан';
+  } else if (invite.channel.isArchived) {
+    isValid = false;
+    reason = 'Канал в архиве';
+  }
+  return {
+    ok: true,
+    data: {
+      channelId: invite.channel.id,
+      channelName: invite.channel.name,
+      channelKind: invite.channel.kind,
+      memberCount: invite.channel._count.members,
+      isValid,
+      reason,
+    },
+  };
+}
+
+/**
+ * Accept an invite — joins the caller as MEMBER of the channel and
+ * atomically increments useCount. Validates expiry/maxUses/revocation
+ * under transaction so two simultaneous accepts don't both pass.
+ */
+export async function acceptChannelInviteAction(
+  token: string,
+): Promise<ActionResult<{ channelId: string }>> {
+  const me = await requireAuth();
+  try {
+    const channelId = await prisma.$transaction(async (tx) => {
+      const invite = await tx.channelInvite.findUnique({
+        where: { token },
+        select: {
+          id: true,
+          channelId: true,
+          expiresAt: true,
+          maxUses: true,
+          useCount: true,
+          revokedAt: true,
+          channel: { select: { id: true, isArchived: true } },
+        },
+      });
+      if (!invite) throw new Error('NOT_FOUND');
+      if (invite.revokedAt) throw new Error('REVOKED');
+      if (invite.expiresAt && invite.expiresAt.getTime() <= Date.now()) {
+        throw new Error('EXPIRED');
+      }
+      if (invite.maxUses != null && invite.useCount >= invite.maxUses) {
+        throw new Error('EXHAUSTED');
+      }
+      if (invite.channel.isArchived) throw new Error('ARCHIVED');
+
+      // Already a member? Treat as no-op success without touching counters.
+      const existing = await tx.channelMember.findUnique({
+        where: { channelId_userId: { channelId: invite.channelId, userId: me.id } },
+        select: { userId: true },
+      });
+      if (existing) return invite.channelId;
+
+      // Atomic counter bump conditioned on maxUses to defeat races.
+      // Raw SQL because Prisma can't express "maxUses IS NULL OR maxUses > useCount"
+      // with a column-column comparison in updateMany.where.
+      const updated = await tx.$executeRaw`
+        UPDATE "ChannelInvite"
+        SET "useCount" = "useCount" + 1
+        WHERE "id" = ${invite.id}
+          AND "revokedAt" IS NULL
+          AND ("maxUses" IS NULL OR "maxUses" > "useCount")
+      `;
+      if (updated === 0) throw new Error('EXHAUSTED');
+
+      await tx.channelMember.create({
+        data: { channelId: invite.channelId, userId: me.id, role: 'MEMBER' },
+      });
+      return invite.channelId;
+    });
+    revalidatePath('/messages');
+    revalidatePath(`/messages/${channelId}`);
+    return { ok: true, data: { channelId } };
+  } catch (e) {
+    const code = e instanceof Error ? e.message : 'INTERNAL';
+    const map: Record<string, { code: string; message: string }> = {
+      NOT_FOUND: { code: 'NOT_FOUND', message: 'Ссылка не найдена' },
+      REVOKED: { code: 'GONE', message: 'Ссылка отозвана' },
+      EXPIRED: { code: 'GONE', message: 'Срок ссылки истёк' },
+      EXHAUSTED: { code: 'GONE', message: 'Лимит использований исчерпан' },
+      ARCHIVED: { code: 'GONE', message: 'Канал в архиве' },
+    };
+    return { ok: false, error: map[code] ?? { code: 'INTERNAL', message: 'Не удалось вступить' } };
+  }
+}

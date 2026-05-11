@@ -81,6 +81,7 @@ model User {
   // Messenger relations.
   channelsCreated     Channel[]          @relation("ChannelCreator")
   channelMemberships  ChannelMember[]    @relation("ChannelMembership")
+  channelInvitesCreated ChannelInvite[]  @relation("ChannelInviteCreator")
   messages            Message[]          @relation("MessageAuthor")
   messageReactions    MessageReaction[]  @relation("MessageReactor")
   messageMentions     MessageMention[]   @relation("MessageMentioned")
@@ -1196,6 +1197,8 @@ model Channel {
   messages    Message[]
   /// Meetings started from this channel via "Позвонить".
   meetings    Meeting[]       @relation("ChannelMeeting")
+  /// Invite links — Telegram-style join via /i/<token>.
+  invites     ChannelInvite[]
 
   @@unique([projectId, slug])
   @@index([kind, isArchived])
@@ -1228,6 +1231,28 @@ model ChannelMember {
 enum ChannelRole {
   ADMIN
   MEMBER
+}
+
+/// Invite links for PRIVATE channels. PUBLIC channels don't need
+/// them (anyone in the org can join), DM/GROUP_DM are explicit
+/// member sets. Tokens are URL-safe random strings; the join URL is
+/// /i/<token>. Optional expiry + max uses mirror Telegram semantics.
+model ChannelInvite {
+  id          String    @id @default(cuid())
+  channelId   String
+  channel     Channel   @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  token       String    @unique
+  createdById String
+  createdBy   User      @relation("ChannelInviteCreator", fields: [createdById], references: [id])
+  /// null = no expiry.
+  expiresAt   DateTime?
+  /// null = unlimited uses.
+  maxUses     Int?
+  useCount    Int       @default(0)
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([channelId, revokedAt])
 }
 
 model Message {

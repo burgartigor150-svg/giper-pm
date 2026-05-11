@@ -28,12 +28,13 @@ const TABLES_IN_DELETE_ORDER = [
   'IntegrationSyncLog',
   'ProjectIntegration',
   'Integration',
-  // Messenger graph (Reaction → Mention → Attachment → Message → Member → Channel).
+  // Messenger graph (Reaction → Mention → Attachment → Message → Member → Invite → Channel).
   'MessageReaction',
   'MessageMention',
   'MessageAttachment',
   'Message',
   'ChannelMember',
+  'ChannelInvite',
   'Channel',
   // Meetings graph.
   'MeetingTranscript',
