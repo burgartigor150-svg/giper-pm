@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Hash, Lock, MessageSquare, Plus } from 'lucide-react';
+import { Hash, Lock, MessageSquare } from 'lucide-react';
 import { Avatar } from '@giper/ui/components/Avatar';
 import { Button } from '@giper/ui/components/Button';
 import { cn } from '@giper/ui/cn';
@@ -12,7 +12,6 @@ import { channelForChat } from '@giper/realtime';
 import {
   postMessageAction,
   markChannelReadAction,
-  createChannelAction,
 } from '@/actions/messenger';
 import { renderRichText } from '@/lib/text/renderRichText';
 import { extractTaskRefs } from '@/lib/text/taskRefs';
@@ -21,6 +20,8 @@ import { MessageReactions } from './MessageReactions';
 import { ThreadPane } from './ThreadPane';
 import { MessageComposer } from './MessageComposer';
 import { TaskPreviewCard } from './TaskPreviewCard';
+import { CreateChannelDialog } from './CreateChannelDialog';
+import { ChannelHeader } from './ChannelHeader';
 import { MessageSquareReply } from 'lucide-react';
 
 type ChannelKind = 'PUBLIC' | 'PRIVATE' | 'DM' | 'GROUP_DM';
@@ -129,7 +130,7 @@ export function MessagesShell({
       <aside className="flex h-full flex-col border-r border-border bg-background">
         <div className="flex items-center justify-between border-b border-border px-3 py-2">
           <h2 className="text-sm font-semibold">Чаты</h2>
-          <CreateChannelButton />
+          <CreateChannelDialog />
         </div>
         <div className="flex-1 overflow-y-auto p-2 text-sm">
           <Section title="Каналы">
@@ -181,6 +182,18 @@ export function MessagesShell({
           </div>
         ) : (
           <>
+            {(() => {
+              // Resolve the active channel's metadata for the header.
+              // The shell already has both member + public lists in
+              // props — no need for a server fetch just to show name.
+              const active =
+                memberChannels.find((c) => c.id === activeChannelId) ??
+                publicChannels.find((c) => c.id === activeChannelId);
+              if (!active) return null;
+              return (
+                <ChannelHeader channel={active} />
+              );
+            })()}
             <div className="flex-1 overflow-y-auto px-4 py-4" ref={scrollRef}>
               {messages.length === 0 ? (
                 <div className="text-sm text-muted-foreground">
@@ -385,86 +398,4 @@ function pluralReplies(n: number): string {
   return 'ответов';
 }
 
-function CreateChannelButton() {
-  const [open, setOpen] = useState(false);
-  const [name, setName] = useState('');
-  const [kind, setKind] = useState<'PUBLIC' | 'PRIVATE'>('PUBLIC');
-  const [pending, startTransition] = useTransition();
-  const router = useRouter();
-
-  function handleCreate() {
-    if (!name.trim()) return;
-    startTransition(async () => {
-      const res = await createChannelAction({ name, kind });
-      if (res.ok && res.data) {
-        setOpen(false);
-        setName('');
-        router.push(`/messages/${res.data.id}`);
-        router.refresh();
-      }
-    });
-  }
-
-  return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-        aria-label="Создать канал"
-      >
-        <Plus className="h-4 w-4" />
-      </button>
-      {open ? (
-        <div className="absolute right-0 top-full z-30 mt-1 w-64 rounded-md border border-border bg-popover p-3 shadow-md">
-          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Новый канал
-          </div>
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Название…"
-            className="mb-2 w-full rounded-md border border-input bg-background px-2 py-1 text-sm"
-            autoFocus
-          />
-          <div className="mb-2 flex gap-2 text-xs">
-            <label className="flex items-center gap-1">
-              <input
-                type="radio"
-                checked={kind === 'PUBLIC'}
-                onChange={() => setKind('PUBLIC')}
-              />
-              Публичный
-            </label>
-            <label className="flex items-center gap-1">
-              <input
-                type="radio"
-                checked={kind === 'PRIVATE'}
-                onChange={() => setKind('PRIVATE')}
-              />
-              Приватный
-            </label>
-          </div>
-          <div className="flex gap-2">
-            <Button
-              size="sm"
-              type="button"
-              onClick={handleCreate}
-              disabled={pending || !name.trim()}
-            >
-              Создать
-            </Button>
-            <Button
-              size="sm"
-              type="button"
-              variant="ghost"
-              onClick={() => setOpen(false)}
-            >
-              Отмена
-            </Button>
-          </div>
-        </div>
-      ) : null}
-    </div>
-  );
-}
+// CreateChannelButton moved to CreateChannelDialog with member picker.

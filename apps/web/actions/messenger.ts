@@ -73,6 +73,13 @@ export async function createChannelAction(input: {
   kind: 'PUBLIC' | 'PRIVATE';
   projectId?: string | null;
   description?: string;
+  /**
+   * Initial invitees added as MEMBER alongside the creator (ADMIN).
+   * Required for PRIVATE — a channel that nobody but the creator can
+   * see is functionally a draft and is rejected at validation. For
+   * PUBLIC the list is optional (anyone can self-join).
+   */
+  memberUserIds?: string[];
 }): Promise<ActionResult<{ id: string; slug: string }>> {
   const me = await requireAuth();
   const name = input.name.trim();
@@ -81,6 +88,35 @@ export async function createChannelAction(input: {
   }
   if (name.length > 60) {
     return { ok: false, error: { code: 'VALIDATION', message: 'Не длиннее 60 символов' } };
+  }
+  const memberUserIds = (input.memberUserIds ?? []).filter((id) => id && id !== me.id);
+  if (input.kind === 'PRIVATE' && memberUserIds.length === 0) {
+    return {
+      ok: false,
+      error: {
+        code: 'VALIDATION',
+        message: 'В приватный канал нужно добавить хотя бы одного участника',
+      },
+    };
+  }
+  // Validate every invited user exists and is active. Don't trust the
+  // client array — it's user-supplied input.
+  let validInviteeIds: string[] = [];
+  if (memberUserIds.length > 0) {
+    const found = await prisma.user.findMany({
+      where: { id: { in: memberUserIds }, isActive: true },
+      select: { id: true },
+    });
+    validInviteeIds = found.map((u) => u.id);
+    if (validInviteeIds.length !== memberUserIds.length) {
+      return {
+        ok: false,
+        error: {
+          code: 'VALIDATION',
+          message: 'Один или несколько участников не существуют или деактивированы',
+        },
+      };
+    }
   }
   const slug = slugify(name);
   try {
@@ -93,7 +129,10 @@ export async function createChannelAction(input: {
         projectId: input.projectId ?? null,
         createdById: me.id,
         members: {
-          create: { userId: me.id, role: 'ADMIN' },
+          create: [
+            { userId: me.id, role: 'ADMIN' },
+            ...validInviteeIds.map((userId) => ({ userId, role: 'MEMBER' as const })),
+          ],
         },
       },
       select: { id: true, slug: true },
@@ -106,6 +145,171 @@ export async function createChannelAction(input: {
     }
     return { ok: false, error: { code: 'INTERNAL', message: 'Не удалось создать канал' } };
   }
+}
+
+/**
+ * Add users to an existing channel.
+ *
+ * Permission: caller must be an ADMIN of the channel (creator is
+ * ADMIN by default). DM/GROUP_DM are NOT invitable through this
+ * action — those are 1-1 / fixed-set conversations by design;
+ * inviting a third party would turn a DM into a group, which is a
+ * different concept and should be a separate "convert to group"
+ * flow.
+ */
+export async function inviteToChannelAction(
+  channelId: string,
+  userIds: string[],
+): Promise<ActionResult<{ added: number }>> {
+  const me = await requireAuth();
+  const channel = await prisma.channel.findUnique({
+    where: { id: channelId },
+    select: { id: true, kind: true, isArchived: true },
+  });
+  if (!channel) return { ok: false, error: { code: 'NOT_FOUND', message: 'Канал не найден' } };
+  if (channel.kind === 'DM' || channel.kind === 'GROUP_DM') {
+    return { ok: false, error: { code: 'VALIDATION', message: 'В DM нельзя пригласить' } };
+  }
+  if (channel.isArchived) {
+    return { ok: false, error: { code: 'GONE', message: 'Канал в архиве' } };
+  }
+  const myMembership = await prisma.channelMember.findUnique({
+    where: { channelId_userId: { channelId, userId: me.id } },
+    select: { role: true },
+  });
+  if (!myMembership || myMembership.role !== 'ADMIN') {
+    return { ok: false, error: { code: 'FORBIDDEN', message: 'Только админ канала может приглашать' } };
+  }
+
+  const cleanIds = Array.from(new Set(userIds.filter((id) => id && id !== me.id)));
+  if (cleanIds.length === 0) {
+    return { ok: true, data: { added: 0 } };
+  }
+  const validUsers = await prisma.user.findMany({
+    where: { id: { in: cleanIds }, isActive: true },
+    select: { id: true },
+  });
+  // Find who's already in to compute the truthful "added" count.
+  // Then bulk-create the new rows (skipDuplicates as a safety net
+  // in case someone joins between findMany and createMany).
+  const existing = await prisma.channelMember.findMany({
+    where: { channelId, userId: { in: validUsers.map((u) => u.id) } },
+    select: { userId: true },
+  });
+  const existingIds = new Set(existing.map((e) => e.userId));
+  const toAdd = validUsers.filter((u) => !existingIds.has(u.id));
+  if (toAdd.length > 0) {
+    await prisma.channelMember.createMany({
+      data: toAdd.map((u) => ({ channelId, userId: u.id, role: 'MEMBER' as const })),
+      skipDuplicates: true,
+    });
+  }
+  const added = toAdd.length;
+  revalidatePath('/messages');
+  revalidatePath(`/messages/${channelId}`);
+  return { ok: true, data: { added } };
+}
+
+/**
+ * Remove a user from a channel. Same permission model as invite —
+ * channel ADMIN only. The user being removed cannot be the channel
+ * creator (createdById) — that role is sticky to prevent
+ * locking-yourself-out scenarios.
+ */
+export async function removeFromChannelAction(
+  channelId: string,
+  userId: string,
+): Promise<ActionResult> {
+  const me = await requireAuth();
+  const channel = await prisma.channel.findUnique({
+    where: { id: channelId },
+    select: { id: true, kind: true, createdById: true },
+  });
+  if (!channel) return { ok: false, error: { code: 'NOT_FOUND', message: 'Канал не найден' } };
+  if (channel.kind === 'DM' || channel.kind === 'GROUP_DM') {
+    return { ok: false, error: { code: 'VALIDATION', message: 'Из DM нельзя удалить участника' } };
+  }
+  if (userId === channel.createdById) {
+    return {
+      ok: false,
+      error: { code: 'VALIDATION', message: 'Нельзя удалить создателя канала' },
+    };
+  }
+  const myMembership = await prisma.channelMember.findUnique({
+    where: { channelId_userId: { channelId, userId: me.id } },
+    select: { role: true },
+  });
+  if (!myMembership || myMembership.role !== 'ADMIN') {
+    return { ok: false, error: { code: 'FORBIDDEN', message: 'Только админ канала может удалять' } };
+  }
+  await prisma.channelMember
+    .delete({ where: { channelId_userId: { channelId, userId } } })
+    .catch(() => null); // already gone is fine
+  revalidatePath('/messages');
+  revalidatePath(`/messages/${channelId}`);
+  return { ok: true };
+}
+
+/**
+ * List members of a channel for the members-drawer UI.
+ *
+ * Permission: any channel member can see who else is in. DM/GROUP_DM
+ * also work — the caller is one of the two participants.
+ */
+export async function listChannelMembersAction(
+  channelId: string,
+): Promise<
+  | {
+      ok: true;
+      data: {
+        members: Array<{
+          id: string;
+          name: string;
+          email: string;
+          image: string | null;
+          role: string;
+          isCreator: boolean;
+        }>;
+        canManage: boolean;
+      };
+    }
+  | { ok: false; error: { code: string; message: string } }
+> {
+  const me = await requireAuth();
+  const channel = await prisma.channel.findUnique({
+    where: { id: channelId },
+    select: { id: true, createdById: true },
+  });
+  if (!channel) return { ok: false, error: { code: 'NOT_FOUND', message: 'Канал не найден' } };
+  const myMembership = await prisma.channelMember.findUnique({
+    where: { channelId_userId: { channelId, userId: me.id } },
+    select: { role: true },
+  });
+  if (!myMembership) {
+    return { ok: false, error: { code: 'FORBIDDEN', message: 'Нет доступа' } };
+  }
+  const rows = await prisma.channelMember.findMany({
+    where: { channelId },
+    orderBy: [{ role: 'asc' }, { joinedAt: 'asc' }],
+    select: {
+      role: true,
+      user: { select: { id: true, name: true, email: true, image: true } },
+    },
+  });
+  return {
+    ok: true,
+    data: {
+      members: rows.map((r) => ({
+        id: r.user.id,
+        name: r.user.name,
+        email: r.user.email,
+        image: r.user.image,
+        role: r.role,
+        isCreator: r.user.id === channel.createdById,
+      })),
+      canManage: myMembership.role === 'ADMIN',
+    },
+  };
 }
 
 export async function joinChannelAction(channelId: string): Promise<ActionResult> {
