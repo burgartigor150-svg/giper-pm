@@ -402,6 +402,8 @@ type QuickAddInput = {
   /** Optional pre-selection from the dialog. */
   assigneeId?: string;
   priority?: 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
+  /** Pre-fill deadline (used by the calendar's day quick-add). */
+  dueDate?: string;
 };
 
 /**
@@ -419,6 +421,7 @@ export async function quickAddTaskAction(
     parentId: input.parentTaskId,
     assigneeId: input.assigneeId || undefined,
     priority: input.priority,
+    dueDate: input.dueDate || undefined,
   });
   if (!parsed.success) {
     return {

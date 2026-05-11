@@ -101,7 +101,7 @@ export default async function CalendarPage({
           orderBy: { key: 'asc' },
         });
 
-  const [items, lookaheadItems, projects] = await Promise.all([
+  const [items, lookaheadItems, projects, eventRows] = await Promise.all([
     getDeadlinesInRange(rangeStart, rangeEnd, { id: me.id, role: me.role }, filters),
     getDeadlinesInRange(
       lookaheadStart,
@@ -110,6 +110,26 @@ export default async function CalendarPage({
       { ...filters, status: ['BACKLOG', 'TODO', 'IN_PROGRESS', 'REVIEW'] },
     ),
     projectsPromise,
+    // Personal/team calendar events overlapping the visible range.
+    prisma.calendarEvent.findMany({
+      where: {
+        AND: [{ endAt: { gt: rangeStart } }, { startAt: { lt: rangeEnd } }],
+        OR: [
+          { createdById: me.id },
+          { attendees: { some: { userId: me.id } } },
+        ],
+      },
+      orderBy: { startAt: 'asc' },
+      select: {
+        id: true,
+        title: true,
+        startAt: true,
+        endAt: true,
+        isAllDay: true,
+        location: true,
+        createdById: true,
+      },
+    }),
   ]);
 
   // Assignee picker = strictly my team (PmTeamMember rows + me).
@@ -155,6 +175,11 @@ export default async function CalendarPage({
         lookahead={lookaheadItems.map((i) => ({
           ...i,
           dueDate: i.dueDate.toISOString(),
+        }))}
+        events={eventRows.map((e) => ({
+          ...e,
+          startAt: e.startAt.toISOString(),
+          endAt: e.endAt.toISOString(),
         }))}
         currentUserId={me.id}
         currentUserRole={me.role}

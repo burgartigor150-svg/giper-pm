@@ -40,6 +40,9 @@ const TABLES_IN_DELETE_ORDER = [
   'MeetingTranscript',
   'MeetingParticipant',
   'Meeting',
+  // Calendar events.
+  'CalendarEventAttendee',
+  'CalendarEvent',
   // Telegram glue.
   'TelegramProjectMessage',
   'ProjectTelegramChat',

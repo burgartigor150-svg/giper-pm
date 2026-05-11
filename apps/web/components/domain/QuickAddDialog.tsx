@@ -34,6 +34,7 @@ export function QuickAddDialog() {
   const [title, setTitle] = useState('');
   const [assigneeId, setAssigneeId] = useState<string>('');
   const [priority, setPriority] = useState<'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT'>('MEDIUM');
+  const [dueDate, setDueDate] = useState<string>('');
   const [members, setMembers] = useState<QuickAddMember[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -61,10 +62,11 @@ export function QuickAddDialog() {
   useEffect(() => {
     const onOpen = (e: Event) => {
       const detail = (e as CustomEvent).detail as
-        | { parentTaskId?: string; projectKey?: string }
+        | { parentTaskId?: string; projectKey?: string; dueDate?: string }
         | undefined;
       if (detail?.parentTaskId) setParentTaskId(detail.parentTaskId);
       if (detail?.projectKey) setProjectKey(detail.projectKey);
+      if (detail?.dueDate) setDueDate(detail.dueDate);
       setOpen(true);
     };
     window.addEventListener('giper:quick-add-task', onOpen);
@@ -94,6 +96,7 @@ export function QuickAddDialog() {
       setParentTaskId(null);
       setAssigneeId('');
       setPriority('MEDIUM');
+      setDueDate('');
     } else {
       // Focus textarea on next paint.
       setTimeout(() => titleRef.current?.focus(), 0);
@@ -132,6 +135,7 @@ export function QuickAddDialog() {
           parentTaskId: parentTaskId ?? undefined,
           assigneeId: assigneeId || undefined,
           priority,
+          dueDate: dueDate || undefined,
         });
         if (!res.ok) {
           setError(res.error.message);
@@ -148,7 +152,7 @@ export function QuickAddDialog() {
         setOpen(false);
       });
     },
-    [projectKey, title, parentTaskId, assigneeId, priority, router],
+    [projectKey, title, parentTaskId, assigneeId, priority, dueDate, router],
   );
 
   if (typeof document === 'undefined' || !open) return null;
@@ -269,6 +273,19 @@ export function QuickAddDialog() {
               </select>
             </label>
           </div>
+
+          <label className="flex flex-col gap-1.5">
+            <span className="text-xs uppercase tracking-wide text-muted-foreground">
+              Дедлайн
+            </span>
+            <input
+              type="date"
+              value={dueDate}
+              onChange={(e) => setDueDate(e.target.value)}
+              disabled={pending}
+              className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+            />
+          </label>
 
           {error ? <p className="text-xs text-red-600">{error}</p> : null}
         </div>

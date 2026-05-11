@@ -57,6 +57,17 @@ export type DeadlineItem = {
   assignee: Person | null;
 };
 
+export type CalendarEventItem = {
+  id: string;
+  title: string;
+  startAt: string; // ISO
+  endAt: string; // ISO
+  isAllDay: boolean;
+  /** "meeting:<id>" marker for call-type events, otherwise location text. */
+  location: string | null;
+  createdById: string;
+};
+
 type Filters = {
   scope?: 'mine' | 'team';
   projectKey?: string;
@@ -72,6 +83,7 @@ type Props = {
   anchor: string;
   items: DeadlineItem[];
   lookahead: DeadlineItem[];
+  events?: CalendarEventItem[];
   currentUserId: string;
   currentUserRole: string;
   projects: { key: string; name: string }[];
@@ -164,6 +176,7 @@ export function Calendar({
   anchor,
   items,
   lookahead,
+  events = [],
   currentUserId,
   currentUserRole,
   projects,
@@ -233,6 +246,31 @@ export function Calendar({
     }
     return map;
   }, [items, optimisticMove]);
+
+  // Per-day buckets of CalendarEvent (separate map — the grid renders
+  // them after tasks in each cell). All-day events span their full
+  // range; for the calendar's simple use we drop a chip on every day
+  // the event covers.
+  const eventBuckets = useMemo(() => {
+    const map = new Map<string, CalendarEventItem[]>();
+    for (const ev of events) {
+      // Walk from startAt's day to the day before endAt (endAt is
+      // exclusive for all-day; for timed events the same day usually).
+      const start = startOfDay(new Date(ev.startAt));
+      const end = new Date(ev.endAt);
+      let cur = start;
+      let safety = 0;
+      while (cur.getTime() < end.getTime() && safety < 60) {
+        const k = dayKey(cur);
+        const arr = map.get(k);
+        if (arr) arr.push(ev);
+        else map.set(k, [ev]);
+        cur = new Date(cur.getFullYear(), cur.getMonth(), cur.getDate() + 1);
+        safety++;
+      }
+    }
+    return map;
+  }, [events]);
 
   // ---- Navigation
   const navigate = useCallback(
@@ -599,6 +637,7 @@ export function Calendar({
                 today={today}
                 selectedDayKey={selectedDayKey}
                 buckets={buckets}
+                eventBuckets={eventBuckets}
                 onDayClick={(date) => setPopover({ key: dayKey(date), date })}
               />
             ) : view === 'week' ? (
@@ -607,10 +646,15 @@ export function Calendar({
                 today={today}
                 selectedDayKey={selectedDayKey}
                 buckets={buckets}
+                eventBuckets={eventBuckets}
                 onDayClick={(date) => setPopover({ key: dayKey(date), date })}
               />
             ) : (
-              <DayList anchor={anchor} buckets={buckets} />
+              <DayList
+                anchor={anchor}
+                buckets={buckets}
+                events={eventBuckets.get(anchor) ?? []}
+              />
             )}
           </div>
           <UpcomingSidebar
@@ -681,12 +725,14 @@ function MonthGrid({
   today,
   selectedDayKey,
   buckets,
+  eventBuckets,
   onDayClick,
 }: {
   anchor: string;
   today: Date;
   selectedDayKey: string | null;
   buckets: Map<string, DeadlineItem[]>;
+  eventBuckets: Map<string, CalendarEventItem[]>;
   onDayClick: (d: Date) => void;
 }) {
   const [y, m] = anchor.split('-').map(Number);
@@ -721,6 +767,7 @@ function MonthGrid({
             isSelected={dayKey(day) === selectedDayKey}
             inMonth={day.getMonth() === monthIdx}
             items={buckets.get(dayKey(day)) ?? []}
+            events={eventBuckets.get(dayKey(day)) ?? []}
             onClick={onDayClick}
           />
         )),
@@ -734,12 +781,14 @@ function WeekGrid({
   today,
   selectedDayKey,
   buckets,
+  eventBuckets,
   onDayClick,
 }: {
   anchor: string;
   today: Date;
   selectedDayKey: string | null;
   buckets: Map<string, DeadlineItem[]>;
+  eventBuckets: Map<string, CalendarEventItem[]>;
   onDayClick: (d: Date) => void;
 }) {
   const start = new Date(anchor);
@@ -765,6 +814,7 @@ function WeekGrid({
           isSelected={dayKey(d) === selectedDayKey}
           inMonth={true}
           items={buckets.get(dayKey(d)) ?? []}
+          events={eventBuckets.get(dayKey(d)) ?? []}
           onClick={onDayClick}
           tall
         />
@@ -776,9 +826,11 @@ function WeekGrid({
 function DayList({
   anchor,
   buckets,
+  events = [],
 }: {
   anchor: string;
   buckets: Map<string, DeadlineItem[]>;
+  events?: CalendarEventItem[];
 }) {
   const d = new Date(anchor);
   const list = buckets.get(dayKey(d)) ?? [];
@@ -793,14 +845,27 @@ function DayList({
         })}
       </h2>
       <DroppableDay date={d}>
-        {list.length === 0 ? (
-          <p className="text-sm text-muted-foreground">На этот день задач нет.</p>
+        {list.length === 0 && events.length === 0 ? (
+          <p className="text-sm text-muted-foreground">На этот день ничего нет.</p>
         ) : (
-          <ul className="flex flex-col gap-1">
-            {list.map((it) => (
-              <DraggableTaskCard key={it.id} item={it} expanded />
-            ))}
-          </ul>
+          <>
+            {list.length > 0 ? (
+              <ul className="flex flex-col gap-1">
+                {list.map((it) => (
+                  <DraggableTaskCard key={it.id} item={it} expanded />
+                ))}
+              </ul>
+            ) : null}
+            {events.length > 0 ? (
+              <ul className="mt-2 flex flex-col gap-1 border-t border-border pt-2">
+                {events.map((ev) => (
+                  <li key={ev.id}>
+                    <EventChip ev={ev} />
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </>
         )}
       </DroppableDay>
     </div>
@@ -813,6 +878,7 @@ function DayCell({
   isSelected,
   inMonth,
   items,
+  events = [],
   onClick,
   tall,
 }: {
@@ -821,6 +887,7 @@ function DayCell({
   isSelected: boolean;
   inMonth: boolean;
   items: DeadlineItem[];
+  events?: CalendarEventItem[];
   onClick: (d: Date) => void;
   tall?: boolean;
 }) {
@@ -886,7 +953,43 @@ function DayCell({
             +{hidden} ещё
           </button>
         ) : null}
+        {events.length > 0 ? (
+          <ul className="mt-0.5 flex flex-col gap-0.5">
+            {events.slice(0, 3).map((ev) => (
+              <EventChip key={ev.id} ev={ev} />
+            ))}
+            {events.length > 3 ? (
+              <li className="px-1 text-[10px] text-muted-foreground">
+                +{events.length - 3} ещё
+              </li>
+            ) : null}
+          </ul>
+        ) : null}
       </div>
+    </div>
+  );
+}
+
+function EventChip({ ev }: { ev: CalendarEventItem }) {
+  const isCall = !!ev.location && ev.location.startsWith('meeting:');
+  const time = ev.isAllDay
+    ? null
+    : new Date(ev.startAt).toLocaleTimeString('ru-RU', {
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+  return (
+    <div
+      className={[
+        'flex items-center gap-1 truncate rounded px-1.5 py-0.5 text-[10px]',
+        isCall
+          ? 'bg-blue-500/15 text-blue-700 dark:text-blue-300'
+          : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300',
+      ].join(' ')}
+      title={ev.title}
+    >
+      {time ? <span className="font-mono tabular-nums">{time}</span> : null}
+      <span className="truncate">{ev.title}</span>
     </div>
   );
 }
@@ -1106,13 +1209,49 @@ function DayPopover({
             </ul>
           )}
         </div>
-        <div className="border-t px-4 py-2 text-right">
-          <Link
-            href={`/projects?dueDate=${ymd(date)}`}
-            className="text-xs text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded"
+        <div className="flex items-center justify-end gap-2 border-t px-4 py-2">
+          <span className="mr-auto text-xs text-muted-foreground">Добавить на этот день:</span>
+          <button
+            type="button"
+            onClick={() => {
+              const dueDate = ymd(date);
+              window.dispatchEvent(
+                new CustomEvent('giper:quick-add-task', { detail: { dueDate } }),
+              );
+              onClose();
+            }}
+            className="rounded-md border border-input bg-background px-2.5 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
-            + Создать задачу с этим дедлайном
-          </Link>
+            Задача
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              window.dispatchEvent(
+                new CustomEvent('giper:new-calendar-entry', {
+                  detail: { date: ymd(date), mode: 'event' },
+                }),
+              );
+              onClose();
+            }}
+            className="rounded-md border border-input bg-background px-2.5 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            Событие
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              window.dispatchEvent(
+                new CustomEvent('giper:new-calendar-entry', {
+                  detail: { date: ymd(date), mode: 'call' },
+                }),
+              );
+              onClose();
+            }}
+            className="rounded-md border border-input bg-background px-2.5 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            Созвон
+          </button>
         </div>
       </div>
     </div>

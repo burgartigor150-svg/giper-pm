@@ -8,6 +8,7 @@ import { AppShell } from '@/components/domain/AppShell';
 import { PushOptInBanner } from '@/components/domain/PushOptIn';
 import { ActiveCallProvider } from '@/components/domain/ActiveCallProvider';
 import { ActiveCallContainer } from '@/components/domain/ActiveCallContainer';
+import { NewCalendarEventDialog } from '@/components/domain/calendar/NewCalendarEventDialog';
 import type { NavItem } from '@/components/domain/Sidebar';
 
 function buildNav(user: SessionUser): NavItem[] {
@@ -69,6 +70,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             mounted across navigation so the WebRTC connection
             survives router pushes. */}
         <ActiveCallContainer />
+        {/* Quick-create modal for calendar entries — listens for
+            window 'giper:new-calendar-entry' so any view (calendar
+            grid, day popover, etc.) can summon it. */}
+        <NewCalendarEventDialog />
       </ActiveCallProvider>
     </AppShell>
   );

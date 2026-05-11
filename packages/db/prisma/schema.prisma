@@ -82,6 +82,8 @@ model User {
   channelsCreated     Channel[]          @relation("ChannelCreator")
   channelMemberships  ChannelMember[]    @relation("ChannelMembership")
   channelInvitesCreated ChannelInvite[]  @relation("ChannelInviteCreator")
+  calendarEventsCreated CalendarEvent[]  @relation("CalendarEventCreator")
+  calendarEventAttendances CalendarEventAttendee[] @relation("CalendarEventAttendee")
   messages            Message[]          @relation("MessageAuthor")
   messageReactions    MessageReaction[]  @relation("MessageReactor")
   messageMentions     MessageMention[]   @relation("MessageMentioned")
@@ -342,6 +344,8 @@ model Project {
   telegramChats ProjectTelegramChat[]
   /// Video meetings tied to this project (LiveKit + transcription).
   meetings      Meeting[]
+  /// Lightweight calendar entries scoped to this project.
+  calendarEvents CalendarEvent[]
 
   @@unique([externalSource, externalId])
   @@index([status])
@@ -1388,4 +1392,60 @@ model MessageMention {
 
   @@id([messageId, userId])
   @@index([userId, createdAt])
+}
+
+// ============================================================================
+// CALENDAR EVENTS
+// Lightweight personal/team calendar entries that aren't tasks and aren't
+// active meetings — planning items, deadlines, time-off, all-hands etc.
+// Visibility = creator + attendees (a-la Google Calendar). Tasks and Meetings
+// remain separate first-class entities; the calendar grid renders all three.
+// ============================================================================
+
+model CalendarEvent {
+  id          String       @id @default(cuid())
+  title       String
+  description String?      @db.Text
+  /// Optional project scoping — appears in that project's calendar feed.
+  projectId   String?
+  project     Project?     @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  /// Start instant (UTC). For all-day events, midnight in the user's tz.
+  startAt     DateTime
+  /// End instant. For all-day events, the next midnight (exclusive).
+  endAt       DateTime
+  /// True = render as a date-only chip, ignore time. False = time-bound.
+  isAllDay    Boolean      @default(false)
+  /// Where the event happens (room, address, video link). Free-form.
+  location    String?
+
+  createdById String
+  createdBy   User         @relation("CalendarEventCreator", fields: [createdById], references: [id])
+
+  attendees   CalendarEventAttendee[]
+
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@index([startAt, endAt])
+  @@index([projectId, startAt])
+  @@index([createdById, startAt])
+}
+
+model CalendarEventAttendee {
+  eventId   String
+  event     CalendarEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User          @relation("CalendarEventAttendee", fields: [userId], references: [id], onDelete: Cascade)
+  /// Optional response — null = no decision yet.
+  response  EventResponse?
+  createdAt DateTime      @default(now())
+
+  @@id([eventId, userId])
+  @@index([userId, createdAt])
+}
+
+enum EventResponse {
+  ACCEPTED
+  DECLINED
+  TENTATIVE
 }
