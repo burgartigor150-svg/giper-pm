@@ -23,6 +23,7 @@ import { TaskPreviewCard } from './TaskPreviewCard';
 import { CreateChannelDialog } from './CreateChannelDialog';
 import { ChannelHeader } from './ChannelHeader';
 import { VideoNotePlayer } from './VideoNotePlayer';
+import { SystemEventCard, type SystemEvent } from './SystemEventCard';
 import { MessageSquareReply } from 'lucide-react';
 
 type ChannelKind = 'PUBLIC' | 'PRIVATE' | 'DM' | 'GROUP_DM';
@@ -57,6 +58,14 @@ type MessageRow = {
   createdAt: Date;
   reactions: Array<{ userId: string; emoji: string }>;
   attachments?: MessageAttachmentLite[];
+  source?: 'WEB' | 'MOBILE' | 'API' | 'SYSTEM';
+  eventKind?:
+    | 'CALL_STARTED'
+    | 'CALL_ENDED'
+    | 'MEMBER_CHANGED'
+    | 'CHANNEL_RENAMED'
+    | null;
+  eventPayload?: unknown;
 };
 
 type MentionUser = { id: string; name: string };
@@ -345,6 +354,22 @@ function MessageRow({
   // the same task can be referenced by many rows — flat lookup
   // avoids shipping duplicates.
   const refs = extractTaskRefs(m.body);
+
+  // SYSTEM events get a specialised card without avatar / author /
+  // timestamp chrome — that data is encoded inside the card itself.
+  if (m.source === 'SYSTEM' && m.eventKind) {
+    return (
+      <li className="flex justify-center">
+        <SystemEventCard
+          kind={m.eventKind as SystemEvent}
+          authorName={m.author.name}
+          payload={m.eventPayload ?? null}
+          createdAt={new Date(m.createdAt)}
+        />
+      </li>
+    );
+  }
+
   return (
     <li className="group relative flex gap-3">
       <Avatar src={m.author.image} alt={m.author.name} className="h-8 w-8 shrink-0" />

@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useState, useTransition } from 'react';
-import { Hash, Lock, Users, X, Search, UserPlus, UserMinus } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Hash, Lock, Users, X, Search, UserPlus, UserMinus, Phone } from 'lucide-react';
 import { Avatar } from '@giper/ui/components/Avatar';
 import {
   listChannelMembersAction,
@@ -9,6 +10,7 @@ import {
   removeFromChannelAction,
   searchUsersForMention,
 } from '@/actions/messenger';
+import { startCallInChannelAction } from '@/actions/meetings';
 
 type ChannelLite = {
   id: string;
@@ -39,13 +41,34 @@ type ChannelMember = {
  */
 export function ChannelHeader({ channel }: { channel: ChannelLite }) {
   const [panelOpen, setPanelOpen] = useState(false);
-  if (channel.kind === 'DM' || channel.kind === 'GROUP_DM') {
-    // DM doesn't need this header — the sidebar already shows the
-    // participant name. Keeping the bar empty would also waste a
-    // row of vertical space.
-    return null;
+  const [callPending, startCall] = useTransition();
+  const router = useRouter();
+  // DM/GROUP_DM no longer hide the header — we want the call button
+  // there too. We keep the title visible for context (the sidebar
+  // also shows it, but redundancy is cheap and avoids whiplash).
+  const Icon =
+    channel.kind === 'PRIVATE'
+      ? Lock
+      : channel.kind === 'DM' || channel.kind === 'GROUP_DM'
+        ? Users
+        : Hash;
+  const isDm = channel.kind === 'DM' || channel.kind === 'GROUP_DM';
+
+  function call() {
+    startCall(async () => {
+      const r = await startCallInChannelAction({ channelId: channel.id });
+      if (!r.ok) {
+        // Inline alert is harsh but we don't have toast yet. The
+        // most common reason is "Нет прав" which the user can read
+        // and react to.
+        // eslint-disable-next-line no-alert
+        alert(r.message);
+        return;
+      }
+      router.push(`/meetings/${r.meetingId}`);
+    });
   }
-  const Icon = channel.kind === 'PRIVATE' ? Lock : Hash;
+
   return (
     <>
       <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-border bg-background px-4">
@@ -53,15 +76,29 @@ export function ChannelHeader({ channel }: { channel: ChannelLite }) {
           <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
           <h2 className="truncate text-sm font-semibold">{channel.name}</h2>
         </div>
-        <button
-          type="button"
-          onClick={() => setPanelOpen(true)}
-          className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors duration-150 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          aria-label="Участники канала"
-        >
-          <Users className="size-3.5" aria-hidden="true" />
-          Участники
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={call}
+            disabled={callPending}
+            className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors duration-150 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+            aria-label="Начать звонок в этом чате"
+          >
+            <Phone className="size-3.5" aria-hidden="true" />
+            {callPending ? 'Создаём…' : 'Позвонить'}
+          </button>
+          {!isDm ? (
+            <button
+              type="button"
+              onClick={() => setPanelOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors duration-150 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              aria-label="Участники канала"
+            >
+              <Users className="size-3.5" aria-hidden="true" />
+              Участники
+            </button>
+          ) : null}
+        </div>
       </header>
       {panelOpen ? (
         <MembersPanel channelId={channel.id} onClose={() => setPanelOpen(false)} />

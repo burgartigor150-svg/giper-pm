@@ -81,6 +81,125 @@ export async function createMeetingAction({
 }
 
 /**
+ * Start a video call attached to a chat channel ("Позвонить" from
+ * the chat header). Creates a Meeting with channelId set, drops a
+ * SYSTEM message with eventKind=CALL_STARTED into the chat so every
+ * participant sees a join card in realtime, and (optionally) pings
+ * the other DM party via Telegram bot if they have one linked.
+ *
+ * Permission: any channel member can start a call. The action does
+ * NOT auto-join the caller — the UI redirects to /meetings/<id>
+ * which mints the join token via joinMeetingAction.
+ *
+ * Side effects all live in one transaction so a partial fail
+ * (e.g. the meeting row is created but the system message blows
+ * up) can be rolled back together — otherwise we'd have orphan
+ * meetings in the dashboard and confused participants.
+ */
+export async function startCallInChannelAction(input: {
+  channelId: string;
+}): Promise<
+  | { ok: true; meetingId: string }
+  | { ok: false; message: string }
+> {
+  const me = await requireAuth();
+  const { resolveChannelAccess } = await import('@/lib/messenger/access');
+  const { publishChatEvent } = await import('@/lib/realtime/publishChat');
+
+  const access = await resolveChannelAccess(input.channelId, me.id);
+  if (!access) return { ok: false, message: 'Канал не найден' };
+  if (!access.canPost) {
+    return { ok: false, message: 'Нет прав на запись в этот канал' };
+  }
+
+  const channel = await prisma.channel.findUnique({
+    where: { id: input.channelId },
+    select: {
+      id: true,
+      name: true,
+      kind: true,
+      // For the system-message title we want "Звонок в #project-x" /
+      // "Звонок с Игорь" — depends on channel kind.
+      members: {
+        select: { user: { select: { id: true, name: true } } },
+        take: 5,
+      },
+    },
+  });
+  if (!channel) return { ok: false, message: 'Канал не найден' };
+
+  // Reject duplicate active call in the same channel. Two concurrent
+  // LiveKit rooms in one DM is confusing; the existing one wins and
+  // the caller is told to join it.
+  const existing = await prisma.meeting.findFirst({
+    where: {
+      channelId: input.channelId,
+      status: { in: ['PLANNED', 'ACTIVE'] },
+    },
+    select: { id: true },
+  });
+  if (existing) {
+    return { ok: true, meetingId: existing.id };
+  }
+
+  // Title heuristic. For DM use the other party's name; for named
+  // channels, "Звонок: <name>". Falls back to "Звонок" when neither
+  // applies (shouldn't, but keeps the column NOT NULL happy).
+  let title = 'Звонок';
+  if (channel.kind === 'DM') {
+    const other = channel.members.find((m) => m.user.id !== me.id);
+    if (other) title = `Звонок с ${other.user.name}`;
+  } else if (channel.name) {
+    title = `Звонок: ${channel.name}`;
+  }
+
+  const created = await prisma.$transaction(async (tx) => {
+    const meeting = await tx.meeting.create({
+      data: {
+        title: title.slice(0, 200),
+        kind: 'VIDEO_LIVEKIT',
+        status: 'PLANNED',
+        createdById: me.id,
+        channelId: input.channelId,
+      },
+      select: { id: true },
+    });
+    const livekitRoomName = newRoomName(meeting.id);
+    await tx.meeting.update({
+      where: { id: meeting.id },
+      data: { livekitRoomName },
+    });
+    const systemMsg = await tx.message.create({
+      data: {
+        channelId: input.channelId,
+        authorId: me.id,
+        body: '', // payload-driven card; body is unused for system events
+        source: 'SYSTEM',
+        eventKind: 'CALL_STARTED',
+        eventPayload: { meetingId: meeting.id, livekitRoomName, title },
+      },
+      select: { id: true },
+    });
+    await tx.channel.update({
+      where: { id: input.channelId },
+      data: { updatedAt: new Date() },
+    });
+    return { meetingId: meeting.id, systemMsgId: systemMsg.id, livekitRoomName };
+  });
+
+  await publishChatEvent({
+    kind: 'message.new',
+    channelId: input.channelId,
+    messageId: created.systemMsgId,
+    authorId: me.id,
+    parentId: null,
+  });
+  revalidatePath(`/messages/${input.channelId}`);
+  revalidatePath('/meetings');
+  return { ok: true, meetingId: created.meetingId };
+}
+
+/**
  * Mint a LiveKit access token for the caller and (lazily) kick off
  * composite recording on the first join.
  */
@@ -111,6 +230,7 @@ export async function joinMeetingAction({
       livekitEgressId: true,
       recordingKey: true,
       createdById: true,
+      channelId: true,
       project: {
         select: { ownerId: true, members: { select: { userId: true, role: true } } },
       },
@@ -122,10 +242,19 @@ export async function joinMeetingAction({
   if (meeting.status === 'ENDED' || meeting.status === 'PROCESSING' || meeting.status === 'READY') {
     return { ok: false, message: 'Встреча уже закончилась — посмотрите запись на странице карточки.' };
   }
-  // Permissions: creator, or project member, or admin.
+  // Permissions: creator, project member, channel member, or admin.
+  // Chat-originated meetings (channelId set) inherit visibility from
+  // the channel — anyone who can read the chat can join the call.
+  let channelAllowed = false;
+  if (meeting.channelId) {
+    const { resolveChannelAccess } = await import('@/lib/messenger/access');
+    const acc = await resolveChannelAccess(meeting.channelId, me.id);
+    channelAllowed = !!acc?.canRead;
+  }
   const allowed =
     me.role === 'ADMIN' ||
     meeting.createdById === me.id ||
+    channelAllowed ||
     (meeting.project &&
       canManageAssignments({ id: me.id, role: me.role }, meeting.project));
   if (!allowed) return { ok: false, message: 'Нет прав на эту встречу' };
@@ -181,8 +310,10 @@ export async function endMeetingAction({
     select: {
       id: true,
       status: true,
+      startedAt: true,
       livekitEgressId: true,
       createdById: true,
+      channelId: true,
       project: { select: { ownerId: true, members: { select: { userId: true, role: true } } } },
     },
   });
@@ -197,15 +328,58 @@ export async function endMeetingAction({
   if (meeting.livekitEgressId) {
     await stopEgress(meeting.livekitEgressId);
   }
+  const endedAt = new Date();
   await prisma.meeting.update({
     where: { id: meeting.id },
-    data: { status: 'ENDED', endedAt: new Date() },
+    data: { status: 'ENDED', endedAt },
   });
+  // If the call was started from a chat channel, drop a CALL_ENDED
+  // system-message so participants see "Звонок завершён · 12:34"
+  // right where it started. The transcribe-worker posts a richer
+  // follow-up (summary + tasks) when the recording is ready.
+  if (meeting.channelId) {
+    const durationSec = meeting.startedAt
+      ? Math.max(1, Math.round((endedAt.getTime() - meeting.startedAt.getTime()) / 1000))
+      : null;
+    const { publishChatEvent } = await import('@/lib/realtime/publishChat');
+    try {
+      const msg = await prisma.message.create({
+        data: {
+          channelId: meeting.channelId,
+          authorId: me.id,
+          body: '',
+          source: 'SYSTEM',
+          eventKind: 'CALL_ENDED',
+          eventPayload: { meetingId: meeting.id, durationSec },
+        },
+        select: { id: true },
+      });
+      await prisma.channel.update({
+        where: { id: meeting.channelId },
+        data: { updatedAt: new Date() },
+      });
+      await publishChatEvent({
+        kind: 'message.new',
+        channelId: meeting.channelId,
+        messageId: msg.id,
+        authorId: me.id,
+        parentId: null,
+      });
+    } catch (e) {
+      // Don't fail the end-call action because we couldn't post the
+      // system card — the meeting itself ended successfully.
+      // eslint-disable-next-line no-console
+      console.warn('[meetings] CALL_ENDED system message failed:', e);
+    }
+  }
   // Worker picks it up — but only after egress webhook fires
   // (egress_ended) the recording is fully flushed. Our webhook handler
   // publishes to TRANSCRIBE_CHANNEL when that arrives.
   revalidatePath('/meetings');
   revalidatePath(`/meetings/${meeting.id}`);
+  if (meeting.channelId) {
+    revalidatePath(`/messages/${meeting.channelId}`);
+  }
   return { ok: true };
 }
 

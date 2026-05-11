@@ -379,6 +379,11 @@ model Meeting {
   id                    String        @id @default(cuid())
   projectId             String?
   project               Project?      @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  /// Optional link to a chat channel — set when the meeting was
+  /// kicked off via "Позвонить" from a DM/channel. End-of-call
+  /// summary card is posted back into this channel.
+  channelId             String?
+  channel               Channel?      @relation("ChannelMeeting", fields: [channelId], references: [id], onDelete: SetNull)
   title                 String
   status                MeetingStatus @default(PLANNED)
   kind                  MeetingKind   @default(VIDEO_LIVEKIT)
@@ -1158,6 +1163,8 @@ model Channel {
 
   members     ChannelMember[]
   messages    Message[]
+  /// Meetings started from this channel via "Позвонить".
+  meetings    Meeting[]       @relation("ChannelMeeting")
 
   @@unique([projectId, slug])
   @@index([kind, isArchived])
@@ -1208,6 +1215,15 @@ model Message {
   // Lightweight markdown-style flag set so the renderer knows whether
   // to allow code blocks / link previews / etc. Default WEB.
   source      MessageSource @default(WEB)
+  /// Optional discriminator for service messages (source=SYSTEM).
+  /// Lets the renderer pick a custom card per event type (call
+  /// started, member joined, channel renamed, etc.) without forcing
+  /// every system message to use the same body-string shape.
+  eventKind   MessageEventKind?
+  /// Payload for the event card — e.g. { meetingId, livekitRoomName }
+  /// for a CALL_STARTED. Free-form JSON keeps the schema stable as
+  /// we add new event types.
+  eventPayload Json?
   editedAt    DateTime?
   deletedAt   DateTime?
 
@@ -1267,6 +1283,19 @@ enum MessageSource {
   MOBILE
   API
   SYSTEM       // service messages: "X joined", "channel renamed", etc.
+}
+
+enum MessageEventKind {
+  /// "<name> started a call" card with a Join button. Payload:
+  /// { meetingId: string }.
+  CALL_STARTED
+  /// "Call ended" card with optional duration + transcript link.
+  /// Payload: { meetingId, durationSec?, hasTranscript? }.
+  CALL_ENDED
+  /// Member added/removed; payload: { userId, action: 'added' | 'removed' }.
+  MEMBER_CHANGED
+  /// Channel renamed; payload: { from, to }.
+  CHANNEL_RENAMED
 }
 
 model MessageReaction {

@@ -59,6 +59,9 @@ export async function loadChannelMessages(
     select: {
       id: true,
       body: true,
+      source: true,
+      eventKind: true,
+      eventPayload: true,
       authorId: true,
       author: { select: { id: true, name: true, image: true } },
       parentId: true,
