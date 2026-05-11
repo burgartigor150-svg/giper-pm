@@ -26,6 +26,14 @@ const nextConfig = {
   typescript: { ignoreBuildErrors: true },
   experimental: {
     typedRoutes: false,
+    // Server Actions default body cap is 1 MB, which truncates
+    // video-note uploads — even a 5-second 480p H.264 clip easily
+    // crosses that. We raise the SA cap to 10 MB so the server-side
+    // 8 MB limit in sendVideoNoteAction is the real boundary. Don't
+    // remove this unless you also lower the server-side cap.
+    serverActions: {
+      bodySizeLimit: '10mb',
+    },
   },
 };
 
