@@ -240,7 +240,12 @@ export function Calendar({
       const sp = new URLSearchParams(params.toString());
       if (view === 'month') {
         const [y, m] = anchor.split('-').map(Number);
-        const next = new Date(y!, (m! - 1) | 0 + delta, 1);
+        // Bitwise `|` has lower precedence than `+`, so the previous
+        // `(m! - 1) | 0 + delta` parsed as `(m-1) | delta` — a bitwise
+        // OR that for delta=-1 produced -1 (jump a year) and for
+        // delta=+1 left the month unchanged. Plain arithmetic + Date
+        // handles month rollover for us.
+        const next = new Date(y!, m! - 1 + delta, 1);
         sp.set('m', `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}`);
         sp.delete('d');
       } else {
