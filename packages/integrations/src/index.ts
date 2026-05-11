@@ -3,6 +3,7 @@ export { runHarvest, type HarvestResult } from './telegramHarvest';
 export {
   proposeTasks,
   proposeTasksFromMeeting,
+  expandRussianName,
   type ChatMessageInput,
   type ProjectContext,
   type TaskProposal,

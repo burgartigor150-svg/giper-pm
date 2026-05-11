@@ -6,6 +6,7 @@ import { prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
 import { canManageAssignments } from '@/lib/permissions';
 import { createTask } from '@/lib/tasks/createTask';
+import { expandRussianName } from '@giper/integrations';
 import type { ApplyOverrides } from '@/actions/aiHarvest';
 
 let _redis: Redis | null = null;
@@ -26,6 +27,9 @@ type StoredProposal = {
   type: 'TASK' | 'BUG' | 'FEATURE' | 'CHORE';
   priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
   suggestedAssigneeId: string | null;
+  /** Raw name from the transcript ("Катя", "Сергей"). UI uses this
+   *  to fetch the candidates picker. */
+  mentionedAssigneeName: string | null;
   suggestedDueDate: string | null;
   sourceMessageIds: string[];
   rationale: string;
@@ -162,6 +166,37 @@ export async function applyMeetingProposalAction({
     overrides?.dueDate !== undefined ? overrides.dueDate : proposal.suggestedDueDate;
   const dueDate = dueDateInput ? new Date(dueDateInput) : undefined;
 
+  // If the picked assignee isn't a project member yet (typical for the
+  // disambiguation-picker flow — PM resolved "Катя" to a Екатерина from
+  // another team), auto-add them as CONTRIBUTOR. Otherwise createTask
+  // would reject with VALIDATION. We only do this when the caller has
+  // permission to manage the project (already checked above via
+  // canManageAssignments inside loadMeetingForUser's `allowed` gate).
+  if (assigneeId) {
+    const isMember =
+      assigneeId === meeting.project.ownerId ||
+      meeting.project.members.some((m) => m.user.id === assigneeId);
+    if (!isMember) {
+      const userExists = await prisma.user.findUnique({
+        where: { id: assigneeId },
+        select: { id: true, isActive: true },
+      });
+      if (!userExists || !userExists.isActive) {
+        return {
+          ok: false,
+          message: 'Выбранный исполнитель не существует или деактивирован',
+        };
+      }
+      await prisma.projectMember.create({
+        data: {
+          projectId: meeting.project.id,
+          userId: assigneeId,
+          role: 'CONTRIBUTOR',
+        },
+      });
+    }
+  }
+
   const created = await createTask(
     {
       projectKey: meeting.project.key,
@@ -185,4 +220,69 @@ export async function applyMeetingProposalAction({
   revalidatePath(`/meetings/${meetingId}`);
 
   return { ok: true, taskNumber: created.number, projectKey: created.project.key };
+}
+
+/**
+ * Resolve a mentioned name (e.g. "Катя") from a meeting transcript
+ * into a ranked list of candidate users. Used by the proposal card
+ * picker UI when the AI deliberately didn't guess an assignee.
+ *
+ * Ranking: project members first (most likely the intended person),
+ * then any active org-wide user whose name starts with the mentioned
+ * name or one of its Russian-diminutive expansions. Capped at 20.
+ *
+ * We DON'T fall back to surnames or partial matches — that's how
+ * misroutes happen. If the speech was "Катя" we look at names
+ * starting with "Катя" or "Екатерина", nothing else.
+ */
+export async function searchCandidateAssigneesAction({
+  meetingId,
+  mentionedName,
+}: {
+  meetingId: string;
+  mentionedName: string;
+}): Promise<
+  | { ok: true; candidates: { id: string; name: string; email: string; inProject: boolean }[] }
+  | { ok: false; message: string }
+> {
+  const me = await requireAuth();
+  const meeting = await loadMeetingForUser(meetingId, me.id, me.role);
+  if (!meeting) return { ok: false, message: 'Нет прав' };
+
+  const trimmed = mentionedName.trim();
+  if (trimmed.length < 2) return { ok: true, candidates: [] };
+
+  const variants = expandRussianName(trimmed);
+  // Build the OR list once — every variant becomes a name-prefix match.
+  // Case-insensitive: Prisma startsWith mode 'insensitive' uses
+  // citext-compatible ILIKE under the hood.
+  const orClauses = variants.map((v) => ({
+    name: { startsWith: v, mode: 'insensitive' as const },
+  }));
+
+  const inProjectIds = new Set(
+    (meeting.project?.members ?? []).map((m) => m.user.id),
+  );
+
+  const all = await prisma.user.findMany({
+    where: {
+      isActive: true,
+      OR: orClauses,
+    },
+    select: { id: true, name: true, email: true },
+    orderBy: { name: 'asc' },
+    take: 40,
+  });
+  // Rank: project members first, then the rest. Cap at 20 — if the
+  // PM has more than 20 Катя's they need a real search box, not a
+  // picker.
+  const enriched = all.map((u) => ({
+    ...u,
+    inProject: inProjectIds.has(u.id),
+  }));
+  enriched.sort((a, b) => {
+    if (a.inProject !== b.inProject) return a.inProject ? -1 : 1;
+    return a.name.localeCompare(b.name, 'ru');
+  });
+  return { ok: true, candidates: enriched.slice(0, 20) };
 }

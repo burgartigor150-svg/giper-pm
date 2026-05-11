@@ -45,6 +45,15 @@ export type TaskProposal = {
   priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
   /** User.id from ProjectContext.members or null. */
   suggestedAssigneeId: string | null;
+  /**
+   * Raw first-name/diminutive lifted from the source ("Катя",
+   * "Сергей"). Set when the source explicitly addresses someone
+   * but we don't know which real user to bind to (the org has
+   * many Катя's; auto-match would misroute work). UI shows a
+   * candidates picker so the human disambiguates. null when no
+   * person was mentioned by name.
+   */
+  mentionedAssigneeName: string | null;
   /** ISO date 'YYYY-MM-DD' or null. */
   suggestedDueDate: string | null;
   /** TelegramProjectMessage.id values that contributed to this task. */
@@ -145,6 +154,7 @@ const RESPONSE_SCHEMA = {
           type: { type: 'string', enum: ['TASK', 'BUG', 'FEATURE', 'CHORE'] },
           priority: { type: 'string', enum: ['LOW', 'MEDIUM', 'HIGH', 'URGENT'] },
           suggestedAssigneeId: { type: ['string', 'null'] },
+          mentionedAssigneeName: { type: ['string', 'null'] },
           suggestedDueDate: { type: ['string', 'null'] },
           sourceMessageIds: { type: 'array', items: { type: 'string' } },
           rationale: { type: 'string' },
@@ -155,6 +165,7 @@ const RESPONSE_SCHEMA = {
           'type',
           'priority',
           'suggestedAssigneeId',
+          'mentionedAssigneeName',
           'suggestedDueDate',
           'sourceMessageIds',
           'rationale',
@@ -259,12 +270,20 @@ function normalizeProposal(p: TaskProposal): TaskProposal {
     p.suggestedDueDate && /^\d{4}-\d{2}-\d{2}$/.test(p.suggestedDueDate)
       ? p.suggestedDueDate
       : null;
+  // mentionedAssigneeName is optional in older proposals (and the
+  // TG-chat prompt doesn't ask for it). Trim+slice when present, else
+  // default null. Cap at 80 chars — anything longer isn't a name.
+  const mentioned =
+    typeof p.mentionedAssigneeName === 'string' && p.mentionedAssigneeName.trim()
+      ? p.mentionedAssigneeName.trim().slice(0, 80)
+      : null;
   return {
     title: p.title.trim().slice(0, 220),
     description: p.description.trim().slice(0, 4000),
     type: allowedTypes.includes(p.type) ? p.type : 'TASK',
     priority: allowedPrio.includes(p.priority) ? p.priority : 'MEDIUM',
     suggestedAssigneeId: typeof p.suggestedAssigneeId === 'string' ? p.suggestedAssigneeId : null,
+    mentionedAssigneeName: mentioned,
     suggestedDueDate: dueDate,
     sourceMessageIds: p.sourceMessageIds
       .filter((x): x is string => typeof x === 'string')
@@ -321,10 +340,13 @@ export async function proposeTasks(
  *  - the LLM is told the source is a SPOKEN meeting transcript, not
  *    a typed chat — "болтовни" filter is much stricter for chats
  *    than for meetings, where every word was deliberate
- *  - explicit instruction: if a name from the transcript ("Катя",
- *    "Сергей") is NOT in project members, STILL emit the task and
- *    set suggestedAssigneeId=null + mention the name in description
- *    so the PM can reassign on the card
+ *  - explicit instruction: report the mentioned name verbatim
+ *    ("Катя", "Сергей") in mentionedAssigneeName but do NOT guess
+ *    suggestedAssigneeId from a first name alone — in a 600-person
+ *    company there are many Катя's. The UI lets the human pick.
+ *  - suggestedAssigneeId is only set when the upstream uses a UNIQUE
+ *    identifier (full name "Екатерина Иванова", or speaker label that
+ *    maps 1:1 to a member id).
  *  - one-speaker meetings still produce proposals — a PM dictating
  *    today's plan is the most useful case for this feature
  */
@@ -334,10 +356,11 @@ const MEETING_SYSTEM_PROMPT = `Ты — ассистент проектного 
 - Это запись живого разговора, а не чат. Каждая фраза была сказана осознанно — НЕ фильтруй её как "болтовню".
 - Любое явное поручение ("Кате проверить маркетплейсы", "Сергею сделать ревью") — это задача. Эмити её.
 - Один говорящий, раздающий задания нескольким людям, — нормальный кейс. Не сворачивай его в одну задачу.
-- Если упомянутого исполнителя ("Катя") НЕТ в списке участников проекта — ВСЁ РАВНО создай задачу. Поставь suggestedAssigneeId=null и в начале description напиши "Упомянут исполнитель: <Имя> (не в составе проекта)". PM назначит реального человека руками.
-- Если исполнитель есть в members (по точному имени или короткой форме) — поставь его id в suggestedAssigneeId.
+- Назначение исполнителя:
+  * mentionedAssigneeName: ВСЕГДА выпиши имя так, как оно прозвучало ("Катя", "Сергей", "Леонид"). Если по имени не назвали — null.
+  * suggestedAssigneeId: НИКОГДА не выбирай члена проекта только по совпадению короткого имени ("Катя"). В компании может быть много Кать. Ставь id из members ТОЛЬКО если в речи прозвучало полное ФИО или иной уникальный идентификатор, и оно однозначно совпадает с одним участником. В остальных случаях — null. PM сам выберет нужного человека через UI.
 - Заголовок — короткое императивное действие ("Проверить маркетплейсы", не "Маркетплейсы").
-- Описание — 1-2 предложения по сути + дословная цитата ключевой реплики ([тайм-код] говорящий: ...).
+- Описание — 1-2 предложения по сути + дословная цитата ключевой реплики ([тайм-код] говорящий: ...). НЕ дублируй имя исполнителя в текст — оно уже в mentionedAssigneeName.
 - Срок: если в речи сказано "сегодня"/"к завтра"/etc — переведи в YYYY-MM-DD относительно today из контекста. Если не сказано — null.
 - Тип: BUG если жалоба/проблема ("этикетки не печатаются"), FEATURE если новый функционал, CHORE для рутины (документация, ревью), TASK для всего остального.
 - Приоритет: URGENT для "горит/срочно", HIGH если есть короткий дедлайн, MEDIUM по умолчанию, LOW для отдалённых тем.
@@ -412,11 +435,6 @@ export async function proposeTasksFromMeeting(
           p.suggestedAssigneeId = null;
         }
       }
-      // Fuzzy match — try to fill null assignees by matching member
-      // names against the proposal description/title. This catches the
-      // "Катя" vs "Екатерина Иванова" case where the LLM correctly
-      // identified the person but couldn't pick the id.
-      attachAssigneesByName(safe, project);
       return {
         ok: true,
         proposals: safe,
@@ -436,86 +454,76 @@ export async function proposeTasksFromMeeting(
 }
 
 /**
- * Mutates each proposal: if suggestedAssigneeId is null but description
- * or title contains a name (or its diminutive) that matches a member,
- * set the id.
+ * Russian diminutive ↔ full-name table. Used by candidate search
+ * (server-side action `searchUsersByMentionedName`) to fan out from
+ * "Катя" → users whose name starts with "Екатерина", etc.
  *
- * Matching strategy:
- *   1. Build candidates from member.name — full first name + the
- *      diminutive variants we know about (Катя → Екатерина etc).
- *      We deliberately keep this LIST short and Russian-only because
- *      adding heuristic fuzziness (Levenshtein etc.) on first names
- *      is more likely to misroute work than to help.
- *   2. For each proposal, scan title + description for any candidate
- *      as a whole word (Unicode \b). First hit wins.
+ * We deliberately keep this in a static table rather than using a
+ * Levenshtein / phonetic matcher. In a 600-person org any heuristic
+ * fuzziness misroutes work more often than it helps. The table
+ * encodes hard linguistic equivalences only.
  */
-function attachAssigneesByName(proposals: TaskProposal[], project: ProjectContext): void {
-  if (!project.members.length) return;
-  // Diminutive ↔ full-name table. Add entries here when a team member's
-  // common nickname doesn't share a prefix with their full name.
-  const DIMINUTIVES: Array<[RegExp, string[]]> = [
-    [/^Екатерина/i, ['Катя', 'Катюша']],
-    [/^Александр/i, ['Саша', 'Шура', 'Алекс']],
-    [/^Александра/i, ['Саша', 'Шура', 'Аля']],
-    [/^Алексей/i, ['Лёша', 'Леша', 'Алёша']],
-    [/^Анастасия/i, ['Настя']],
-    [/^Анна/i, ['Аня', 'Анюта']],
-    [/^Антон/i, ['Антоша']],
-    [/^Артём/i, ['Тёма', 'Тема']],
-    [/^Валентин/i, ['Валя']],
-    [/^Валерий/i, ['Валера']],
-    [/^Виктор/i, ['Витя']],
-    [/^Виктория/i, ['Вика']],
-    [/^Владимир/i, ['Вова', 'Володя']],
-    [/^Дмитрий/i, ['Дима', 'Митя']],
-    [/^Евгений/i, ['Женя']],
-    [/^Евгения/i, ['Женя']],
-    [/^Елена/i, ['Лена']],
-    [/^Игорь/i, ['Игорёк']],
-    [/^Ирина/i, ['Ира']],
-    [/^Константин/i, ['Костя']],
-    [/^Кирилл/i, ['Кир']],
-    [/^Леонид/i, ['Лёня', 'Леня']],
-    [/^Людмила/i, ['Люда', 'Мила']],
-    [/^Мария/i, ['Маша']],
-    [/^Михаил/i, ['Миша']],
-    [/^Надежда/i, ['Надя']],
-    [/^Наталья|^Наталия/i, ['Наташа', 'Ната']],
-    [/^Николай/i, ['Коля']],
-    [/^Ольга/i, ['Оля']],
-    [/^Павел/i, ['Паша']],
-    [/^Сергей/i, ['Серёжа', 'Серега']],
-    [/^Татьяна/i, ['Таня']],
-    [/^Юлия/i, ['Юля']],
-    [/^Юрий/i, ['Юра']],
-  ];
-  type Cand = { id: string; aliases: string[] };
-  const candidates: Cand[] = project.members.map((m) => {
-    const aliases = new Set<string>();
-    const first = m.name.trim().split(/\s+/)[0];
-    if (first) aliases.add(first);
-    for (const [re, diminutives] of DIMINUTIVES) {
-      if (re.test(m.name)) for (const d of diminutives) aliases.add(d);
-    }
-    return { id: m.id, aliases: [...aliases] };
-  });
-  for (const p of proposals) {
-    if (p.suggestedAssigneeId) continue;
-    const haystack = `${p.title}\n${p.description}`;
-    for (const c of candidates) {
-      const hit = c.aliases.some((alias) =>
-        // \b on Russian text is reliable in modern Node — case-insensitive,
-        // whole-word match.
-        new RegExp(`\\b${escapeRegex(alias)}\\b`, 'iu').test(haystack),
-      );
-      if (hit) {
-        p.suggestedAssigneeId = c.id;
-        break;
+export const RUSSIAN_DIMINUTIVES: Array<[RegExp, string[]]> = [
+  [/^Екатерина/i, ['Катя', 'Катюша']],
+  [/^Александр/i, ['Саша', 'Шура', 'Алекс']],
+  [/^Александра/i, ['Саша', 'Шура', 'Аля']],
+  [/^Алексей/i, ['Лёша', 'Леша', 'Алёша']],
+  [/^Анастасия/i, ['Настя']],
+  [/^Анна/i, ['Аня', 'Анюта']],
+  [/^Антон/i, ['Антоша']],
+  [/^Артём|^Артем/i, ['Тёма', 'Тема']],
+  [/^Валентин/i, ['Валя']],
+  [/^Валерий/i, ['Валера']],
+  [/^Виктор/i, ['Витя']],
+  [/^Виктория/i, ['Вика']],
+  [/^Владимир/i, ['Вова', 'Володя']],
+  [/^Дмитрий/i, ['Дима', 'Митя']],
+  [/^Евгений/i, ['Женя']],
+  [/^Евгения/i, ['Женя']],
+  [/^Елена/i, ['Лена']],
+  [/^Игорь/i, ['Игорёк']],
+  [/^Ирина/i, ['Ира']],
+  [/^Константин/i, ['Костя']],
+  [/^Кирилл/i, ['Кир']],
+  [/^Леонид/i, ['Лёня', 'Леня']],
+  [/^Людмила/i, ['Люда', 'Мила']],
+  [/^Мария/i, ['Маша']],
+  [/^Михаил/i, ['Миша']],
+  [/^Надежда/i, ['Надя']],
+  [/^Наталья|^Наталия/i, ['Наташа', 'Ната']],
+  [/^Николай/i, ['Коля']],
+  [/^Ольга/i, ['Оля']],
+  [/^Павел/i, ['Паша']],
+  [/^Сергей/i, ['Серёжа', 'Серега']],
+  [/^Татьяна/i, ['Таня']],
+  [/^Юлия/i, ['Юля']],
+  [/^Юрий/i, ['Юра']],
+];
+
+/**
+ * Given a diminutive (e.g. "Катя"), return all full-name prefixes
+ * that produce it (e.g. ["Екатерина"]). Used to expand a mentioned
+ * name into the SQL `name STARTS WITH ?` set when searching for
+ * candidate users. Returns the input itself too so "Сергей" stays
+ * "Сергей" — full names also match through the same query.
+ */
+export function expandRussianName(name: string): string[] {
+  const trimmed = name.trim();
+  if (!trimmed) return [];
+  const out = new Set<string>([trimmed]);
+  for (const [fullPattern, dims] of RUSSIAN_DIMINUTIVES) {
+    for (const d of dims) {
+      if (d.toLowerCase() === trimmed.toLowerCase()) {
+        // Recover the full-name prefix from the RegExp source. The
+        // pattern is always anchored at ^; multi-alternative entries
+        // (e.g. Наталья|Наталия) need splitting.
+        const src = fullPattern.source.replace(/^\^/, '');
+        for (const alt of src.split('|')) {
+          const cleanAlt = alt.replace(/^\^/, '');
+          if (cleanAlt) out.add(cleanAlt);
+        }
       }
     }
   }
-}
-
-function escapeRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return [...out];
 }

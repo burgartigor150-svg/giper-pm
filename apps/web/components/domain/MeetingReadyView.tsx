@@ -21,10 +21,14 @@ type Proposal = {
   type: 'TASK' | 'BUG' | 'FEATURE' | 'CHORE';
   priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
   suggestedAssigneeId: string | null;
+  /** Raw first-name lifted from the transcript when LLM didn't pick
+   * a unique member id. UI shows a candidates picker. */
+  mentionedAssigneeName?: string | null;
   suggestedDueDate: string | null;
   rationale: string;
 };
 type Member = { id: string; name: string };
+type Candidate = { id: string; name: string; email: string; inProject: boolean };
 
 const PRIORITY_LABEL: Record<Proposal['priority'], string> = {
   LOW: 'Низкий',
@@ -300,8 +304,31 @@ function MeetingTasksPanel({
                 key={p.proposalId}
                 proposal={p}
                 members={members}
+                meetingId={meetingId}
                 onCreate={() => setEditingId(p.proposalId)}
                 onDiscard={() => discard(p)}
+                onResolved={(pid, userId, userName) => {
+                  // Local-only — the picked assignee lives in component
+                  // state until the user clicks "Создать", at which
+                  // point applyMeetingProposalAction takes assigneeId
+                  // from overrides. We also push the user into
+                  // `members` so the ProposalEditor's <select> shows
+                  // their name as the preselected option.
+                  setProposals((prev) =>
+                    prev
+                      ? prev.map((x) =>
+                          x.proposalId === pid
+                            ? { ...x, suggestedAssigneeId: userId }
+                            : x,
+                        )
+                      : prev,
+                  );
+                  setMembers((prev) =>
+                    prev.some((m) => m.id === userId)
+                      ? prev
+                      : [...prev, { id: userId, name: userName }],
+                  );
+                }}
               />
             ),
           )
@@ -314,15 +341,24 @@ function MeetingTasksPanel({
 function ProposalCard({
   proposal,
   members,
+  meetingId,
   onCreate,
   onDiscard,
+  onResolved,
 }: {
   proposal: Proposal;
   members: Member[];
+  meetingId: string;
   onCreate: () => void;
   onDiscard: () => void;
+  /** Called when the user picks a candidate from the disambiguation
+   *  list — parent updates its proposal cache so next render shows
+   *  the chosen assignee. */
+  onResolved: (proposalId: string, userId: string, userName: string) => void;
 }) {
   const assigneeName = members.find((m) => m.id === proposal.suggestedAssigneeId)?.name ?? '—';
+  const needsPick =
+    !proposal.suggestedAssigneeId && !!proposal.mentionedAssigneeName;
   return (
     <div className="rounded-lg border border-border bg-card p-3 shadow-sm">
       <div className="flex items-start justify-between gap-2">
@@ -336,6 +372,14 @@ function ProposalCard({
         {assigneeName !== '—' ? `Исполнитель: ${assigneeName}` : ''}
         {proposal.suggestedDueDate ? ` · срок: ${proposal.suggestedDueDate}` : ''}
       </p>
+      {needsPick ? (
+        <MentionedAssigneePicker
+          meetingId={meetingId}
+          proposalId={proposal.proposalId}
+          mentionedName={proposal.mentionedAssigneeName!}
+          onPick={(u) => onResolved(proposal.proposalId, u.id, u.name)}
+        />
+      ) : null}
       <div className="mt-2 flex justify-end gap-2">
         <Button type="button" size="sm" variant="outline" onClick={onDiscard}>
           Отклонить
@@ -344,6 +388,109 @@ function ProposalCard({
           Создать →
         </Button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Inline picker for an ambiguous mentioned name. We don't try to
+ * pre-load candidates with the proposal — that would mean N queries
+ * for every meeting view. Instead we fetch lazily on first interaction.
+ */
+function MentionedAssigneePicker({
+  meetingId,
+  proposalId,
+  mentionedName,
+  onPick,
+}: {
+  meetingId: string;
+  proposalId: string;
+  mentionedName: string;
+  onPick: (u: Candidate) => void;
+}) {
+  void proposalId;
+  const [opened, setOpened] = useState(false);
+  const [candidates, setCandidates] = useState<Candidate[] | null>(null);
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+
+  function open() {
+    setOpened(true);
+    if (candidates !== null) return;
+    setError(null);
+    startTransition(async () => {
+      // Lazy import to avoid pulling the server-action bundle on cards
+      // that never need disambiguation.
+      const { searchCandidateAssigneesAction } = await import(
+        '@/actions/aiMeeting'
+      );
+      const r = await searchCandidateAssigneesAction({
+        meetingId,
+        mentionedName,
+      });
+      if (!r.ok) {
+        setError(r.message);
+        return;
+      }
+      setCandidates(r.candidates);
+    });
+  }
+
+  if (!opened) {
+    return (
+      <button
+        type="button"
+        onClick={open}
+        className="mt-2 inline-flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] font-medium text-amber-900 hover:bg-amber-100 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100 dark:hover:bg-amber-950/60"
+      >
+        Упомянут: «{mentionedName}» — выбрать исполнителя
+      </button>
+    );
+  }
+
+  return (
+    <div className="mt-2 rounded-md border border-amber-200 bg-amber-50/50 p-2 dark:border-amber-900 dark:bg-amber-950/30">
+      <p className="mb-1 text-[11px] text-muted-foreground">
+        В транскрипте сказано «{mentionedName}». Найдены кандидаты:
+      </p>
+      {pending && candidates === null ? (
+        <p className="text-[11px] text-muted-foreground">Ищем…</p>
+      ) : error ? (
+        <p className="text-[11px] text-red-600">{error}</p>
+      ) : !candidates || candidates.length === 0 ? (
+        <p className="text-[11px] text-muted-foreground">
+          Совпадений по имени не найдено. Назначите вручную после создания задачи.
+        </p>
+      ) : (
+        <ul className="space-y-1">
+          {candidates.map((c) => (
+            <li key={c.id}>
+              <button
+                type="button"
+                onClick={() => onPick(c)}
+                className="flex w-full items-center justify-between gap-2 rounded px-1.5 py-1 text-left text-[11px] hover:bg-amber-100 dark:hover:bg-amber-950/60"
+              >
+                <span className="flex items-center gap-1">
+                  <span className="font-medium">{c.name}</span>
+                  {c.inProject ? (
+                    <span className="rounded bg-emerald-100 px-1 py-0.5 text-[10px] text-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-100">
+                      в проекте
+                    </span>
+                  ) : null}
+                </span>
+                <span className="text-muted-foreground">{c.email}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <button
+        type="button"
+        onClick={() => setOpened(false)}
+        className="mt-1 text-[11px] text-muted-foreground hover:underline"
+      >
+        Свернуть
+      </button>
     </div>
   );
 }
