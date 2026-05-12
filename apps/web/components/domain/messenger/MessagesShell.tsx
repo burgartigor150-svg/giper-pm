@@ -92,6 +92,9 @@ type Props = {
   /** Whether the caller has muted the active channel. Drives the
    *  bell icon state in the header. */
   isMuted?: boolean;
+  /** True when the caller created the active channel. Surfaces the
+   *  delete button in the header. */
+  canDeleteChannel?: boolean;
 };
 
 export function MessagesShell({
@@ -104,6 +107,7 @@ export function MessagesShell({
   meId,
   myChannelRole = null,
   isMuted = false,
+  canDeleteChannel = false,
 }: Props) {
   const mentionsMap = new Map(mentionedUsers.map((u) => [u.id, u]));
   const previewsMap = new Map(taskPreviews.map((p) => [p.key, p]));
@@ -251,7 +255,11 @@ export function MessagesShell({
             return (
               <>
                 {active ? (
-                  <ChannelHeader channel={active} isMuted={isMuted} />
+                  <ChannelHeader
+                    channel={active}
+                    isMuted={isMuted}
+                    canDelete={canDeleteChannel}
+                  />
                 ) : null}
             <div className="flex-1 overflow-y-auto px-4 py-4" ref={scrollRef}>
               {messages.length === 0 ? (

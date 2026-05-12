@@ -30,6 +30,7 @@ import {
   createChannelInviteAction,
   listChannelInvitesAction,
   revokeChannelInviteAction,
+  deleteChannelAction,
 } from '@/actions/messenger';
 import { startCallInChannelAction } from '@/actions/meetings';
 
@@ -63,13 +64,18 @@ type ChannelMember = {
 export function ChannelHeader({
   channel,
   isMuted = false,
+  canDelete = false,
 }: {
   channel: ChannelLite;
   isMuted?: boolean;
+  /** True when the viewer is the channel's creator. Surfaces the
+   *  delete button — the server action also re-checks. */
+  canDelete?: boolean;
 }) {
   const [panelOpen, setPanelOpen] = useState(false);
   const [callPending, startCall] = useTransition();
   const [mutePending, startMute] = useTransition();
+  const [deletePending, startDelete] = useTransition();
   const router = useRouter();
   // DM/GROUP_DM no longer hide the header — we want the call button
   // there too. We keep the title visible for context (the sidebar
@@ -107,6 +113,24 @@ export function ChannelHeader({
         alert(r.error.message);
         return;
       }
+      router.refresh();
+    });
+  }
+
+  function destroy() {
+    // eslint-disable-next-line no-alert
+    const sure = window.confirm(
+      `Удалить канал «${channel.name}» вместе со всей историей? Это действие нельзя отменить.`,
+    );
+    if (!sure) return;
+    startDelete(async () => {
+      const r = await deleteChannelAction(channel.id);
+      if (!r.ok) {
+        // eslint-disable-next-line no-alert
+        alert(r.error.message);
+        return;
+      }
+      router.push('/messages');
       router.refresh();
     });
   }
@@ -165,6 +189,18 @@ export function ChannelHeader({
             >
               <Users className="size-3.5" aria-hidden="true" />
               <span className="hidden sm:inline">Участники</span>
+            </button>
+          ) : null}
+          {canDelete && !isDm ? (
+            <button
+              type="button"
+              onClick={destroy}
+              disabled={deletePending}
+              className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors duration-150 hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+              aria-label="Удалить канал"
+              title="Удалить канал"
+            >
+              <Trash2 className="size-3.5" aria-hidden="true" />
             </button>
           ) : null}
         </div>

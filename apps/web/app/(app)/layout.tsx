@@ -19,10 +19,12 @@ function buildNav(user: SessionUser): NavItem[] {
     { key: 'calendar', href: '/calendar' },
     { key: 'time', href: '/time' },
     { key: 'messages', href: '/messages' },
+    // "Созвоны" — list page itself is filtered to runs the user
+    // participated in / created, so it's safe for any role.
+    { key: 'meetings', href: '/meetings' },
   ];
   if (canSeeSettings(user)) {
     items.push({ key: 'telegram', href: '/integrations/telegram' });
-    items.push({ key: 'meetings', href: '/meetings' });
   }
   if (user.role === 'ADMIN' || user.role === 'PM') {
     items.push({ key: 'team', href: '/team' });

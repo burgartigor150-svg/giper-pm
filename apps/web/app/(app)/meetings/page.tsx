@@ -1,7 +1,5 @@
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@giper/ui/components/Card';
-import { Button } from '@giper/ui/components/Button';
 import { prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
 import { canSeeSettings } from '@/lib/permissions';
@@ -29,14 +27,16 @@ const STATUS_COLOR: Record<string, string> = {
 
 export default async function MeetingsListPage() {
   const me = await requireAuth();
-  if (!canSeeSettings({ id: me.id, role: me.role })) notFound();
+  const canCreate = canSeeSettings({ id: me.id, role: me.role });
 
+  // Strictly only meetings the user participated in or created. PM/ADMIN
+  // used to see everything via an `OR: [..., {}]` (empty object = match
+  // all) — too noisy and a privacy leak for guest call titles.
   const meetings = await prisma.meeting.findMany({
     where: {
       OR: [
         { createdById: me.id },
         { participants: { some: { userId: me.id } } },
-        ...(me.role === 'ADMIN' || me.role === 'PM' ? [{}] : []),
       ],
     },
     orderBy: [{ createdAt: 'desc' }],
@@ -59,7 +59,7 @@ export default async function MeetingsListPage() {
     <div className="mx-auto max-w-4xl space-y-4 p-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Созвоны</h1>
-        <CreateMeetingButton />
+        {canCreate ? <CreateMeetingButton /> : null}
       </div>
 
       {meetings.length === 0 ? (
@@ -67,8 +67,9 @@ export default async function MeetingsListPage() {
           <CardHeader>
             <CardTitle>Пока нет встреч</CardTitle>
             <CardDescription>
-              Нажмите «Новая встреча», и мы запустим LiveKit-комнату прямо в браузере. Запись и
-              транскрипт делаются автоматически.
+              {canCreate
+                ? 'Нажмите «Новая встреча», и мы запустим LiveKit-комнату прямо в браузере. Запись и транскрипт делаются автоматически.'
+                : 'Здесь появятся созвоны, в которых вы участвовали. Запустить новый созвон можно из любого чата.'}
             </CardDescription>
           </CardHeader>
         </Card>

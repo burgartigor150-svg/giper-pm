@@ -345,6 +345,46 @@ export async function leaveChannelAction(channelId: string): Promise<ActionResul
   return { ok: true };
 }
 
+/**
+ * Hard-delete a channel and everything underneath it (messages, members,
+ * invites, attachments). Only the channel CREATOR may delete; DM and
+ * GROUP_DM are explicitly refused — those are conversations between
+ * specific people and shouldn't be wiped by one side.
+ *
+ * Caller must confirm in the UI — there is no recovery once the cascade
+ * runs.
+ */
+export async function deleteChannelAction(
+  channelId: string,
+): Promise<ActionResult> {
+  const me = await requireAuth();
+  const channel = await prisma.channel.findUnique({
+    where: { id: channelId },
+    select: { id: true, kind: true, createdById: true },
+  });
+  if (!channel) {
+    return { ok: false, error: { code: 'NOT_FOUND', message: 'Канал не найден' } };
+  }
+  if (channel.kind === 'DM' || channel.kind === 'GROUP_DM') {
+    return {
+      ok: false,
+      error: { code: 'VALIDATION', message: 'Личные чаты нельзя удалить — выйдите из них' },
+    };
+  }
+  if (channel.createdById !== me.id) {
+    return {
+      ok: false,
+      error: { code: 'FORBIDDEN', message: 'Удалить канал может только его создатель' },
+    };
+  }
+  // Schema has onDelete: Cascade on every child relation, so a single
+  // delete here drops messages, members, invites, attachments, mentions
+  // and reactions in one transaction.
+  await prisma.channel.delete({ where: { id: channelId } });
+  revalidatePath('/messages');
+  return { ok: true };
+}
+
 // ---------------------------------------------------------------------------
 // Direct Messages — find or create a 1-1 DM channel between two users
 // ---------------------------------------------------------------------------

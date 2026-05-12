@@ -37,6 +37,7 @@ import {
   removeFromChannelAction,
   listChannelMembersAction,
   postMessageAction,
+  deleteChannelAction,
 } from '@/actions/messenger';
 import { makeUser } from './helpers/factories';
 
@@ -411,5 +412,79 @@ describe('BROADCAST channels', () => {
       where: { channelId_userId: { channelId: res.data.id, userId: stranger.id } },
     });
     expect(member).toBeNull();
+  });
+});
+
+describe('deleteChannelAction', () => {
+  it('creator can delete a PUBLIC channel; cascade removes members', async () => {
+    const creator = await makeUser();
+    const member = await makeUser();
+    mockMe.id = creator.id;
+    const res = await createChannelAction({
+      name: `del-${Date.now()}`,
+      kind: 'PUBLIC',
+      memberUserIds: [member.id],
+    });
+    if (!res.ok || !res.data) throw new Error('setup');
+    const r = await deleteChannelAction(res.data.id);
+    expect(r.ok).toBe(true);
+    const after = await prisma.channel.findUnique({ where: { id: res.data.id } });
+    expect(after).toBeNull();
+    const memberRows = await prisma.channelMember.findMany({
+      where: { channelId: res.data.id },
+    });
+    expect(memberRows).toHaveLength(0);
+  });
+
+  it('non-creator admin → FORBIDDEN', async () => {
+    const creator = await makeUser();
+    const other = await makeUser();
+    mockMe.id = creator.id;
+    const res = await createChannelAction({
+      name: `del-${Date.now()}`,
+      kind: 'PRIVATE',
+      memberUserIds: [other.id],
+    });
+    if (!res.ok || !res.data) throw new Error('setup');
+    // Promote 'other' to ADMIN of the channel — still must be denied.
+    await prisma.channelMember.update({
+      where: { channelId_userId: { channelId: res.data.id, userId: other.id } },
+      data: { role: 'ADMIN' },
+    });
+    mockMe.id = other.id;
+    const r = await deleteChannelAction(res.data.id);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error.code).toBe('FORBIDDEN');
+  });
+
+  it('DM channels cannot be deleted', async () => {
+    const a = await makeUser();
+    const b = await makeUser();
+    const dm = await prisma.channel.create({
+      data: {
+        kind: 'DM',
+        name: 'dm',
+        slug: `dm-${Date.now()}`,
+        createdById: a.id,
+        members: {
+          create: [
+            { userId: a.id, role: 'MEMBER' },
+            { userId: b.id, role: 'MEMBER' },
+          ],
+        },
+      },
+    });
+    mockMe.id = a.id;
+    const r = await deleteChannelAction(dm.id);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error.code).toBe('VALIDATION');
+  });
+
+  it('NOT_FOUND on unknown id', async () => {
+    const u = await makeUser();
+    mockMe.id = u.id;
+    const r = await deleteChannelAction('no-such-channel');
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error.code).toBe('NOT_FOUND');
   });
 });

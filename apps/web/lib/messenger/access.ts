@@ -24,6 +24,8 @@ export type ChannelAccess = {
   role: 'ADMIN' | 'MEMBER' | null;
   isMuted: boolean;
   kind: 'PUBLIC' | 'PRIVATE' | 'DM' | 'GROUP_DM' | 'BROADCAST';
+  /** Original creator of the channel — only this user may delete it. */
+  createdById: string;
 };
 
 export async function resolveChannelAccess(
@@ -32,7 +34,7 @@ export async function resolveChannelAccess(
 ): Promise<ChannelAccess | null> {
   const channel = await prisma.channel.findUnique({
     where: { id: channelId },
-    select: { id: true, kind: true, isArchived: true },
+    select: { id: true, kind: true, isArchived: true, createdById: true },
   });
   if (!channel) return null;
 
@@ -51,6 +53,7 @@ export async function resolveChannelAccess(
       isMember,
       role,
       isMuted,
+      createdById: channel.createdById,
       canRead: !channel.isArchived || isMember,
       canPost: !channel.isArchived,
     };
@@ -63,6 +66,7 @@ export async function resolveChannelAccess(
       isMember,
       role,
       isMuted,
+      createdById: channel.createdById,
       canRead: !channel.isArchived || isMember,
       canPost: isMember && role === 'ADMIN' && !channel.isArchived,
     };
@@ -74,6 +78,7 @@ export async function resolveChannelAccess(
     isMember,
     role,
     isMuted,
+    createdById: channel.createdById,
     canRead: isMember,
     canPost: isMember && !channel.isArchived,
   };
