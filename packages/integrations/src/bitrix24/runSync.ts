@@ -20,7 +20,17 @@ export type RunSyncResult = {
   tasks: SyncTasksResult;
   ok: boolean;
   error?: string;
+  /** True when a previous run was still RUNNING and we skipped this trigger. */
+  skipped?: boolean;
 };
+
+/**
+ * Treat any RUNNING log older than this as stuck (the process crashed,
+ * Vercel timed out, etc.) — supervisor sweeps them to FAILED so the next
+ * sync trigger isn't blocked forever. 25 min is comfortably above the
+ * 5-min cron cadence and the maxDuration: 300s API ceiling.
+ */
+const STALE_RUN_MS = 25 * 60 * 1000;
 
 export type RunSyncOptions = {
   since?: Date | null;
@@ -61,8 +71,70 @@ export async function runBitrix24Sync(
 ): Promise<RunSyncResult> {
   const startedAt = new Date();
 
-  // Persist a sync log row up front so callers can monitor in-progress runs.
   const integration = await ensureIntegrationRow(prisma);
+
+  // Supervisor: sweep RUNNING logs older than STALE_RUN_MS to FAILED.
+  // Without this a Vercel timeout or container kill leaves the log
+  // pinned at RUNNING and blocks every subsequent trigger via the lock
+  // below.
+  const staleCutoff = new Date(Date.now() - STALE_RUN_MS);
+  await prisma.integrationSyncLog.updateMany({
+    where: {
+      integrationId: integration.id,
+      status: 'RUNNING',
+      startedAt: { lt: staleCutoff },
+    },
+    data: {
+      status: 'FAILED',
+      finishedAt: new Date(),
+      errors: { fatal: 'stale RUNNING swept by supervisor (>25min)' },
+    },
+  });
+
+  // Distributed lock: refuse to start a new run while a recent one is
+  // still RUNNING. Two parallel syncs hammering the same Bitrix webhook
+  // is the fastest path to QUERY_LIMIT_EXCEEDED — much worse than
+  // simply skipping this trigger.
+  const inflight = await prisma.integrationSyncLog.findFirst({
+    where: {
+      integrationId: integration.id,
+      status: 'RUNNING',
+      startedAt: { gte: staleCutoff },
+    },
+    select: { id: true, startedAt: true },
+  });
+  if (inflight) {
+    const skippedFinished = new Date();
+    return {
+      startedAt,
+      finishedAt: skippedFinished,
+      durationMs: 0,
+      users: { totalSeen: 0, matched: 0, updated: 0, created: 0 },
+      projects: { totalSeen: 0, created: 0, updated: 0, skipped: 0 },
+      members: {
+        projectsScanned: 0,
+        membershipsTotal: 0,
+        membershipsAdded: 0,
+        membershipsRemoved: 0,
+      },
+      tasks: {
+        totalSeen: 0,
+        created: 0,
+        updated: 0,
+        skippedNoProject: 0,
+        errors: 0,
+        files: { totalSeen: 0, created: 0, updated: 0, deleted: 0, errors: 0 },
+        comments: { totalSeen: 0, created: 0, updated: 0, deleted: 0, errors: 0 },
+        history: { totalSeen: 0, created: 0, updated: 0, errors: 0 },
+        chat: { totalSeen: 0, created: 0, updated: 0, errors: 0 },
+      },
+      ok: true,
+      skipped: true,
+      error: `skipped: previous sync started ${inflight.startedAt.toISOString()} still RUNNING`,
+    };
+  }
+
+  // Persist a sync log row up front so callers can monitor in-progress runs.
   const log = await prisma.integrationSyncLog.create({
     data: {
       integrationId: integration.id,

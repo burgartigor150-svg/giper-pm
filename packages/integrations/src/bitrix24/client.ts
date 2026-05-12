@@ -6,8 +6,9 @@
  * just append the method name to the base URL and POST/GET parameters.
  *
  * Throttling: cloud Bitrix24 caps a single inbound webhook at ~2 RPS. We
- * pace requests to ~3 per second with a tiny in-process queue; if the
- * server still answers QUERY_LIMIT_EXCEEDED we back off and retry.
+ * pace requests at 600ms minimum interval (~1.6 RPS — safely under the
+ * cap) with a tiny in-process queue; if the server still answers
+ * QUERY_LIMIT_EXCEEDED we back off exponentially with jitter and retry.
  */
 
 export type Bitrix24ClientOptions = {
@@ -15,7 +16,7 @@ export type Bitrix24ClientOptions = {
    *  https://giper.bitrix24.ru/rest/1282/is01dtztz8cii4wn/
    */
   webhookUrl: string;
-  /** Floor between requests, default 350ms. */
+  /** Floor between requests, default 600ms (~1.6 RPS, under the 2 RPS Bitrix cap). */
   minIntervalMs?: number;
   /** AbortSignal to cancel a long pagination run. */
   signal?: AbortSignal;
@@ -53,7 +54,7 @@ export class Bitrix24Client {
   constructor(opts: Bitrix24ClientOptions) {
     if (!opts.webhookUrl) throw new Error('webhookUrl required');
     this.base = opts.webhookUrl.endsWith('/') ? opts.webhookUrl : opts.webhookUrl + '/';
-    this.minIntervalMs = opts.minIntervalMs ?? 350;
+    this.minIntervalMs = opts.minIntervalMs ?? 600;
     this.signal = opts.signal;
   }
 
@@ -79,6 +80,14 @@ export class Bitrix24Client {
       try {
         body = JSON.parse(text);
       } catch {
+        // Bitrix proxy often returns plain-text 503 on rate-limit before
+        // even hitting the API — same backoff treatment as JSON 503.
+        if ((res.status === 503 || res.status === 429) && attempt < 6) {
+          const base = 1500 * Math.pow(2, attempt - 1);
+          const jitter = base * 0.3 * (Math.random() * 2 - 1);
+          await sleep(Math.round(base + jitter));
+          continue;
+        }
         if (res.status >= 500 && attempt < 3) {
           await sleep(500 * attempt);
           continue;
@@ -86,13 +95,26 @@ export class Bitrix24Client {
         throw new Bitrix24Error(method, res.status, 'PARSE', text.slice(0, 200));
       }
       if (body.error) {
-        if (body.error === 'QUERY_LIMIT_EXCEEDED' && attempt < 5) {
-          await sleep(800 * attempt);
+        if (body.error === 'QUERY_LIMIT_EXCEEDED' && attempt < 6) {
+          // Exponential backoff with jitter: 1500/3000/6000/12000/24000 ms,
+          // ± up to 30% to avoid synchronised retry storms across parallel
+          // pagination loops within the same sync.
+          const base = 1500 * Math.pow(2, attempt - 1);
+          const jitter = base * 0.3 * (Math.random() * 2 - 1);
+          await sleep(Math.round(base + jitter));
           continue;
         }
         throw new Bitrix24Error(method, res.status, body.error, body.error_description);
       }
       if (!res.ok) {
+        // 503 from the upstream proxy is sometimes wrapped in a non-JSON
+        // body — treat it as a rate-limit signal too.
+        if ((res.status === 503 || res.status === 429) && attempt < 6) {
+          const base = 1500 * Math.pow(2, attempt - 1);
+          const jitter = base * 0.3 * (Math.random() * 2 - 1);
+          await sleep(Math.round(base + jitter));
+          continue;
+        }
         if (res.status >= 500 && attempt < 3) {
           await sleep(500 * attempt);
           continue;
