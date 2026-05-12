@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import {
   Hash,
   Lock,
@@ -17,6 +18,7 @@ import {
   Copy,
   Trash2,
   Megaphone,
+  ChevronLeft,
 } from 'lucide-react';
 import { Avatar } from '@giper/ui/components/Avatar';
 import {
@@ -111,21 +113,33 @@ export function ChannelHeader({
 
   return (
     <>
-      <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-border bg-background px-4">
+      <header className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border bg-background px-3 md:px-4">
         <div className="flex min-w-0 items-center gap-2">
+          {/* Mobile-only back-to-list link. The shell hides the list
+              when a channel is active, so this is the only escape. */}
+          <Link
+            href="/messages"
+            className="-ml-1 rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:hidden"
+            aria-label="К списку чатов"
+          >
+            <ChevronLeft className="size-5" />
+          </Link>
           <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
           <h2 className="truncate text-sm font-semibold">{channel.name}</h2>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-0.5 md:gap-1">
           <button
             type="button"
             onClick={call}
             disabled={callPending}
             className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors duration-150 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
             aria-label="Начать звонок в этом чате"
+            title="Позвонить"
           >
             <Phone className="size-3.5" aria-hidden="true" />
-            {callPending ? 'Создаём…' : 'Позвонить'}
+            <span className="hidden sm:inline">
+              {callPending ? 'Создаём…' : 'Позвонить'}
+            </span>
           </button>
           <button
             type="button"
@@ -147,9 +161,10 @@ export function ChannelHeader({
               onClick={() => setPanelOpen(true)}
               className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors duration-150 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               aria-label="Участники канала"
+              title="Участники"
             >
               <Users className="size-3.5" aria-hidden="true" />
-              Участники
+              <span className="hidden sm:inline">Участники</span>
             </button>
           ) : null}
         </div>

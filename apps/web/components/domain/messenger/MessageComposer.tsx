@@ -224,7 +224,7 @@ export function MessageComposer({
           className="min-h-[40px] w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-sm"
         />
         {mentionState && matches.length > 0 ? (
-          <div className="absolute bottom-full left-0 z-30 mb-1 w-72 rounded-md border border-border bg-popover py-1 shadow-md">
+          <div className="absolute bottom-full left-0 z-30 mb-1 w-72 max-w-[calc(100vw-2rem)] rounded-md border border-border bg-popover py-1 shadow-md">
             <ul>
               {matches.map((u, i) => (
                 <li key={u.id}>

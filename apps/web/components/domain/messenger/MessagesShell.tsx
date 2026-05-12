@@ -151,17 +151,29 @@ export function MessagesShell({
     (c) => !memberChannels.some((mc) => mc.id === c.id),
   );
 
+  // Mobile layout switch: when a channel is selected the list slides
+  // out (hidden); when no channel is selected the list is full-width.
+  // Desktop keeps both panes side-by-side as before. The thread pane
+  // is hidden on mobile entirely — too cramped to be useful.
   return (
     <div
       className={cn(
         '-mx-4 -my-6 grid h-[calc(100vh-3.5rem)] md:-mx-8',
+        // Mobile: single column. Desktop: 2 (or 3 with thread) columns.
+        'grid-cols-1',
         openThreadId
-          ? 'grid-cols-[260px_minmax(0,1fr)_360px]'
-          : 'grid-cols-[260px_minmax(0,1fr)]',
+          ? 'md:grid-cols-[260px_minmax(0,1fr)_360px]'
+          : 'md:grid-cols-[260px_minmax(0,1fr)]',
       )}
     >
-      {/* Left rail: channels & DMs */}
-      <aside className="flex h-full flex-col border-r border-border bg-background">
+      {/* Left rail: channels & DMs. Hidden on mobile when a channel is
+          active — chat pane gets the whole screen. */}
+      <aside
+        className={cn(
+          'flex h-full flex-col border-r border-border bg-background',
+          activeChannelId ? 'hidden md:flex' : 'flex',
+        )}
+      >
         <div className="flex items-center justify-between border-b border-border px-3 py-2">
           <h2 className="text-sm font-semibold">Чаты</h2>
           <CreateChannelDialog />
@@ -208,8 +220,15 @@ export function MessagesShell({
         </div>
       </aside>
 
-      {/* Right pane: messages */}
-      <section className="flex h-full min-w-0 flex-col">
+      {/* Right pane: messages. On mobile this is the whole screen
+          when a channel is active; otherwise hidden so the list takes
+          over. */}
+      <section
+        className={cn(
+          'flex h-full min-w-0 flex-col',
+          !activeChannelId ? 'hidden md:flex' : 'flex',
+        )}
+      >
         {!activeChannelId ? (
           <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
             Выбери канал или начни разговор слева

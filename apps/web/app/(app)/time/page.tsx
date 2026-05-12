@@ -80,7 +80,8 @@ export default async function TimePage({
           {entries.length === 0 ? (
             <div className="p-6 text-sm text-muted-foreground">{t('noEntries')}</div>
           ) : (
-            <table className="w-full text-sm">
+            <div className="overflow-x-auto">
+            <table className="w-full min-w-[640px] text-sm">
               <thead className="bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
                 <tr>
                   <th className="px-3 py-2 w-8">
@@ -157,6 +158,7 @@ export default async function TimePage({
                 ))}
               </tbody>
             </table>
+            </div>
           )}
         </Card>
 

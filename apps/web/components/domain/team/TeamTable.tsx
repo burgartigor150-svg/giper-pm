@@ -66,7 +66,8 @@ export function TeamTable({ rows }: { rows: Row[] }) {
   }
 
   return (
-    <table className="w-full text-sm">
+    <div className="overflow-x-auto">
+    <table className="w-full min-w-[640px] text-sm">
       <thead className="bg-muted/50 text-left">
         <tr>
           <SortTh label={t('table.user')} field="name" sort={sort} dir={dir} toggle={toggle} />
@@ -121,6 +122,7 @@ export function TeamTable({ rows }: { rows: Row[] }) {
         ))}
       </tbody>
     </table>
+    </div>
   );
 }
 

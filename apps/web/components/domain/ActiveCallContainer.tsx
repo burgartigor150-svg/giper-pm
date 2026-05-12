@@ -72,7 +72,7 @@ export function ActiveCallContainer() {
           : // Dock: bottom-right floating card. Width = 320, height
             // adjusted to a 16:9-ish frame. Above all standard z-30
             // popovers, below modal z-[70].
-            'fixed bottom-4 right-4 z-[60] flex w-80 flex-col overflow-hidden rounded-lg border border-border bg-background shadow-lg'
+            'fixed bottom-3 right-3 z-[60] flex w-56 flex-col overflow-hidden rounded-lg border border-border bg-background shadow-lg sm:bottom-4 sm:right-4 sm:w-80'
       }
       role="dialog"
       aria-label={`Активный звонок: ${call.title}`}

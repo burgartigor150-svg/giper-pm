@@ -92,7 +92,7 @@ export function CreateChannelDialog() {
         // chat list included) so the dialog clearly owns the screen
         // and there's nothing else to click by accident.
         <div
-          className="fixed inset-0 z-[70] flex items-start justify-center bg-foreground/40 p-4 pt-[10vh]"
+          className="fixed inset-0 z-[70] flex items-start justify-center overflow-y-auto bg-foreground/40 p-3 pt-[6vh] md:p-4 md:pt-[10vh]"
           role="dialog"
           aria-modal="true"
           aria-label="Новый канал"

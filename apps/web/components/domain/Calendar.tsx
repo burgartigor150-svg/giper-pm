@@ -455,18 +455,21 @@ export function Calendar({
         ) : null}
         {/* Top bar */}
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h1 className="text-2xl font-semibold">{fmtRange(view, anchor)}</h1>
+          <h1 className="text-lg font-semibold md:text-2xl">{fmtRange(view, anchor)}</h1>
           <div className="flex flex-wrap items-center gap-1">
-            {/* View switcher */}
+            {/* View switcher — labels hide on mobile to fit. */}
             <div className="flex items-center gap-0.5 rounded-md border border-input bg-background p-0.5">
               <ViewBtn active={view === 'month'} onClick={() => setView('month')}>
-                <CalendarRange className="h-3.5 w-3.5" /> Месяц
+                <CalendarRange className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Месяц</span>
               </ViewBtn>
               <ViewBtn active={view === 'week'} onClick={() => setView('week')}>
-                <CalendarDays className="h-3.5 w-3.5" /> Неделя
+                <CalendarDays className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Неделя</span>
               </ViewBtn>
               <ViewBtn active={view === 'day'} onClick={() => setView('day')}>
-                <CalendarIcon className="h-3.5 w-3.5" /> День
+                <CalendarIcon className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">День</span>
               </ViewBtn>
             </div>
             <button
@@ -481,7 +484,8 @@ export function Calendar({
                   : 'border-input text-muted-foreground hover:bg-muted')
               }
             >
-              <Filter className="size-3.5" /> Фильтры
+              <Filter className="size-3.5" />
+              <span className="hidden sm:inline">Фильтры</span>
             </button>
             <input
               type="date"
@@ -657,10 +661,12 @@ export function Calendar({
               />
             )}
           </div>
-          <UpcomingSidebar
-            items={lookahead}
-            currentUserId={currentUserId}
-          />
+          <div className="hidden lg:block">
+            <UpcomingSidebar
+              items={lookahead}
+              currentUserId={currentUserId}
+            />
+          </div>
         </div>
 
         {/* Day popover */}
@@ -801,9 +807,12 @@ function WeekGrid({
       {days.map((d, i) => (
         <div
           key={`h-${ymd(d)}`}
-          className="bg-muted px-2 py-1 text-center text-xs font-medium uppercase tracking-wide text-muted-foreground"
+          className="bg-muted px-1 py-1 text-center text-[10px] font-medium uppercase tracking-wide text-muted-foreground md:px-2 md:text-xs"
         >
-          {WEEKDAYS[i]}, {d.getDate()}.{String(d.getMonth() + 1).padStart(2, '0')}
+          <span className="md:hidden">{WEEKDAYS[i]} {d.getDate()}</span>
+          <span className="hidden md:inline">
+            {WEEKDAYS[i]}, {d.getDate()}.{String(d.getMonth() + 1).padStart(2, '0')}
+          </span>
         </div>
       ))}
       {days.map((d) => (
@@ -907,8 +916,8 @@ function DayCell({
     <div
       ref={setNodeRef}
       className={[
-        'flex flex-col gap-1 bg-background p-1.5',
-        tall ? 'min-h-[280px]' : 'min-h-[120px]',
+        'flex flex-col gap-1 bg-background p-1 md:p-1.5',
+        tall ? 'min-h-[200px] md:min-h-[280px]' : 'min-h-[64px] md:min-h-[120px]',
         inMonth ? '' : 'opacity-40',
         isWeekend ? 'bg-muted/40' : '',
         overdueOpen ? 'bg-destructive/10' : '',
@@ -940,7 +949,25 @@ function DayCell({
           </span>
         ) : null}
       </button>
-      <div className="flex min-h-0 flex-col gap-0.5">
+      {/* Compact mobile view: just colored priority dots for tasks +
+          a tiny chip count for events. Tapping the day opens the
+          full popover with the real list. */}
+      <div className="flex flex-wrap gap-0.5 md:hidden">
+        {items.slice(0, 6).map((it) => (
+          <span
+            key={it.id}
+            className={[
+              'h-1.5 w-1.5 rounded-full',
+              PRIORITY_BAR[it.priority] ?? 'bg-muted-foreground/40',
+            ].join(' ')}
+            aria-hidden
+          />
+        ))}
+        {events.length > 0 ? (
+          <span className="ml-0.5 inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden />
+        ) : null}
+      </div>
+      <div className="hidden min-h-0 flex-col gap-0.5 md:flex">
         {visible.map((it) => (
           <DraggableTaskCard key={it.id} item={it} />
         ))}
@@ -1209,8 +1236,8 @@ function DayPopover({
             </ul>
           )}
         </div>
-        <div className="flex items-center justify-end gap-2 border-t px-4 py-2">
-          <span className="mr-auto text-xs text-muted-foreground">Добавить на этот день:</span>
+        <div className="flex flex-wrap items-center justify-end gap-2 border-t px-4 py-2">
+          <span className="mr-auto text-xs text-muted-foreground">Добавить:</span>
           <button
             type="button"
             onClick={() => {

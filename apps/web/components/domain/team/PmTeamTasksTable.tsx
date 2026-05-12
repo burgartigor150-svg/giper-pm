@@ -104,7 +104,7 @@ export function PmTeamTasksTable({ tasks, team, activeFilter }: Props) {
         </p>
       ) : (
         <div className="overflow-x-auto rounded-md border border-border bg-background">
-          <table className="w-full text-sm">
+          <table className="w-full min-w-[720px] text-sm">
             <thead className="bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
               <tr>
                 <th className="px-3 py-2 font-medium">Задача</th>

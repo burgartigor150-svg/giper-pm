@@ -91,7 +91,7 @@ export function ThreadPane({ rootMessageId, meId, onClose }: Props) {
   }, [data?.replies.length]);
 
   return (
-    <aside className="flex h-full w-[360px] shrink-0 flex-col border-l border-border bg-background">
+    <aside className="fixed inset-0 z-40 flex h-full w-full shrink-0 flex-col border-l border-border bg-background md:static md:w-[360px]">
       <div className="flex items-center justify-between border-b border-border px-3 py-2">
         <div className="text-sm font-semibold">Тред</div>
         <button

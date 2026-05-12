@@ -159,7 +159,7 @@ export function QuickAddDialog() {
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[60] flex items-start justify-center bg-black/50 p-4 pt-[15vh]"
+      className="fixed inset-0 z-[60] flex items-start justify-center overflow-y-auto bg-black/50 p-3 pt-[8vh] md:p-4 md:pt-[15vh]"
       onClick={() => !pending && setOpen(false)}
     >
       <div

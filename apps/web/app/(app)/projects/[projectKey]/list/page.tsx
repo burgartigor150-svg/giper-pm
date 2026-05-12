@@ -120,7 +120,8 @@ export default async function ProjectTasksListPage({
         {result.items.length === 0 ? (
           <div className="p-6 text-sm text-muted-foreground">{t('empty')}</div>
         ) : (
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[800px] text-sm">
             <thead className="border-b border-border bg-muted/50 text-left">
               <tr>
                 <th className="px-4 py-3" aria-sort={ariaSortFor('number')}>
@@ -206,6 +207,7 @@ export default async function ProjectTasksListPage({
               ))}
             </tbody>
           </table>
+          </div>
         )}
         <Pagination page={result.page} pageCount={result.pageCount} />
       </Card>
