@@ -127,7 +127,11 @@ export async function POST(req: Request) {
         select: { project: { select: { key: true } } },
       });
       const result = await deleteOneTask(prisma, client, taskId);
-      if (before) {
+      // eslint-disable-next-line no-console
+      console.log(
+        `[bitrix:webhook] ONTASKDELETE task=${taskId} -> action=${result.action}${result.reason ? ' reason=' + result.reason : ''}`,
+      );
+      if (before && result.action === 'updated') {
         revalidatePath(`/projects/${before.project.key}/list`);
         revalidatePath(`/projects/${before.project.key}/board`);
       }
@@ -137,6 +141,10 @@ export async function POST(req: Request) {
     // ----- Comments -----
     if (event === 'ONTASKCOMMENTADD' && taskForComment && commentId) {
       const result = await syncOneComment(prisma, client, taskForComment, commentId);
+      // eslint-disable-next-line no-console
+      console.log(
+        `[bitrix:webhook] ONTASKCOMMENTADD task=${taskForComment} comment=${commentId} -> action=${result.action}${result.reason ? ' reason=' + result.reason : ''}`,
+      );
       if (result.commentId) {
         const local = await prisma.comment.findUnique({
           where: { id: result.commentId },
