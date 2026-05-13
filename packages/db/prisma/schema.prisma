@@ -631,6 +631,14 @@ model Task {
   bitrixCreatedById   String?
   bitrixResponsibleId String?
 
+  // For Bitrix24 tasks whose discussion lives in the IM messenger
+  // (modern "collab" mode and any task migrated to the new chat-based
+  // discussion model). When set, comment sync uses
+  // im.dialog.messages.get with DIALOG_ID=`chat<chatId>` instead of
+  // the legacy task.commentitem.getlist endpoint — that's the only
+  // way to see comments on these tasks.
+  bitrixChatId        String?
+
   // Internal track — independent from the Bitrix-mirror status above.
   // The mirrored `status` reflects what the client sees in Bitrix; the
   // internal track is what our team uses day-to-day. Defaults match

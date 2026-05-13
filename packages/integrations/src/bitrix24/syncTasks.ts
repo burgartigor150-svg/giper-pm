@@ -279,6 +279,7 @@ async function upsertOne(
       creatorId: true,
       bitrixCreatedById: true,
       bitrixResponsibleId: true,
+      bitrixChatId: true,
     },
   });
 
@@ -300,6 +301,7 @@ async function upsertOne(
       (found.assigneeId ?? null) !== (assigneeId ?? null) ||
       (found.bitrixCreatedById ?? null) !== (mapped.bitrixCreatedById ?? null) ||
       (found.bitrixResponsibleId ?? null) !== (mapped.bitrixResponsibleId ?? null) ||
+      (found.bitrixChatId ?? null) !== (mapped.bitrixChatId ?? null) ||
       creatorChanged;
     if (dirty) {
       await prisma.task.update({
@@ -316,6 +318,7 @@ async function upsertOne(
           tags: mapped.tags,
           bitrixCreatedById: mapped.bitrixCreatedById ?? null,
           bitrixResponsibleId: mapped.bitrixResponsibleId ?? null,
+          bitrixChatId: mapped.bitrixChatId ?? null,
           ...(creatorChanged ? { creatorId: upstreamCreatorId! } : {}),
         },
       });
@@ -349,6 +352,7 @@ async function upsertOne(
       tags: mapped.tags,
       bitrixCreatedById: mapped.bitrixCreatedById ?? null,
       bitrixResponsibleId: mapped.bitrixResponsibleId ?? null,
+      bitrixChatId: mapped.bitrixChatId ?? null,
     },
     select: { id: true },
   });

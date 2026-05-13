@@ -5,6 +5,7 @@ import type { BxTask } from './types';
 import { hashTaskState } from './outbound';
 import { ensureProjectForGroup } from './syncProjects';
 import { syncTaskComments, type SyncCommentsResult } from './syncComments';
+import { syncTaskChat } from './syncChat';
 
 /**
  * Inbound (Bitrix24 → giper-pm) handlers, used by the webhook endpoint.
@@ -35,7 +36,10 @@ export async function syncOneTask(
   client: Bitrix24Client,
   bitrixTaskId: string,
 ): Promise<InboundResult> {
-  // Same select as the bulk runner — keep them in sync.
+  // Same select as the bulk runner — keep them in sync. CHAT_ID is
+  // critical: Bitrix has moved task discussions from the legacy forum
+  // (commentitem.*) into the IM messenger, and CHAT_ID is the only
+  // way to find the right chat for im.dialog.messages.get.
   const res = await client.call<{ task: BxTask }>('tasks.task.get', {
     taskId: bitrixTaskId,
     select: [
@@ -53,6 +57,7 @@ export async function syncOneTask(
       'DEADLINE',
       'START_DATE_PLAN',
       'PARENT_ID',
+      'CHAT_ID',
     ],
   });
   const raw = res.result?.task;
@@ -166,6 +171,7 @@ export async function syncOneTask(
         tags: mapped.tags,
         bitrixCreatedById: mapped.bitrixCreatedById ?? null,
         bitrixResponsibleId: mapped.bitrixResponsibleId ?? null,
+        bitrixChatId: mapped.bitrixChatId ?? null,
         bitrixSyncedAt: new Date(),
         bitrixSyncedHash: incomingHashCreate,
       },
@@ -211,7 +217,10 @@ export async function syncOneTask(
     return { action: 'conflict', taskId: local.id };
   }
 
-  // Apply upstream state.
+  // Apply upstream state. Also refresh bitrixChatId — Bitrix migrates
+  // tasks from forum to messenger over time, and we want each webhook
+  // update to keep the chat pointer current so comment sync picks the
+  // right backend on the next ONTASKCOMMENT* hit.
   await prisma.task.update({
     where: { id: local.id },
     data: {
@@ -220,6 +229,7 @@ export async function syncOneTask(
       dueDate: mapped.dueDate,
       startedAt: mapped.startedAt,
       completedAt: mapped.completedAt,
+      bitrixChatId: mapped.bitrixChatId ?? null,
       bitrixSyncedAt: new Date(),
       bitrixSyncedHash: incomingHash,
       syncConflict: false,
@@ -320,7 +330,7 @@ export async function syncOneComment(
 ): Promise<InboundResult> {
   let task = await prisma.task.findFirst({
     where: { externalSource: 'bitrix24', externalId: bitrixTaskId },
-    select: { id: true },
+    select: { id: true, bitrixChatId: true },
   });
   if (!task) {
     // Bulk sync's incremental watermark misses tasks whose CHANGED_DATE
@@ -330,7 +340,7 @@ export async function syncOneComment(
     if (taskRes.taskId) {
       task = await prisma.task.findUnique({
         where: { id: taskRes.taskId },
-        select: { id: true },
+        select: { id: true, bitrixChatId: true },
       });
     }
     if (!task) {
@@ -339,6 +349,44 @@ export async function syncOneComment(
         reason: `task not mirrored locally and could not be pulled (${taskRes.action}${taskRes.reason ? ': ' + taskRes.reason : ''})`,
       };
     }
+  }
+
+  // Route by backend: Bitrix moved task discussions from the legacy
+  // forum into the IM messenger. If we know the task has a chat
+  // (bitrixChatId set by the most recent task sync), pull from
+  // im.dialog.messages.get; otherwise fall back to the legacy
+  // task.commentitem.getlist.
+  if (task.bitrixChatId) {
+    const chatStats = {
+      totalSeen: 0,
+      created: 0,
+      updated: 0,
+      errors: 0,
+    };
+    await syncTaskChat(
+      prisma,
+      client,
+      { id: task.id, bitrixTaskId, chatId: task.bitrixChatId },
+      chatStats,
+    );
+    if (chatStats.errors > 0 && chatStats.created === 0 && chatStats.updated === 0) {
+      return {
+        action: 'skipped',
+        reason: `syncTaskChat hit ${chatStats.errors} error(s); no messages landed`,
+      };
+    }
+    if (chatStats.created === 0 && chatStats.updated === 0) {
+      return {
+        action: 'echoed',
+        taskId: task.id,
+        reason: `chat backend: nothing new (seen=${chatStats.totalSeen})`,
+      };
+    }
+    return {
+      action: 'created',
+      taskId: task.id,
+      reason: `chat backend: created=${chatStats.created} updated=${chatStats.updated}`,
+    };
   }
 
   const stats: SyncCommentsResult = {
@@ -369,13 +417,13 @@ export async function syncOneComment(
     return {
       action: 'echoed',
       taskId: task.id,
-      reason: `nothing new (seen=${stats.totalSeen}, deleted=${stats.deleted})`,
+      reason: `forum backend: nothing new (seen=${stats.totalSeen}, deleted=${stats.deleted})`,
     };
   }
   return {
     action: 'created',
     taskId: task.id,
-    reason: `created=${stats.created} updated=${stats.updated} deleted=${stats.deleted}`,
+    reason: `forum backend: created=${stats.created} updated=${stats.updated} deleted=${stats.deleted}`,
   };
 }
 

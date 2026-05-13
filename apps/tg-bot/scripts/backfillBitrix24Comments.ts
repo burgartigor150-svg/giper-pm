@@ -1,28 +1,36 @@
 /**
  * One-shot backfill: for every active mirrored Bitrix24 task in giper-pm,
- * pull its full comment list and upsert into our Comment table.
+ * pull its full comment thread and upsert into our Comment table.
  *
- * Why this exists: webhook-based comment sync only catches new chatter
- * once the webhook fix landed. Historic comments on long-lived tasks
- * were never imported (bulk sync's CHANGED_DATE watermark skips tasks
- * that didn't move). This script catches them up in one pass.
+ * Routing: Bitrix has moved task discussions from the legacy forum API
+ * (task.commentitem.*) into the IM messenger for most tasks. We dispatch
+ * per task:
+ *   - if Task.bitrixChatId is set locally → syncTaskChat (im.dialog.messages.get)
+ *   - else: probe tasks.task.get to refresh chatId. If a chat exists,
+ *     persist it on the row and call syncTaskChat. Otherwise fall back
+ *     to legacy syncTaskComments.
  *
- * Safe: uses syncTaskComments with skipDeletes=true, so we never drop
- * local rows even if the per-task getlist returns a narrower view.
+ * Safe: syncTaskChat is upsert-only by externalId='chat:<id>'.
+ * syncTaskComments runs with skipDeletes=true so we never drop local
+ * rows even if the per-task getlist returns a narrower view.
  *
  * Run on prod (inside the tg-bot container — it ships tsx + sources):
  *   docker compose -f /opt/giper-pm/docker-compose.prod.yml exec -T tg-bot \
  *     npx tsx /app/apps/tg-bot/scripts/backfillBitrix24Comments.ts
  *
- * Progress is printed per task. Safe to Ctrl+C at any point — every
- * task is its own transaction.
+ * Progress is printed per task. Safe to Ctrl+C — every task is its
+ * own set of independent writes.
  */
 import { prisma } from '@giper/db';
 import {
   Bitrix24Client,
   syncTaskComments,
+  syncTaskChat,
   type SyncCommentsResult,
 } from '@giper/integrations/bitrix24';
+import type { BxTask } from '@giper/integrations/bitrix24';
+
+type ChatStats = { totalSeen: number; created: number; updated: number; errors: number };
 
 async function main() {
   const webhookUrl = process.env.BITRIX24_WEBHOOK_URL?.trim();
@@ -32,53 +40,99 @@ async function main() {
   }
   const client = new Bitrix24Client({ webhookUrl });
 
-  // Active = anything not DONE/CANCELED, mirrored from Bitrix.
   const tasks = await prisma.task.findMany({
     where: {
       externalSource: 'bitrix24',
       externalId: { not: null },
       status: { notIn: ['DONE', 'CANCELED'] },
     },
-    select: { id: true, externalId: true, number: true, title: true },
+    select: {
+      id: true,
+      externalId: true,
+      number: true,
+      title: true,
+      bitrixChatId: true,
+    },
     orderBy: { number: 'asc' },
   });
 
   console.log(`[backfill] ${tasks.length} active mirrored tasks to scan`);
 
-  const totals = { created: 0, updated: 0, errors: 0, skipped: 0 };
+  const totals = { created: 0, updated: 0, errors: 0, chatRoute: 0, forumRoute: 0 };
   const startedAt = Date.now();
 
   for (let i = 0; i < tasks.length; i++) {
     const t = tasks[i]!;
     if (!t.externalId) continue;
-    const stats: SyncCommentsResult = {
-      totalSeen: 0,
-      created: 0,
-      updated: 0,
-      deleted: 0,
-      errors: 0,
-    };
+    const tag = `[${i + 1}/${tasks.length}]`;
     try {
-      await syncTaskComments(
-        prisma,
-        client,
-        { id: t.id, bitrixTaskId: t.externalId },
-        stats,
-        { skipDeletes: true },
-      );
-      totals.created += stats.created;
-      totals.updated += stats.updated;
-      totals.errors += stats.errors;
-      const tag = stats.created > 0 || stats.updated > 0 ? '+' : ' ';
-      console.log(
-        `[backfill] [${i + 1}/${tasks.length}] ${tag} bx=${t.externalId} ` +
-          `seen=${stats.totalSeen} created=${stats.created} updated=${stats.updated} errors=${stats.errors} ` +
-          `"${t.title.slice(0, 50)}"`,
-      );
+      let chatId = t.bitrixChatId;
+      if (!chatId) {
+        // Probe Bitrix for the chat backing of this task. Cheap relative
+        // to comment fetch; result is persisted so subsequent webhooks
+        // route correctly without another probe.
+        const res = await client.call<{ task: BxTask }>('tasks.task.get', {
+          taskId: t.externalId,
+          select: ['ID', 'CHAT_ID'],
+        });
+        const upstreamChatId = res.result?.task?.chatId;
+        if (upstreamChatId && upstreamChatId !== '0') {
+          chatId = String(upstreamChatId);
+          await prisma.task.update({
+            where: { id: t.id },
+            data: { bitrixChatId: chatId },
+          });
+        }
+      }
+
+      if (chatId) {
+        totals.chatRoute++;
+        const stats: ChatStats = { totalSeen: 0, created: 0, updated: 0, errors: 0 };
+        await syncTaskChat(
+          prisma,
+          client,
+          { id: t.id, bitrixTaskId: t.externalId, chatId },
+          stats,
+        );
+        totals.created += stats.created;
+        totals.updated += stats.updated;
+        totals.errors += stats.errors;
+        const mark = stats.created > 0 || stats.updated > 0 ? '+' : ' ';
+        console.log(
+          `[backfill] ${tag} ${mark} bx=${t.externalId} chat=${chatId} ` +
+            `seen=${stats.totalSeen} created=${stats.created} updated=${stats.updated} errors=${stats.errors} ` +
+            `"${t.title.slice(0, 50)}"`,
+        );
+      } else {
+        totals.forumRoute++;
+        const stats: SyncCommentsResult = {
+          totalSeen: 0,
+          created: 0,
+          updated: 0,
+          deleted: 0,
+          errors: 0,
+        };
+        await syncTaskComments(
+          prisma,
+          client,
+          { id: t.id, bitrixTaskId: t.externalId },
+          stats,
+          { skipDeletes: true },
+        );
+        totals.created += stats.created;
+        totals.updated += stats.updated;
+        totals.errors += stats.errors;
+        const mark = stats.created > 0 || stats.updated > 0 ? '+' : ' ';
+        console.log(
+          `[backfill] ${tag} ${mark} bx=${t.externalId} forum ` +
+            `seen=${stats.totalSeen} created=${stats.created} updated=${stats.updated} errors=${stats.errors} ` +
+            `"${t.title.slice(0, 50)}"`,
+        );
+      }
     } catch (e) {
       totals.errors++;
       console.error(
-        `[backfill] [${i + 1}/${tasks.length}] FAIL bx=${t.externalId}`,
+        `[backfill] ${tag} FAIL bx=${t.externalId}`,
         e instanceof Error ? e.message : e,
       );
     }
@@ -87,7 +141,8 @@ async function main() {
   const elapsedSec = ((Date.now() - startedAt) / 1000).toFixed(0);
   console.log(
     `\n[backfill] done in ${elapsedSec}s — ` +
-      `created=${totals.created} updated=${totals.updated} errors=${totals.errors}`,
+      `created=${totals.created} updated=${totals.updated} errors=${totals.errors} ` +
+      `(chat=${totals.chatRoute}, forum=${totals.forumRoute})`,
   );
 
   await prisma.$disconnect();
