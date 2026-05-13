@@ -167,19 +167,26 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: true, event, ...result });
     }
 
-    if (event === 'ONTASKCOMMENTDELETE' && commentId) {
-      // Capture the parent task before delete so we can revalidate.
-      const before = await prisma.comment.findUnique({
-        where: {
-          externalSource_externalId: {
-            externalSource: 'bitrix24',
-            externalId: commentId,
-          },
-        },
-        select: { taskId: true },
+    if (event === 'ONTASKCOMMENTDELETE' && taskForComment && commentId) {
+      // deleteOneComment now re-syncs the whole comment list for the
+      // task — the diff inside syncTaskComments drops any local rows
+      // whose externalId vanished upstream. We don't need a pre-fetch
+      // of the parent task id.
+      const result = await deleteOneComment(
+        prisma,
+        client,
+        taskForComment,
+        commentId,
+      );
+      // eslint-disable-next-line no-console
+      console.log(
+        `[bitrix:webhook] ONTASKCOMMENTDELETE task=${taskForComment} -> action=${result.action}${result.reason ? ' reason=' + result.reason : ''}`,
+      );
+      const localTask = await prisma.task.findFirst({
+        where: { externalSource: 'bitrix24', externalId: taskForComment },
+        select: { id: true },
       });
-      const result = await deleteOneComment(prisma, commentId);
-      if (before) await revalidateTaskPath(before.taskId);
+      if (localTask) await revalidateTaskPath(localTask.id);
       return NextResponse.json({ ok: true, event, ...result });
     }
 

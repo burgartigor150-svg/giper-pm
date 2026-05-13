@@ -1,9 +1,10 @@
 import type { PrismaClient } from '@giper/db';
 import type { Bitrix24Client } from './client';
-import { mapBitrixTask, convertBitrixMarkup } from './mappers';
+import { mapBitrixTask } from './mappers';
 import type { BxTask } from './types';
 import { hashTaskState } from './outbound';
 import { ensureProjectForGroup } from './syncProjects';
+import { syncTaskComments, type SyncCommentsResult } from './syncComments';
 
 /**
  * Inbound (Bitrix24 → giper-pm) handlers, used by the webhook endpoint.
@@ -227,14 +228,6 @@ export async function syncOneTask(
   return { action: 'updated', taskId: local.id };
 }
 
-type BxComment = {
-  ID: string;
-  AUTHOR_ID: string;
-  AUTHOR_NAME?: string;
-  POST_MESSAGE: string;
-  POST_DATE: string;
-};
-
 /**
  * Hard-delete a locally mirrored task. Used by ONTASKDELETE.
  *
@@ -303,41 +296,36 @@ export async function deleteOneTask(
 }
 
 /**
- * Pull a single comment from Bitrix and upsert into our Comment table.
- * Used by ONTASKCOMMENTADD.
+ * Reconcile comments for a single task from Bitrix → giper-pm. Used by
+ * ONTASKCOMMENT* webhooks.
  *
- * Echo detection: if the comment is already linked to a local row by
- * (externalSource, externalId), we created it via outbound — skip.
+ * Strategy: instead of fetching one comment by id (Bitrix's
+ * `task.commentitem.get` accepts an ID we can't actually derive from
+ * the webhook payload — MESSAGE_ID is *not* the POST_ID it wants), we
+ * pull the *whole* comment list for the task and let the existing
+ * syncTaskComments routine diff against our local rows. It's an extra
+ * roundtrip versus a single-comment fetch, but it's the only call
+ * that's reliable across all three event types (ADD/UPDATE/DELETE) and
+ * it survives any future Bitrix payload-shape drift.
+ *
+ * Echo detection: syncTaskComments matches by (externalSource,
+ * externalId), so our own outbound writes — which set externalId from
+ * the response — get recognised as already-mirrored on the next pull.
  */
 export async function syncOneComment(
   prisma: PrismaClient,
   client: Bitrix24Client,
   bitrixTaskId: string,
-  bitrixCommentId: string,
+  _bitrixCommentId: string,
 ): Promise<InboundResult> {
-  // Already linked → our own echo.
-  const existing = await prisma.comment.findUnique({
-    where: {
-      externalSource_externalId: {
-        externalSource: 'bitrix24',
-        externalId: bitrixCommentId,
-      },
-    },
-    select: { id: true },
-  });
-  if (existing) return { action: 'echoed', commentId: existing.id };
-
   let task = await prisma.task.findFirst({
     where: { externalSource: 'bitrix24', externalId: bitrixTaskId },
     select: { id: true },
   });
   if (!task) {
-    // Inbound comment for a task we haven't mirrored yet. The bulk
-    // sync's incremental watermark only catches tasks whose CHANGED_DATE
-    // moved — and Bitrix doesn't bump CHANGED_DATE on comment add. So
-    // this is a frequent case during normal chatter on legacy tasks.
-    // Try to pull the task in now; if it lands (right group, not closed
-    // upstream), the comment can attach to it.
+    // Bulk sync's incremental watermark misses tasks whose CHANGED_DATE
+    // didn't move — Bitrix doesn't bump it on comment add. Pull the
+    // task in on demand so the comment can attach to it.
     const taskRes = await syncOneTask(prisma, client, bitrixTaskId);
     if (taskRes.taskId) {
       task = await prisma.task.findUnique({
@@ -353,45 +341,33 @@ export async function syncOneComment(
     }
   }
 
-  const res = await client.call<BxComment>('task.commentitem.get', {
-    TASKID: bitrixTaskId,
-    ITEMID: bitrixCommentId,
-  });
-  const c = res.result;
-  if (!c) return { action: 'skipped', reason: 'comment not found' };
+  const stats: SyncCommentsResult = {
+    totalSeen: 0,
+    created: 0,
+    updated: 0,
+    deleted: 0,
+    errors: 0,
+  };
+  await syncTaskComments(prisma, client, { id: task.id, bitrixTaskId }, stats);
 
-  // Map AUTHOR_ID → our user (best effort). If not linked, fall back to
-  // the project owner so the comment still shows up; the bitrixUserId
-  // is preserved on the comment metadata via source='WEB'.
-  const author = await prisma.user.findFirst({
-    where: { bitrixUserId: c.AUTHOR_ID },
-    select: { id: true },
-  });
-  let authorId = author?.id;
-  if (!authorId) {
-    const fallback = await prisma.user.findFirst({
-      where: { role: 'ADMIN', isActive: true },
-      orderBy: { createdAt: 'asc' },
-      select: { id: true },
-    });
-    if (!fallback) return { action: 'skipped', reason: 'no author resolution' };
-    authorId = fallback.id;
+  if (stats.errors > 0 && stats.created === 0 && stats.updated === 0) {
+    return {
+      action: 'skipped',
+      reason: `syncTaskComments hit ${stats.errors} error(s); no comments landed`,
+    };
   }
-
-  const created = await prisma.comment.create({
-    data: {
+  if (stats.created === 0 && stats.updated === 0) {
+    return {
+      action: 'echoed',
       taskId: task.id,
-      authorId,
-      body: convertBitrixMarkup(c.POST_MESSAGE ?? '').slice(0, 50_000),
-      source: 'WEB',
-      visibility: 'EXTERNAL',
-      externalSource: 'bitrix24',
-      externalId: c.ID,
-      createdAt: c.POST_DATE ? new Date(c.POST_DATE) : new Date(),
-    },
-    select: { id: true },
-  });
-  return { action: 'created', commentId: created.id };
+      reason: `nothing new (seen=${stats.totalSeen}, deleted=${stats.deleted})`,
+    };
+  }
+  return {
+    action: 'created',
+    taskId: task.id,
+    reason: `created=${stats.created} updated=${stats.updated} deleted=${stats.deleted}`,
+  };
 }
 
 /**
@@ -408,51 +384,30 @@ export async function updateOneComment(
   bitrixTaskId: string,
   bitrixCommentId: string,
 ): Promise<InboundResult> {
-  const local = await prisma.comment.findUnique({
-    where: {
-      externalSource_externalId: {
-        externalSource: 'bitrix24',
-        externalId: bitrixCommentId,
-      },
-    },
-    select: { id: true, taskId: true },
-  });
-  if (!local) {
-    return syncOneComment(prisma, client, bitrixTaskId, bitrixCommentId);
-  }
-  const res = await client.call<BxComment>('task.commentitem.get', {
-    TASKID: bitrixTaskId,
-    ITEMID: bitrixCommentId,
-  });
-  const c = res.result;
-  if (!c) return { action: 'skipped', reason: 'comment not found upstream' };
-  await prisma.comment.update({
-    where: { id: local.id },
-    data: { body: convertBitrixMarkup(c.POST_MESSAGE ?? '').slice(0, 50_000) },
-  });
-  return { action: 'updated', commentId: local.id };
+  // Same getlist+diff path as the ADD case. syncTaskComments compares
+  // body strings and updates rows whose upstream POST_MESSAGE changed,
+  // so we don't need a separate fetch-by-id path. Note: bitrixCommentId
+  // from the webhook (MESSAGE_ID) is not the POST_ID we'd need for a
+  // direct fetch anyway.
+  return syncOneComment(prisma, client, bitrixTaskId, bitrixCommentId);
 }
 
 /**
- * Hard-delete a locally mirrored comment. Used by ONTASKCOMMENTDELETE.
- * No-op if we never had it.
+ * Reconcile after ONTASKCOMMENTDELETE. We can't match the deleted
+ * comment by id directly: the webhook carries MESSAGE_ID, while our
+ * locally mirrored Comment rows store POST_ID (the id returned by
+ * `task.commentitem.getlist`). Instead we re-pull the task's whole
+ * comment list and let syncTaskComments drop any local rows whose
+ * externalId is no longer present upstream — same getlist+diff path
+ * used by ADD/UPDATE.
  */
 export async function deleteOneComment(
   prisma: PrismaClient,
+  client: Bitrix24Client,
+  bitrixTaskId: string,
   bitrixCommentId: string,
 ): Promise<InboundResult> {
-  const local = await prisma.comment.findUnique({
-    where: {
-      externalSource_externalId: {
-        externalSource: 'bitrix24',
-        externalId: bitrixCommentId,
-      },
-    },
-    select: { id: true },
-  });
-  if (!local) return { action: 'skipped', reason: 'comment not mirrored' };
-  await prisma.comment.delete({ where: { id: local.id } });
-  return { action: 'updated', commentId: local.id, reason: 'deleted upstream' };
+  return syncOneComment(prisma, client, bitrixTaskId, bitrixCommentId);
 }
 
 // stripBitrixCommentMarkup → moved into mappers.convertBitrixMarkup so
