@@ -18,6 +18,8 @@ jobs:
           node-version: 20
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Generate Prisma client
+        run: pnpm --filter @giper/db exec prisma generate
       - run: pnpm --filter @giper/shared test
       - run: pnpm --filter @giper/web test
 
@@ -47,6 +49,8 @@ jobs:
           node-version: 20
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Generate Prisma client
+        run: pnpm --filter @giper/db exec prisma generate
       - name: Push schema to test DB
         env:
           DATABASE_URL: postgresql://giper:giper@localhost:5433/giper_pm_test
@@ -79,6 +83,8 @@ jobs:
           node-version: 20
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Generate Prisma client
+        run: pnpm --filter @giper/db exec prisma generate
       - name: Push schema to test DB
         env:
           DATABASE_URL: postgresql://giper:giper@localhost:5433/giper_pm_test
