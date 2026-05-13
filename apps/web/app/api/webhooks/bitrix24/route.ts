@@ -74,11 +74,13 @@ export async function POST(req: Request) {
        null)
     : null;
 
+  // For comment events Bitrix carries the real comment id in MESSAGE_ID,
+  // not ID (the ID field is the task_view record and is always '0' for
+  // fresh comment events). Discovered empirically from raw payload dumps.
   const commentId = isCommentEvent
-    ? (params.get('data[FIELDS_AFTER][ID]') ??
-       params.get('data[FIELDS_BEFORE][ID]') ??
-       params.get('data[fields][ID]') ??
-       params.get('data[ID]') ??
+    ? (params.get('data[FIELDS_AFTER][MESSAGE_ID]') ??
+       params.get('data[FIELDS_BEFORE][MESSAGE_ID]') ??
+       params.get('data[fields][MESSAGE_ID]') ??
        null)
     : null;
   // Comment events carry the parent task id alongside the comment id.
@@ -95,21 +97,6 @@ export async function POST(req: Request) {
   console.log(
     `[bitrix:webhook] event=${event} taskId=${taskId ?? '-'} commentId=${commentId ?? '-'} taskForComment=${taskForComment ?? '-'}`,
   );
-  // TEMP: dump the bracket-keyed `data[...]` keys for comment events so
-  // we can locate the real comment id field (current parsing returns
-  // commentId=0 — Bitrix likely stores it under a different bracket
-  // path than FIELDS_AFTER/FIELDS_BEFORE/fields/ID).
-  if (isCommentEvent) {
-    const dataKeys: string[] = [];
-    for (const key of params.keys()) {
-      if (key.startsWith('data[')) {
-        const v = params.get(key) ?? '';
-        dataKeys.push(`${key}=${v.length > 60 ? v.slice(0, 60) + '…' : v}`);
-      }
-    }
-    // eslint-disable-next-line no-console
-    console.log(`[bitrix:webhook:dump] ${event} -> ${dataKeys.join(' | ')}`);
-  }
 
   // 3. Dispatch by event.
   let client;
