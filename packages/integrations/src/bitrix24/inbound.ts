@@ -348,7 +348,16 @@ export async function syncOneComment(
     deleted: 0,
     errors: 0,
   };
-  await syncTaskComments(prisma, client, { id: task.id, bitrixTaskId }, stats);
+  // skipDeletes=true: webhook-context Bitrix replies can be narrower
+  // than what bulk sync sees (per-user permissions, comment visibility).
+  // Letting the delete-diff fire here mass-nukes historic comments.
+  await syncTaskComments(
+    prisma,
+    client,
+    { id: task.id, bitrixTaskId },
+    stats,
+    { skipDeletes: true },
+  );
 
   if (stats.errors > 0 && stats.created === 0 && stats.updated === 0) {
     return {

@@ -44,11 +44,23 @@ type BxComment = {
  * local user matches, fall back to the first ADMIN. We never invent
  * a user — that would let webhook payloads spawn rows.
  */
+export type SyncTaskCommentsOptions = {
+  /**
+   * When true, do NOT remove local rows whose externalId isn't in the
+   * upstream list. Use this from webhook callbacks where Bitrix may
+   * return a narrower view (visibility, permissions, single-user
+   * webhook bot context) than the bulk sync sees — without this guard
+   * we'd mass-delete historic comments on every webhook hit.
+   */
+  skipDeletes?: boolean;
+};
+
 export async function syncTaskComments(
   prisma: PrismaClient,
   client: Bitrix24Client,
   task: { id: string; bitrixTaskId: string },
   stats: SyncCommentsResult,
+  opts: SyncTaskCommentsOptions = {},
 ): Promise<void> {
   let comments: BxComment[];
   try {
@@ -71,16 +83,20 @@ export async function syncTaskComments(
   // Drop local rows that disappeared upstream. Only target rows we
   // own (externalSource='bitrix24'); comments authored locally and
   // not yet pushed have externalSource=null and are out of scope.
-  const stale = await prisma.comment.findMany({
-    where: { taskId: task.id, externalSource: 'bitrix24' },
-    select: { id: true, externalId: true },
-  });
-  const toDelete = stale.filter((c) => c.externalId && !remoteIds.has(c.externalId));
-  if (toDelete.length > 0) {
-    await prisma.comment.deleteMany({
-      where: { id: { in: toDelete.map((c) => c.id) } },
+  // Skipped when opts.skipDeletes is set (webhook callbacks — see
+  // SyncTaskCommentsOptions docstring).
+  if (!opts.skipDeletes) {
+    const stale = await prisma.comment.findMany({
+      where: { taskId: task.id, externalSource: 'bitrix24' },
+      select: { id: true, externalId: true },
     });
-    stats.deleted += toDelete.length;
+    const toDelete = stale.filter((c) => c.externalId && !remoteIds.has(c.externalId));
+    if (toDelete.length > 0) {
+      await prisma.comment.deleteMany({
+        where: { id: { in: toDelete.map((c) => c.id) } },
+      });
+      stats.deleted += toDelete.length;
+    }
   }
 
   // Resolve a fallback author once per task.
