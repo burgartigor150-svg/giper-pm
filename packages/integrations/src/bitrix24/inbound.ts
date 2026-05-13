@@ -82,10 +82,84 @@ export async function syncOneTask(
         reason: 'task closed upstream and not mirrored — nothing to do',
       };
     }
-    return {
-      action: 'skipped',
-      reason: 'task not mirrored locally yet — let the next bulk run create it',
-    };
+    // Create on demand. Only possible when we have a synced workgroup
+    // for the task — standalone Bitrix tasks (groupId=0) and tasks in
+    // un-synced workgroups still get skipped, same as the bulk run.
+    if (!mapped.bitrixGroupId) {
+      return {
+        action: 'skipped',
+        reason: 'standalone Bitrix task (no workgroup) — not mirrored',
+      };
+    }
+    const project = await prisma.project.findFirst({
+      where: {
+        externalSource: 'bitrix24',
+        externalId: mapped.bitrixGroupId,
+      },
+      select: { id: true },
+    });
+    if (!project) {
+      return {
+        action: 'skipped',
+        reason: `workgroup ${mapped.bitrixGroupId} not synced as a project — task ignored`,
+      };
+    }
+    const assigneeId = mapped.bitrixResponsibleId
+      ? (
+          await prisma.user.findFirst({
+            where: { bitrixUserId: mapped.bitrixResponsibleId },
+            select: { id: true },
+          })
+        )?.id ?? null
+      : null;
+    const upstreamCreatorId = mapped.bitrixCreatedById
+      ? (
+          await prisma.user.findFirst({
+            where: { bitrixUserId: mapped.bitrixCreatedById },
+            select: { id: true },
+          })
+        )?.id ?? null
+      : null;
+    const fallbackCreator = await prisma.user.findFirst({
+      where: { role: 'ADMIN', isActive: true },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true },
+    });
+    const creatorId = upstreamCreatorId ?? fallbackCreator?.id ?? null;
+    if (!creatorId) {
+      return { action: 'skipped', reason: 'no creator resolution available' };
+    }
+    // Allocate next project-scoped task number.
+    const max = await prisma.task.aggregate({
+      where: { projectId: project.id },
+      _max: { number: true },
+    });
+    const number = (max._max.number ?? 0) + 1;
+    const incomingHashCreate = hashTaskState({ status: mapped.status });
+    const created = await prisma.task.create({
+      data: {
+        projectId: project.id,
+        number,
+        title: mapped.title,
+        description: mapped.description,
+        status: mapped.status,
+        priority: mapped.priority,
+        dueDate: mapped.dueDate,
+        startedAt: mapped.startedAt,
+        completedAt: mapped.completedAt,
+        creatorId,
+        assigneeId,
+        externalSource: 'bitrix24',
+        externalId: mapped.externalId,
+        tags: mapped.tags,
+        bitrixCreatedById: mapped.bitrixCreatedById ?? null,
+        bitrixResponsibleId: mapped.bitrixResponsibleId ?? null,
+        bitrixSyncedAt: new Date(),
+        bitrixSyncedHash: incomingHashCreate,
+      },
+      select: { id: true },
+    });
+    return { action: 'created', taskId: created.id };
   }
   if (isClosedUpstream) {
     await prisma.task.delete({ where: { id: local.id } });
