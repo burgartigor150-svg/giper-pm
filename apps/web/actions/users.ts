@@ -221,6 +221,27 @@ export async function resetPasswordAction(
   const me = await requireAuth();
   try {
     const { tempPassword } = await resetPassword(userId, { id: me.id, role: me.role });
+
+    // Push the temp password to the user's Bitrix24 IM. Best-effort:
+    // the admin still sees it in the modal regardless of whether the
+    // Bitrix call succeeds.
+    const target = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { name: true, email: true, bitrixUserId: true },
+    });
+    if (target?.bitrixUserId) {
+      const base =
+        process.env.PUBLIC_BASE_URL?.trim() || 'https://pm.since-b24-ru.ru';
+      const message = [
+        `Привет, ${target.name}! Для giper-pm выдан новый временный пароль.`,
+        `Логин: ${target.email}`,
+        `Пароль: ${tempPassword}`,
+        `Войти: ${base}`,
+        'После входа система попросит сменить пароль.',
+      ].join('\n');
+      await notifyBitrixPersonalBestEffort(target.bitrixUserId, message);
+    }
+
     return { ok: true, data: { tempPassword } };
   } catch (e) {
     return toErr(e);
