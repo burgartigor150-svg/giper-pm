@@ -40,15 +40,18 @@ export default async function ReportsPage({ searchParams }: { searchParams: SP }
   const scope = await resolveScope({ id: me.id, role: me.role }, filter);
 
   // Filter dropdowns: visible projects + (for PM/ADMIN) team members.
+  // "My team" = scope.visibleUserIds (own PmTeam members + self). For
+  // plain MEMBER/VIEWER the set is just self, so we hide the dropdown
+  // by returning an empty list (one entry would be pointless).
   const [projects, members] = await Promise.all([
     prisma.project.findMany({
       where: { id: { in: scope.visibleProjectIds }, status: 'ACTIVE' },
       orderBy: { name: 'asc' },
       select: { key: true, name: true },
     }),
-    me.role === 'ADMIN' || me.role === 'PM'
+    (me.role === 'ADMIN' || me.role === 'PM') && scope.visibleUserIds.size > 1
       ? prisma.user.findMany({
-          where: { isActive: true },
+          where: { id: { in: [...scope.visibleUserIds] }, isActive: true },
           orderBy: { name: 'asc' },
           select: { id: true, name: true },
         })

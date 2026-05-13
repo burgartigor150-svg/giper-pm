@@ -4,21 +4,46 @@ import type { SessionUser } from '../permissions';
 /**
  * Translate a (viewer, filter) pair into Prisma WHERE fragments. Server-side
  * enforcement: users can only pull data from projects they participate
- * in, and only for themselves — even crafting a URL doesn't bypass it.
+ * in, and only for users inside their team scope — even crafting a URL
+ * doesn't bypass it.
  *
- * Visibility is per-stake for everyone (incl. ADMIN/PM): owner, member,
- * or any task ownership.
+ * Team scope rule (per product decision):
+ *   - PM / ADMIN: own PmTeam members + self.
+ *   - Everyone else: just self.
+ *
+ * Within that scope, `filter.userId` narrows the report to one specific
+ * person. If the requested userId is outside the viewer's team scope it
+ * is silently ignored (falls back to the full team aggregate).
  */
 export type ScopedQuery = {
-  /** Effective userId filter — always set to the viewer for now. */
+  /** Effective userId filter — set when one specific user is selected. */
   userId: string | null;
   /** Effective projectId filter, or null = all visible projects. */
   projectId: string | null;
   /** Project IDs the viewer is allowed to see (used as outer guard). */
   visibleProjectIds: string[];
   /** Set of user IDs whose data the viewer is allowed to see. */
-  visibleUserIds: Set<string> | null;
+  visibleUserIds: Set<string>;
 };
+
+/**
+ * Users the viewer is allowed to see in reports. Always includes the
+ * viewer themselves. For PM/ADMIN it adds the members of teams they own
+ * via [[PmTeamMember]] (`pmId = viewer.id`).
+ */
+export async function getVisibleUserIds(
+  viewer: SessionUser,
+): Promise<Set<string>> {
+  const ids = new Set<string>([viewer.id]);
+  if (viewer.role === 'PM' || viewer.role === 'ADMIN') {
+    const team = await prisma.pmTeamMember.findMany({
+      where: { pmId: viewer.id },
+      select: { memberId: true },
+    });
+    for (const t of team) ids.add(t.memberId);
+  }
+  return ids;
+}
 
 export async function resolveScope(
   viewer: SessionUser,
@@ -54,11 +79,20 @@ export async function resolveScope(
     projectId = p?.id ?? null;
   }
 
-  // Reports show the viewer's own data only — no cross-user lookup.
+  const visibleUserIds = await getVisibleUserIds(viewer);
+
+  // If filter.userId is provided AND inside the visible team, narrow to
+  // just that user. Otherwise leave userId=null and aggregate across the
+  // whole visible team.
+  const requestedUserId =
+    filter.userId && visibleUserIds.has(filter.userId)
+      ? filter.userId
+      : null;
+
   return {
-    userId: viewer.id,
+    userId: requestedUserId,
     projectId,
     visibleProjectIds,
-    visibleUserIds: new Set([viewer.id]),
+    visibleUserIds,
   };
 }

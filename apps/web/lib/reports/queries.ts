@@ -16,10 +16,12 @@ async function fetchEntries(scope: ScopedQuery, range: ReportsRange) {
   return prisma.timeEntry.findMany({
     where: {
       startedAt: { lte: range.to, gte: range.from },
-      ...(scope.userId ? { userId: scope.userId } : {}),
-      ...(scope.visibleUserIds
-        ? { userId: { in: [...scope.visibleUserIds] } }
-        : {}),
+      // Pick exactly one user filter: a specific selected user, or the
+      // whole visible team. Spreading both lets the second clobber the
+      // first, which is how the old code accidentally widened scope.
+      ...(scope.userId
+        ? { userId: scope.userId }
+        : { userId: { in: [...scope.visibleUserIds] } }),
       ...(scope.projectId
         ? { task: { projectId: scope.projectId } }
         : {
@@ -118,7 +120,9 @@ export async function getBurndown(scope: ScopedQuery, range: ReportsRange) {
       ...(scope.projectId
         ? { projectId: scope.projectId }
         : { projectId: { in: scope.visibleProjectIds } }),
-      ...(scope.userId ? { assigneeId: scope.userId } : {}),
+      ...(scope.userId
+        ? { assigneeId: scope.userId }
+        : { assigneeId: { in: [...scope.visibleUserIds] } }),
     },
     select: {
       createdAt: true,
