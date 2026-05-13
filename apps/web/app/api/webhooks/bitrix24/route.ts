@@ -126,7 +126,7 @@ export async function POST(req: Request) {
         where: { externalSource: 'bitrix24', externalId: taskId },
         select: { project: { select: { key: true } } },
       });
-      const result = await deleteOneTask(prisma, taskId);
+      const result = await deleteOneTask(prisma, client, taskId);
       if (before) {
         revalidatePath(`/projects/${before.project.key}/list`);
         revalidatePath(`/projects/${before.project.key}/board`);

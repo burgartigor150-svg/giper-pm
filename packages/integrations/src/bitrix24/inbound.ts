@@ -156,6 +156,14 @@ type BxComment = {
  * Tasks NOT mirrored locally → no-op. Tasks not from Bitrix → refused
  * (we won't drop locally-authored rows from a webhook payload).
  *
+ * Verification: Bitrix sends spurious ONTASKDELETE webhooks alongside
+ * unrelated activity (e.g. after every ONTASKCOMMENTADD when the task's
+ * audience visibility recomputes). To avoid nuking live tasks, we
+ * confirm with `tasks.task.get` that the task is actually gone upstream
+ * before deleting locally. Only Bitrix's "not found" response (404 /
+ * NOT_FOUND code) is treated as a real delete; transient errors keep
+ * the local mirror untouched.
+ *
  * Side effects: cascade deletes wipe TimeEntry / Comment / Attachment /
  * TaskStatusChange / Checklist for this task. That's intentional: the
  * source-of-truth is Bitrix; if it's gone there, our local mirror has
@@ -164,6 +172,7 @@ type BxComment = {
  */
 export async function deleteOneTask(
   prisma: PrismaClient,
+  client: Bitrix24Client,
   bitrixTaskId: string,
 ): Promise<InboundResult> {
   const local = await prisma.task.findFirst({
@@ -171,6 +180,39 @@ export async function deleteOneTask(
     select: { id: true },
   });
   if (!local) return { action: 'skipped', reason: 'task not mirrored locally' };
+
+  // Verify upstream: only delete if Bitrix actually returns "not found".
+  let upstreamGone = false;
+  try {
+    const res = await client.call<{ task: BxTask }>('tasks.task.get', {
+      taskId: bitrixTaskId,
+      select: ['ID'],
+    });
+    if (!res.result?.task) {
+      upstreamGone = true;
+    }
+  } catch (e) {
+    // Bitrix returns 400 with error code like NOT_FOUND / ACCESS_DENIED
+    // for missing tasks. Treat NOT_FOUND as a real delete; anything
+    // else (network, ACCESS_DENIED, rate-limit) → keep the row.
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/not[_ ]found|tasks_task_not_found|404/i.test(msg)) {
+      upstreamGone = true;
+    } else {
+      return {
+        action: 'skipped',
+        reason: `delete refused — verification failed: ${msg.slice(0, 120)}`,
+      };
+    }
+  }
+
+  if (!upstreamGone) {
+    return {
+      action: 'skipped',
+      reason: 'task still alive upstream — ignoring spurious ONTASKDELETE',
+    };
+  }
+
   await prisma.task.delete({ where: { id: local.id } });
   return { action: 'updated', taskId: local.id, reason: 'deleted upstream' };
 }
