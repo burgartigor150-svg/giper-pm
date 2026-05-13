@@ -3,6 +3,7 @@ import type { Bitrix24Client } from './client';
 import { mapBitrixTask, convertBitrixMarkup } from './mappers';
 import type { BxTask } from './types';
 import { hashTaskState } from './outbound';
+import { ensureProjectForGroup } from './syncProjects';
 
 /**
  * Inbound (Bitrix24 → giper-pm) handlers, used by the webhook endpoint.
@@ -91,7 +92,7 @@ export async function syncOneTask(
         reason: 'standalone Bitrix task (no workgroup) — not mirrored',
       };
     }
-    const project = await prisma.project.findFirst({
+    let project = await prisma.project.findFirst({
       where: {
         externalSource: 'bitrix24',
         externalId: mapped.bitrixGroupId,
@@ -99,10 +100,20 @@ export async function syncOneTask(
       select: { id: true },
     });
     if (!project) {
-      return {
-        action: 'skipped',
-        reason: `workgroup ${mapped.bitrixGroupId} not synced as a project — task ignored`,
-      };
+      // Bulk syncProjects hasn't picked this workgroup up yet — pull it
+      // in on demand so the task (and its comment) can land here.
+      const projectId = await ensureProjectForGroup(
+        prisma,
+        client,
+        mapped.bitrixGroupId,
+      );
+      if (!projectId) {
+        return {
+          action: 'skipped',
+          reason: `workgroup ${mapped.bitrixGroupId} not found in Bitrix or has no resolvable owner`,
+        };
+      }
+      project = { id: projectId };
     }
     const assigneeId = mapped.bitrixResponsibleId
       ? (

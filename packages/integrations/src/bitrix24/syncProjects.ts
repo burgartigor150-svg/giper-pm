@@ -187,6 +187,80 @@ export async function syncProjects(
   return stats;
 }
 
+/**
+ * Ensure a single Project row exists for the given Bitrix workgroup id.
+ * Used by inbound webhook handlers when a fresh task or comment lands
+ * on a workgroup we haven't bulk-synced yet — the bulk sync's
+ * incremental watermark misses those forever otherwise.
+ *
+ * Returns the local project id, or null if Bitrix says the group
+ * doesn't exist / can't be fetched. Idempotent: returns the existing
+ * row's id on subsequent calls.
+ */
+export async function ensureProjectForGroup(
+  prisma: PrismaClient,
+  client: Bitrix24Client,
+  bitrixGroupId: string,
+): Promise<string | null> {
+  // Fast path: already mirrored.
+  const existing = await prisma.project.findUnique({
+    where: {
+      externalSource_externalId: {
+        externalSource: 'bitrix24',
+        externalId: bitrixGroupId,
+      },
+    },
+    select: { id: true },
+  });
+  if (existing) return existing.id;
+
+  // Pull the single group from Bitrix.
+  const groups = await client.all<BxWorkgroup>('sonet_group.get', {
+    FILTER: { ID: [bitrixGroupId] },
+  });
+  const g = groups[0];
+  if (!g) return null;
+
+  // Resolve owner: prefer the real Bitrix user, fall back to first ADMIN.
+  let ownerId: string | null = null;
+  if (g.OWNER_ID) {
+    const u = await prisma.user.findFirst({
+      where: { bitrixUserId: g.OWNER_ID },
+      select: { id: true },
+    });
+    if (u) ownerId = u.id;
+  }
+  if (!ownerId) {
+    const admin = await prisma.user.findFirst({
+      where: { role: 'ADMIN', isActive: true },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true },
+    });
+    if (!admin) return null;
+    ownerId = admin.id;
+  }
+
+  const baseKey = generateProjectKey(g.NAME);
+  const key = await uniqueKey(prisma, baseKey, bitrixGroupId);
+
+  const created = await prisma.project.create({
+    data: {
+      key,
+      name: g.NAME.slice(0, 80),
+      description: g.DESCRIPTION?.slice(0, 2000) ?? null,
+      ownerId,
+      externalSource: 'bitrix24',
+      externalId: bitrixGroupId,
+      status: g.CLOSED === 'Y' ? 'ARCHIVED' : 'ACTIVE',
+      members: {
+        create: { userId: ownerId, role: 'LEAD' },
+      },
+    },
+    select: { id: true },
+  });
+  return created.id;
+}
+
 async function uniqueKey(
   prisma: PrismaClient,
   baseKey: string,
