@@ -28,9 +28,16 @@ type Props = {
     timezone: string;
   };
   isSelf: boolean;
+  /**
+   * Whether the user has at least one position assigned. Used to gate
+   * the "Activate" button — activation pushes a welcome notification
+   * into Bitrix that quotes role + position, so both must be present
+   * before we can fire it.
+   */
+  hasPositions: boolean;
 };
 
-export function EditUserForm({ user, isSelf }: Props) {
+export function EditUserForm({ user, isSelf, hasPositions }: Props) {
   const tForm = useT('users.form');
   const tRoles = useT('users.role');
   const tActions = useT('users.actions');
@@ -152,12 +159,24 @@ export function EditUserForm({ user, isSelf }: Props) {
           <Button
             type="button"
             variant={user.isActive ? 'destructive' : 'default'}
-            disabled={pendingSide || isSelf}
+            disabled={
+              pendingSide ||
+              isSelf ||
+              // Activation requires role + at least one position so the
+              // welcome push into Bitrix has something to quote.
+              (!user.isActive && (!user.role || !hasPositions))
+            }
             onClick={handleToggleActive}
           >
             {user.isActive ? tActions('deactivate') : tActions('activate')}
           </Button>
         </div>
+        {!user.isActive && (!user.role || !hasPositions) ? (
+          <p className="text-xs text-muted-foreground">
+            Перед активацией заполните роль и хотя бы одну должность —
+            пользователь получит уведомление в Bitrix24 с этими данными.
+          </p>
+        ) : null}
       </div>
 
       {tempPassword ? (

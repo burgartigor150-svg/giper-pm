@@ -16,7 +16,12 @@ export async function setUserActive(
   }
   const target = await prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, role: true, isActive: true },
+    select: {
+      id: true,
+      role: true,
+      isActive: true,
+      positions: { select: { position: true }, take: 1 },
+    },
   });
   if (!target) throw new DomainError('NOT_FOUND', 404);
 
@@ -26,6 +31,22 @@ export async function setUserActive(
     });
     if (otherAdminCount === 0) {
       throw new DomainError('VALIDATION', 400, 'Нельзя деактивировать единственного администратора');
+    }
+  }
+
+  // Activation gate: require role + at least one position so the welcome
+  // notification we send to Bitrix can quote both. Deactivation isn't
+  // gated — admins still need to be able to disable a stale account.
+  if (isActive && !target.isActive) {
+    if (!target.role) {
+      throw new DomainError('VALIDATION', 400, 'Перед активацией укажите роль');
+    }
+    if (target.positions.length === 0) {
+      throw new DomainError(
+        'VALIDATION',
+        400,
+        'Перед активацией укажите хотя бы одну должность',
+      );
     }
   }
 

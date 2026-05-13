@@ -16,7 +16,10 @@ import {
   setUserActive,
   updateUser,
 } from '@/lib/users';
-import { enrichUserFromBitrixBestEffort } from '@/lib/integrations/bitrix24Outbound';
+import {
+  enrichUserFromBitrixBestEffort,
+  notifyBitrixPersonalBestEffort,
+} from '@/lib/integrations/bitrix24Outbound';
 
 export type UserSearchHit = {
   id: string;
@@ -164,9 +167,48 @@ export async function setUserActiveAction(
 ): Promise<ActionResult> {
   const me = await requireAuth();
   try {
+    const wasActiveBefore = (
+      await prisma.user.findUnique({
+        where: { id: userId },
+        select: { isActive: true },
+      })
+    )?.isActive;
     await setUserActive(userId, isActive, { id: me.id, role: me.role });
     revalidatePath('/settings/users');
     revalidatePath(`/settings/users/${userId}`);
+
+    // Welcome push: only on real activation (false → true transition),
+    // best-effort so a Bitrix outage never rolls back the local flip.
+    if (isActive && wasActiveBefore === false) {
+      const target = await prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+          name: true,
+          role: true,
+          bitrixUserId: true,
+          positions: {
+            select: { position: true, primary: true },
+            orderBy: { primary: 'desc' },
+          },
+        },
+      });
+      if (target?.bitrixUserId) {
+        const primary =
+          target.positions.find((p) => p.primary) ?? target.positions[0];
+        const base = process.env.PUBLIC_BASE_URL?.trim() || 'https://pm.since-b24-ru.ru';
+        const lines = [
+          `Привет, ${target.name}! Вам открыт доступ в giper-pm.`,
+          `Роль: ${target.role}`,
+          primary ? `Должность: ${primary.position}` : null,
+          `Войти: ${base}`,
+        ].filter(Boolean);
+        await notifyBitrixPersonalBestEffort(
+          target.bitrixUserId,
+          lines.join('\n'),
+        );
+      }
+    }
+
     return { ok: true };
   } catch (e) {
     return toErr(e);

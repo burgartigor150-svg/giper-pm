@@ -44,6 +44,7 @@ export default async function UserDetailPage({
               timezone: user.timezone,
             }}
             isSelf={user.id === me.id}
+            hasPositions={user.positions.length > 0}
           />
         </CardContent>
       </Card>

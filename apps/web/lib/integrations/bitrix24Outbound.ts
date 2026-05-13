@@ -140,3 +140,38 @@ export async function enrichUserFromBitrixBestEffort(
     return { ok: false, error: msg };
   }
 }
+
+/**
+ * Send a personal IM notification to a Bitrix24 user. Best-effort: a
+ * Bitrix outage shouldn't roll back the local action that triggered the
+ * notification (e.g. user activation). Skips silently when the user has
+ * no bitrixUserId or the webhook isn't configured.
+ *
+ * Uses `im.notify.personal.add` — renders as a notification card with
+ * the giper-pm sender, not a regular chat message from the webhook
+ * owner.
+ */
+export async function notifyBitrixPersonalBestEffort(
+  bitrixUserId: string | null | undefined,
+  message: string,
+): Promise<{ ok: boolean; reason?: string }> {
+  if (!bitrixUserId) return { ok: false, reason: 'no bitrixUserId' };
+  const client = tryClient();
+  if (!client) return { ok: false, reason: 'bitrix client not configured' };
+  try {
+    await client.call('im.notify.personal.add', {
+      USER_ID: bitrixUserId,
+      MESSAGE: message,
+    });
+    return { ok: true };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    // eslint-disable-next-line no-console
+    console.error(
+      'bitrix24 outbound: im.notify.personal.add failed',
+      bitrixUserId,
+      msg,
+    );
+    return { ok: false, reason: msg };
+  }
+}
