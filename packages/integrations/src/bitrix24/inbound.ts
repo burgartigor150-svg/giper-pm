@@ -242,12 +242,30 @@ export async function syncOneComment(
   });
   if (existing) return { action: 'echoed', commentId: existing.id };
 
-  const task = await prisma.task.findFirst({
+  let task = await prisma.task.findFirst({
     where: { externalSource: 'bitrix24', externalId: bitrixTaskId },
     select: { id: true },
   });
   if (!task) {
-    return { action: 'skipped', reason: 'task not mirrored locally' };
+    // Inbound comment for a task we haven't mirrored yet. The bulk
+    // sync's incremental watermark only catches tasks whose CHANGED_DATE
+    // moved — and Bitrix doesn't bump CHANGED_DATE on comment add. So
+    // this is a frequent case during normal chatter on legacy tasks.
+    // Try to pull the task in now; if it lands (right group, not closed
+    // upstream), the comment can attach to it.
+    const taskRes = await syncOneTask(prisma, client, bitrixTaskId);
+    if (taskRes.taskId) {
+      task = await prisma.task.findUnique({
+        where: { id: taskRes.taskId },
+        select: { id: true },
+      });
+    }
+    if (!task) {
+      return {
+        action: 'skipped',
+        reason: `task not mirrored locally and could not be pulled (${taskRes.action}${taskRes.reason ? ': ' + taskRes.reason : ''})`,
+      };
+    }
   }
 
   const res = await client.call<BxComment>('task.commentitem.get', {
