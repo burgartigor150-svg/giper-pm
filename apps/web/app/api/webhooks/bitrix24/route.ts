@@ -56,23 +56,45 @@ export async function POST(req: Request) {
   const params = new URLSearchParams(bodyText);
   const event = params.get('event') ?? '';
 
-  const taskId =
-    params.get('data[FIELDS_AFTER][ID]') ??
-    params.get('data[FIELDS_BEFORE][ID]') ??
-    params.get('data[fields][TASK_ID]') ??
-    params.get('data[TASK_ID]') ??
-    null;
-  const commentId =
-    params.get('data[FIELDS_AFTER][ID]') === taskId
-      ? null
-      : (params.get('data[FIELDS_AFTER][ID]') ??
-        params.get('data[fields][ID]') ??
-        null);
-  // Comment events also send the parent task id in a different field.
-  const taskForComment =
-    params.get('data[fields][TASK_ID]') ??
-    params.get('data[FIELDS_AFTER][TASK_ID]') ??
-    null;
+  // Bitrix sends form-urlencoded with bracket-keyed nesting. The same
+  // `data[FIELDS_AFTER][ID]` key means different things depending on
+  // event family:
+  //   - ONTASK* (task lifecycle):    [ID] = task id
+  //   - ONTASKCOMMENT* (discussion): [ID] = comment id, task id lives
+  //                                  in [TASK_ID]
+  // Dispatch by event prefix so we don't mis-parse comment events as
+  // task events (which is exactly what dropped every fresh comment).
+  const isCommentEvent = event.startsWith('ONTASKCOMMENT');
+  const isTaskEvent = !isCommentEvent && event.startsWith('ONTASK');
+
+  const taskId = isTaskEvent
+    ? (params.get('data[FIELDS_AFTER][ID]') ??
+       params.get('data[FIELDS_BEFORE][ID]') ??
+       params.get('data[fields][ID]') ??
+       null)
+    : null;
+
+  const commentId = isCommentEvent
+    ? (params.get('data[FIELDS_AFTER][ID]') ??
+       params.get('data[FIELDS_BEFORE][ID]') ??
+       params.get('data[fields][ID]') ??
+       params.get('data[ID]') ??
+       null)
+    : null;
+  // Comment events carry the parent task id alongside the comment id.
+  const taskForComment = isCommentEvent
+    ? (params.get('data[FIELDS_AFTER][TASK_ID]') ??
+       params.get('data[FIELDS_BEFORE][TASK_ID]') ??
+       params.get('data[fields][TASK_ID]') ??
+       params.get('data[TASK_ID]') ??
+       null)
+    : null;
+
+  // Lightweight visibility: one structured line per inbound hit, no PII.
+  // eslint-disable-next-line no-console
+  console.log(
+    `[bitrix:webhook] event=${event} taskId=${taskId ?? '-'} commentId=${commentId ?? '-'} taskForComment=${taskForComment ?? '-'}`,
+  );
 
   // 3. Dispatch by event.
   let client;
