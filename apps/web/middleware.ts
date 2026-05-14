@@ -13,14 +13,22 @@ export default auth((req) => {
   //   /api/cron/*           — gated by CRON_SECRET (Bearer) inside the route
   //   /api/webhooks/*       — gated by per-integration signature inside the
   //                           route (HMAC for GitHub, ?token= for Bitrix24)
-  // Without these last two, middleware 302s the request before the route's
-  // own auth runs — silently breaking host cron and inbound webhooks.
+  //   /m/<token>            — guest meeting landing page. Auth is the
+  //                           unguessable token in the URL; server-side
+  //                           validation lives in joinMeetingAsGuestAction.
+  //                           Without this entry the middleware bounces
+  //                           the guest to /login before the page ever
+  //                           renders.
+  // Without these, middleware 302s the request before the route's own
+  // auth runs — silently breaking host cron, inbound webhooks, and
+  // guest call links.
   const isPublic =
     pathname.startsWith('/login') ||
     pathname.startsWith('/api/auth') ||
     pathname.startsWith('/api/cron') ||
     pathname.startsWith('/api/webhooks') ||
     pathname.startsWith('/api/livekit/webhook') ||
+    pathname.startsWith('/m/') ||
     pathname === '/api/health' ||
     pathname === '/';
 
