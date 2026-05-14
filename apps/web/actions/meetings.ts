@@ -195,37 +195,85 @@ export async function startCallInChannelAction(input: {
     parentId: null,
   });
 
-  // Fan-out push to every channel member except the caller. Best-
-  // effort: if any subscription is dead or VAPID isn't configured,
-  // the call itself still proceeds (push errors are swallowed
-  // inside sendPushToUsers).
+  // Fan-out invites across three channels in parallel. Each is
+  // best-effort and isolated so a failure in one channel (e.g. VAPID
+  // unconfigured, Bitrix outage) never blocks the call from starting
+  // or the other channels from firing.
+  //
+  //   1. Web Push    — OS-level "X is calling you" toast
+  //   2. In-app row  — Notification record visible in the bell
+  //   3. Bitrix IM   — personal message in the user's Bitrix24 inbox
+  //
+  // Recipients: every channel member except the caller. Muted members
+  // still get the in-app row (so they can find the call in their
+  // inbox), but no Web Push and no Bitrix IM ping.
   void (async () => {
     try {
       const recipients = await prisma.channelMember.findMany({
-        where: {
-          channelId: input.channelId,
-          userId: { not: me.id },
-          // Muted members don't get push pings. They still see the
-          // CALL_STARTED card in-channel when they open giper-pm,
-          // they just don't get the OS notification.
-          isMuted: false,
+        where: { channelId: input.channelId, userId: { not: me.id } },
+        select: {
+          userId: true,
+          isMuted: true,
+          user: { select: { bitrixUserId: true } },
         },
-        select: { userId: true },
       });
-      const { sendPushToUsers } = await import('@/lib/push/sendPush');
-      await sendPushToUsers(
-        recipients.map((r) => r.userId),
+      const meetingUrl = `/meetings/${created.meetingId}`;
+      const pushTitle = `${me.name ?? 'Кто-то'} зовёт на звонок`;
+      const unmuted = recipients.filter((r) => !r.isMuted);
+
+      const [{ sendPushToUsers }, { createNotification }, { notifyBitrixPersonalBestEffort }] =
+        await Promise.all([
+          import('@/lib/push/sendPush'),
+          import('@/lib/notifications/createNotifications'),
+          import('@/lib/integrations/bitrix24Outbound'),
+        ]);
+
+      // 1. Web Push (unmuted only).
+      const pushPromise = sendPushToUsers(
+        unmuted.map((r) => r.userId),
         {
-          title: `${me.name ?? 'Кто-то'} зовёт на звонок`,
+          title: pushTitle,
           body: title,
-          url: `/meetings/${created.meetingId}`,
+          url: meetingUrl,
           tag: `call:${created.meetingId}`,
           data: { meetingId: created.meetingId },
         },
+      ).catch((e) => {
+        // eslint-disable-next-line no-console
+        console.warn('[meetings] web push failed:', e);
+      });
+
+      // 2. In-app inbox row (everyone, including muted — the bell is
+      //    silent UI). Per-user so dedupe works correctly.
+      const inAppPromises = recipients.map((r) =>
+        createNotification({
+          userId: r.userId,
+          kind: 'CALL_INVITE',
+          title: pushTitle,
+          body: title,
+          link: meetingUrl,
+          payload: { meetingId: created.meetingId, channelId: input.channelId },
+        }).catch((e) => {
+          // eslint-disable-next-line no-console
+          console.warn('[meetings] in-app notif failed for', r.userId, e);
+          return null;
+        }),
       );
+
+      // 3. Bitrix24 IM (unmuted, with a known bitrixUserId only).
+      const base =
+        process.env.PUBLIC_BASE_URL?.trim() || 'https://pm.since-b24-ru.ru';
+      const bitrixMsg = `📞 ${pushTitle}\n${title}\nПрисоединиться: ${base}${meetingUrl}`;
+      const bitrixPromises = unmuted
+        .filter((r) => r.user.bitrixUserId)
+        .map((r) =>
+          notifyBitrixPersonalBestEffort(r.user.bitrixUserId!, bitrixMsg),
+        );
+
+      await Promise.all([pushPromise, ...inAppPromises, ...bitrixPromises]);
     } catch (e) {
       // eslint-disable-next-line no-console
-      console.warn('[meetings] push fan-out failed:', e);
+      console.warn('[meetings] fan-out failed:', e);
     }
   })();
 

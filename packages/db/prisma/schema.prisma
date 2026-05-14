@@ -1127,6 +1127,7 @@ enum NotificationKind {
   MENTION
   CHAT_MENTION            // упоминание в мессенджере
   CHAT_DM                 // личное сообщение / GROUP_DM
+  CALL_INVITE             // "X зовёт на звонок"
   SYSTEM
 }
 
