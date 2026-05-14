@@ -437,6 +437,179 @@ export async function joinMeetingAction({
   };
 }
 
+/**
+ * Mint a shareable guest-invite link for a meeting. Only the meeting
+ * creator (or an ADMIN) can issue one — we don't want any random
+ * participant minting links and inviting outsiders on someone else's
+ * call.
+ *
+ * Default TTL: 24 hours. Caller can override with `expiresInHours`
+ * (cap 168 = 7 days). `maxUses` is optional — null means "anyone with
+ * the link can claim a guest seat until expiry / revoke".
+ */
+export async function createMeetingInviteAction(input: {
+  meetingId: string;
+  expiresInHours?: number;
+  maxUses?: number | null;
+}): Promise<
+  | { ok: true; token: string; url: string; expiresAt: string }
+  | { ok: false; message: string }
+> {
+  const me = await requireAuth();
+  const meeting = await prisma.meeting.findUnique({
+    where: { id: input.meetingId },
+    select: { id: true, createdById: true, status: true },
+  });
+  if (!meeting) return { ok: false, message: 'Встреча не найдена' };
+  if (meeting.createdById !== me.id && me.role !== 'ADMIN') {
+    return { ok: false, message: 'Ссылки выдаёт только создатель встречи' };
+  }
+  if (meeting.status === 'ENDED' || meeting.status === 'PROCESSING' || meeting.status === 'READY') {
+    return { ok: false, message: 'Встреча уже завершилась' };
+  }
+  const hours = Math.min(Math.max(input.expiresInHours ?? 24, 1), 168);
+  const expiresAt = new Date(Date.now() + hours * 3600_000);
+
+  // 32 url-safe bytes ≈ 256 bits of entropy — enough to make guessing
+  // hopeless and still short enough to share by hand.
+  const { randomBytes } = await import('node:crypto');
+  const token = randomBytes(32).toString('base64url');
+
+  await prisma.meetingInvite.create({
+    data: {
+      meetingId: meeting.id,
+      token,
+      createdById: me.id,
+      expiresAt,
+      maxUses: input.maxUses ?? null,
+    },
+  });
+
+  const base = process.env.PUBLIC_BASE_URL?.trim() || 'https://pm.since-b24-ru.ru';
+  return {
+    ok: true,
+    token,
+    url: `${base}/m/${token}`,
+    expiresAt: expiresAt.toISOString(),
+  };
+}
+
+/**
+ * Public guest-join action: validates the invite token, increments
+ * usedCount under a transaction, mints a guest LiveKit JWT, and
+ * records a MeetingParticipant row with userId=null.
+ *
+ * No auth required — that's the whole point. The token IS the auth.
+ *
+ * Returns the same shape as joinMeetingAction so the room mount
+ * component can be reused without branching.
+ */
+export async function joinMeetingAsGuestAction(input: {
+  token: string;
+  displayName: string;
+}): Promise<
+  | {
+      ok: true;
+      token: string;
+      serverUrl: string;
+      identity: string;
+      displayName: string;
+      iceServers: IceServer[];
+      meeting: { id: string; title: string; status: string };
+    }
+  | { ok: false; message: string }
+> {
+  const displayName = input.displayName.trim().slice(0, 80);
+  if (displayName.length < 2) {
+    return { ok: false, message: 'Введите имя (минимум 2 символа)' };
+  }
+
+  const invite = await prisma.meetingInvite.findUnique({
+    where: { token: input.token },
+    select: {
+      id: true,
+      expiresAt: true,
+      revokedAt: true,
+      maxUses: true,
+      usedCount: true,
+      meeting: {
+        select: {
+          id: true,
+          title: true,
+          status: true,
+          livekitRoomName: true,
+        },
+      },
+    },
+  });
+  if (!invite) return { ok: false, message: 'Ссылка недействительна' };
+  if (invite.revokedAt) return { ok: false, message: 'Ссылка отозвана' };
+  if (invite.expiresAt < new Date()) return { ok: false, message: 'Срок действия ссылки истёк' };
+  if (invite.maxUses != null && invite.usedCount >= invite.maxUses) {
+    return { ok: false, message: 'Лимит подключений по этой ссылке исчерпан' };
+  }
+  const meeting = invite.meeting;
+  if (!meeting || !meeting.livekitRoomName) {
+    return { ok: false, message: 'Встреча не найдена' };
+  }
+  if (
+    meeting.status === 'ENDED' ||
+    meeting.status === 'PROCESSING' ||
+    meeting.status === 'READY'
+  ) {
+    return { ok: false, message: 'Встреча уже завершилась' };
+  }
+
+  // Atomic claim: increment usedCount only if we're still under
+  // maxUses. The conditional prevents two guests racing in past the
+  // cap.
+  const { randomBytes } = await import('node:crypto');
+  const claim = await prisma.meetingInvite.updateMany({
+    where: {
+      id: invite.id,
+      revokedAt: null,
+      expiresAt: { gt: new Date() },
+      ...(invite.maxUses != null
+        ? { usedCount: { lt: invite.maxUses } }
+        : {}),
+    },
+    data: { usedCount: { increment: 1 } },
+  });
+  if (claim.count === 0) {
+    return { ok: false, message: 'Ссылка стала недоступна' };
+  }
+
+  const guestSuffix = randomBytes(6).toString('base64url');
+  const identity = `guest:${guestSuffix}`;
+
+  await prisma.meetingParticipant.create({
+    data: {
+      meetingId: meeting.id,
+      userId: null,
+      livekitIdentity: identity,
+      displayName,
+    },
+  });
+
+  const accessToken = await mintAccessToken({
+    roomName: meeting.livekitRoomName,
+    identity,
+    displayName,
+    canPublish: true,
+  });
+  const iceServers = buildTurnCredentials({ identity });
+
+  return {
+    ok: true,
+    token: accessToken,
+    serverUrl: livekitPublicUrl(),
+    identity,
+    displayName,
+    iceServers,
+    meeting: { id: meeting.id, title: meeting.title, status: meeting.status },
+  };
+}
+
 export async function endMeetingAction({
   meetingId,
 }: {

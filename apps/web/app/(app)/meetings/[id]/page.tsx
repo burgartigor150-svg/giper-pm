@@ -4,11 +4,12 @@ import { prisma } from '@giper/db';
 import { Card, CardContent, CardHeader, CardTitle } from '@giper/ui/components/Card';
 import { Button } from '@giper/ui/components/Button';
 import { requireAuth } from '@/lib/auth';
-import { canManageAssignments, canSeeSettings } from '@/lib/permissions';
+import { canManageAssignments } from '@/lib/permissions';
 import { joinMeetingAction } from '@/actions/meetings';
 import { MeetingRoomMount } from '@/components/domain/MeetingRoomMount';
 import { MeetingReadyView } from '@/components/domain/MeetingReadyView';
 import { MeetingRetryButton } from '@/components/domain/MeetingRetryButton';
+import { InviteGuestButton } from '@/components/domain/InviteGuestButton';
 import { getSignedDownloadUrl } from '@/lib/storage/s3';
 
 export const dynamic = 'force-dynamic';
@@ -25,7 +26,6 @@ const STATUS_LABEL: Record<string, string> = {
 export default async function MeetingPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const me = await requireAuth();
-  if (!canSeeSettings({ id: me.id, role: me.role })) notFound();
 
   const meeting = await prisma.meeting.findUnique({
     where: { id },
@@ -41,6 +41,7 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
       processingError: true,
       createdById: true,
       createdAt: true,
+      channelId: true,
       project: {
         select: {
           id: true,
@@ -63,11 +64,38 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
   });
   if (!meeting) notFound();
 
+  // Access: creator, ADMIN, PM/owner of attached project, channel-
+  // visible (chat-originated meetings inherit chat visibility), or a
+  // listed invitee in MeetingParticipant. The roster check is what
+  // makes ad-hoc group calls work for plain MEMBER invitees who don't
+  // share any other context with the caller.
+  let channelAllowed = false;
+  if (meeting.channelId) {
+    const { resolveChannelAccess } = await import('@/lib/messenger/access');
+    const acc = await resolveChannelAccess(meeting.channelId, me.id);
+    channelAllowed = !!acc?.canRead;
+  }
+  let invited = false;
+  if (
+    me.role !== 'ADMIN' &&
+    meeting.createdById !== me.id &&
+    !channelAllowed
+  ) {
+    const roster = await prisma.meetingParticipant.findFirst({
+      where: { meetingId: meeting.id, userId: me.id },
+      select: { id: true },
+    });
+    invited = !!roster;
+  }
+  const projectAllowed =
+    !!meeting.project &&
+    canManageAssignments({ id: me.id, role: me.role }, meeting.project);
   const allowed =
     me.role === 'ADMIN' ||
     meeting.createdById === me.id ||
-    (meeting.project &&
-      canManageAssignments({ id: me.id, role: me.role }, meeting.project));
+    channelAllowed ||
+    invited ||
+    projectAllowed;
   if (!allowed) notFound();
 
   // PLANNED / ACTIVE — render the live room. We mint the join token on
@@ -78,16 +106,25 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
       // Token error — fall through to the info card below.
       return <ErrorCard meetingId={meeting.id} title={meeting.title} message={join.message} />;
     }
+    const canInviteGuests =
+      me.role === 'ADMIN' || meeting.createdById === me.id;
     return (
-      <MeetingRoomMount
-        meetingId={meeting.id}
-        serverUrl={join.serverUrl}
-        token={join.token}
-        title={meeting.title}
-        defaultName={join.displayName}
-        iceServers={join.iceServers}
-        channelId={null}
-      />
+      <>
+        {canInviteGuests ? (
+          <div className="mx-auto mb-2 max-w-4xl px-2 pt-2">
+            <InviteGuestButton meetingId={meeting.id} />
+          </div>
+        ) : null}
+        <MeetingRoomMount
+          meetingId={meeting.id}
+          serverUrl={join.serverUrl}
+          token={join.token}
+          title={meeting.title}
+          defaultName={join.displayName}
+          iceServers={join.iceServers}
+          channelId={null}
+        />
+      </>
     );
   }
 

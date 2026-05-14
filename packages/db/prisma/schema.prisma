@@ -98,6 +98,8 @@ model User {
   createdMeetings   Meeting[]            @relation("MeetingCreator")
   /// Per-meeting participation rows (joined LiveKit rooms).
   meetingPresence   MeetingParticipant[]
+  /// Guest-invite links the user has minted.
+  meetingInvitesCreated MeetingInvite[]  @relation("MeetingInviteCreator")
 
   @@index([role, isActive])
 }
@@ -442,6 +444,7 @@ model Meeting {
   createdBy             User          @relation("MeetingCreator", fields: [createdById], references: [id])
 
   participants          MeetingParticipant[]
+  invites               MeetingInvite[]
   transcript            MeetingTranscript?
 
   createdAt             DateTime      @default(now())
@@ -481,6 +484,36 @@ model MeetingParticipant {
 
   @@unique([meetingId, livekitIdentity])
   @@index([userId, joinedAt])
+}
+
+/// Shareable join link for external guests who don't have a giper-pm
+/// account. The token is the secret in the URL (https://pm.../m/<token>);
+/// hitting that URL shows a "введите имя" page and mints a guest-scope
+/// LiveKit JWT. Tokens are expirable, revocable, and capped by use count
+/// so a leaked link doesn't permanently expose the room.
+model MeetingInvite {
+  id            String    @id @default(cuid())
+  meetingId     String
+  meeting       Meeting   @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  /// Long random secret carried in the URL. Indexed @unique so lookup
+  /// is O(1) on every guest hit.
+  token         String    @unique
+  createdById   String
+  createdBy     User      @relation("MeetingInviteCreator", fields: [createdById], references: [id])
+  createdAt     DateTime  @default(now())
+  /// Hard expiry — defaults to 24h after createdAt in app code. Past
+  /// expiresAt the landing page refuses to mint a token.
+  expiresAt     DateTime
+  /// Manually revoked by an admin or the creator. Independent from
+  /// expiresAt so we can kill a token before its TTL runs out.
+  revokedAt     DateTime?
+  /// Optional cap on how many distinct guests can claim this link.
+  /// null = unlimited within expiresAt.
+  maxUses       Int?
+  /// Incremented atomically each time a guest claims a session.
+  usedCount     Int       @default(0)
+
+  @@index([meetingId, revokedAt])
 }
 
 model MeetingTranscript {
