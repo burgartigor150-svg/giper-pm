@@ -195,89 +195,133 @@ export async function startCallInChannelAction(input: {
     parentId: null,
   });
 
-  // Fan-out invites across three channels in parallel. Each is
-  // best-effort and isolated so a failure in one channel (e.g. VAPID
-  // unconfigured, Bitrix outage) never blocks the call from starting
-  // or the other channels from firing.
-  //
-  //   1. Web Push    — OS-level "X is calling you" toast
-  //   2. In-app row  — Notification record visible in the bell
-  //   3. Bitrix IM   — personal message in the user's Bitrix24 inbox
-  //
-  // Recipients: every channel member except the caller. Muted members
-  // still get the in-app row (so they can find the call in their
-  // inbox), but no Web Push and no Bitrix IM ping.
+  // Fire-and-forget fan-out across 3 channels (web push + in-app + Bitrix
+  // IM). Each is isolated so a single channel failure doesn't break the
+  // call or the other channels. See lib/meetings/fanOutCallInvites for
+  // the shared implementation — also used by startGroupCallAction below.
   void (async () => {
-    try {
-      const recipients = await prisma.channelMember.findMany({
-        where: { channelId: input.channelId, userId: { not: me.id } },
-        select: {
-          userId: true,
-          isMuted: true,
-          user: { select: { bitrixUserId: true } },
-        },
-      });
-      const meetingUrl = `/meetings/${created.meetingId}`;
-      const pushTitle = `${me.name ?? 'Кто-то'} зовёт на звонок`;
-      const unmuted = recipients.filter((r) => !r.isMuted);
-
-      const [{ sendPushToUsers }, { createNotification }, { notifyBitrixPersonalBestEffort }] =
-        await Promise.all([
-          import('@/lib/push/sendPush'),
-          import('@/lib/notifications/createNotifications'),
-          import('@/lib/integrations/bitrix24Outbound'),
-        ]);
-
-      // 1. Web Push (unmuted only).
-      const pushPromise = sendPushToUsers(
-        unmuted.map((r) => r.userId),
-        {
-          title: pushTitle,
-          body: title,
-          url: meetingUrl,
-          tag: `call:${created.meetingId}`,
-          data: { meetingId: created.meetingId },
-        },
-      ).catch((e) => {
-        // eslint-disable-next-line no-console
-        console.warn('[meetings] web push failed:', e);
-      });
-
-      // 2. In-app inbox row (everyone, including muted — the bell is
-      //    silent UI). Per-user so dedupe works correctly.
-      const inAppPromises = recipients.map((r) =>
-        createNotification({
-          userId: r.userId,
-          kind: 'CALL_INVITE',
-          title: pushTitle,
-          body: title,
-          link: meetingUrl,
-          payload: { meetingId: created.meetingId, channelId: input.channelId },
-        }).catch((e) => {
-          // eslint-disable-next-line no-console
-          console.warn('[meetings] in-app notif failed for', r.userId, e);
-          return null;
-        }),
-      );
-
-      // 3. Bitrix24 IM (unmuted, with a known bitrixUserId only).
-      const base =
-        process.env.PUBLIC_BASE_URL?.trim() || 'https://pm.since-b24-ru.ru';
-      const bitrixMsg = `📞 ${pushTitle}\n${title}\nПрисоединиться: ${base}${meetingUrl}`;
-      const bitrixPromises = unmuted
-        .filter((r) => r.user.bitrixUserId)
-        .map((r) =>
-          notifyBitrixPersonalBestEffort(r.user.bitrixUserId!, bitrixMsg),
-        );
-
-      await Promise.all([pushPromise, ...inAppPromises, ...bitrixPromises]);
-    } catch (e) {
-      // eslint-disable-next-line no-console
-      console.warn('[meetings] fan-out failed:', e);
-    }
+    const { fanOutCallInvites, recipientsFromChannel } = await import(
+      '@/lib/meetings/fanOutCallInvites'
+    );
+    const recipients = await recipientsFromChannel(input.channelId, me.id);
+    await fanOutCallInvites({
+      meetingId: created.meetingId,
+      title,
+      callerName: me.name ?? null,
+      channelId: input.channelId,
+      recipients,
+    });
   })();
 
   revalidatePath(`/messages/${input.channelId}`);
+  revalidatePath('/meetings');
+  return { ok: true, meetingId: created.meetingId };
+}
+
+/**
+ * Start an ad-hoc group call from anywhere (the "+ Новый групповой
+ * звонок" button on /meetings). No channel attachment — the meeting
+ * stands alone. The caller picks a roster of invitees up-front; those
+ * users get the standard three-channel ping and are recorded as
+ * MeetingParticipant rows so joinMeetingAction can grant them access
+ * even though they aren't in any project or channel together.
+ *
+ * Permission: any active authenticated user. Calling is a peer-level
+ * action, not an admin one.
+ */
+export async function startGroupCallAction(input: {
+  title: string;
+  participantUserIds: string[];
+}): Promise<
+  | { ok: true; meetingId: string }
+  | { ok: false; message: string }
+> {
+  const me = await requireAuth();
+  const cleanTitle = input.title.trim().slice(0, 200);
+  if (cleanTitle.length < 2) {
+    return { ok: false, message: 'Название слишком короткое' };
+  }
+  const inviteeIds = Array.from(new Set(input.participantUserIds)).filter(
+    (id) => id !== me.id,
+  );
+  if (inviteeIds.length === 0) {
+    return { ok: false, message: 'Выберите хотя бы одного участника' };
+  }
+  // Cap to keep a runaway form from creating a 1000-row roster.
+  if (inviteeIds.length > 50) {
+    return { ok: false, message: 'Не больше 50 участников за раз' };
+  }
+
+  // Validate invitees exist and are active — silently dropping stale
+  // ids is friendlier than failing the whole call.
+  const validInvitees = await prisma.user.findMany({
+    where: { id: { in: inviteeIds }, isActive: true },
+    select: { id: true },
+  });
+  if (validInvitees.length === 0) {
+    return { ok: false, message: 'Никто из приглашённых не найден' };
+  }
+
+  const created = await prisma.$transaction(async (tx) => {
+    const meeting = await tx.meeting.create({
+      data: {
+        title: cleanTitle,
+        kind: 'VIDEO_LIVEKIT',
+        status: 'PLANNED',
+        createdById: me.id,
+      },
+      select: { id: true },
+    });
+    const livekitRoomName = newRoomName(meeting.id);
+    await tx.meeting.update({
+      where: { id: meeting.id },
+      data: { livekitRoomName },
+    });
+    // Pre-create the roster so joinMeetingAction can verify membership
+    // without re-reading the original participantUserIds. Identity
+    // placeholder ("invite:") is rewritten at join time with the real
+    // LiveKit identity ("user:<id>:<nonce>").
+    await tx.meetingParticipant.createMany({
+      data: [
+        // Include the caller so the dashboard for them lists this
+        // meeting under "my meetings" right away.
+        {
+          meetingId: meeting.id,
+          userId: me.id,
+          livekitIdentity: `invite:${me.id}`,
+          displayName: (me.name || me.email || 'PM').slice(0, 80),
+        },
+        ...validInvitees.map((u) => ({
+          meetingId: meeting.id,
+          userId: u.id,
+          livekitIdentity: `invite:${u.id}`,
+          displayName: '',
+        })),
+      ],
+      skipDuplicates: true,
+    });
+    return { meetingId: meeting.id, livekitRoomName };
+  });
+
+  // Fan-out invites to the chosen roster (excluding the caller). No
+  // channel context for ad-hoc calls so isMuted always false here.
+  void (async () => {
+    const { fanOutCallInvites, recipientsFromUserIds } = await import(
+      '@/lib/meetings/fanOutCallInvites'
+    );
+    const recipients = await recipientsFromUserIds(
+      validInvitees.map((u) => u.id),
+      me.id,
+    );
+    await fanOutCallInvites({
+      meetingId: created.meetingId,
+      title: cleanTitle,
+      callerName: me.name ?? null,
+      channelId: null,
+      recipients,
+    });
+  })();
+
   revalidatePath('/meetings');
   return { ok: true, meetingId: created.meetingId };
 }
@@ -325,19 +369,30 @@ export async function joinMeetingAction({
   if (meeting.status === 'ENDED' || meeting.status === 'PROCESSING' || meeting.status === 'READY') {
     return { ok: false, message: 'Встреча уже закончилась — посмотрите запись на странице карточки.' };
   }
-  // Permissions: creator, project member, channel member, or admin.
-  // Chat-originated meetings (channelId set) inherit visibility from
-  // the channel — anyone who can read the chat can join the call.
+  // Permissions: creator, project member, channel member, ad-hoc
+  // roster member, or admin. Chat-originated meetings (channelId set)
+  // inherit visibility from the channel; ad-hoc group calls grant
+  // access via the MeetingParticipant roster pre-populated by
+  // startGroupCallAction.
   let channelAllowed = false;
   if (meeting.channelId) {
     const { resolveChannelAccess } = await import('@/lib/messenger/access');
     const acc = await resolveChannelAccess(meeting.channelId, me.id);
     channelAllowed = !!acc?.canRead;
   }
+  let invited = false;
+  if (!channelAllowed && meeting.createdById !== me.id && me.role !== 'ADMIN') {
+    const roster = await prisma.meetingParticipant.findFirst({
+      where: { meetingId, userId: me.id },
+      select: { id: true },
+    });
+    invited = !!roster;
+  }
   const allowed =
     me.role === 'ADMIN' ||
     meeting.createdById === me.id ||
     channelAllowed ||
+    invited ||
     (meeting.project &&
       canManageAssignments({ id: me.id, role: me.role }, meeting.project));
   if (!allowed) return { ok: false, message: 'Нет прав на эту встречу' };

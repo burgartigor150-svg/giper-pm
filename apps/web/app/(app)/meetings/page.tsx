@@ -4,6 +4,7 @@ import { prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
 import { canSeeSettings } from '@/lib/permissions';
 import { CreateMeetingButton } from '@/components/domain/CreateMeetingButton';
+import { GroupCallButton } from '@/components/domain/GroupCallButton';
 
 export const dynamic = 'force-dynamic';
 
@@ -57,9 +58,12 @@ export default async function MeetingsListPage() {
 
   return (
     <div className="mx-auto max-w-4xl space-y-4 p-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <h1 className="text-2xl font-semibold">Созвоны</h1>
-        {canCreate ? <CreateMeetingButton /> : null}
+        <div className="flex flex-wrap items-start gap-2">
+          <GroupCallButton />
+          {canCreate ? <CreateMeetingButton /> : null}
+        </div>
       </div>
 
       {meetings.length === 0 ? (
