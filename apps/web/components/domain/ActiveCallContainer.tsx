@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useTransition } from 'react';
+import { useState, useTransition } from 'react';
 import {
   CarouselLayout,
   ControlBar,
@@ -18,10 +18,9 @@ import {
 } from '@livekit/components-react';
 import '@livekit/components-styles';
 import { Track, type RoomConnectOptions } from 'livekit-client';
-import { Maximize2, Minimize2, PhoneOff } from 'lucide-react';
+import { Maximize2, Minimize2, PhoneOff, UserPlus } from 'lucide-react';
 import { useActiveCall } from './ActiveCallProvider';
-import { endMeetingAction } from '@/actions/meetings';
-import { InviteGuestButton } from './InviteGuestButton';
+import { createMeetingInviteAction, endMeetingAction } from '@/actions/meetings';
 
 /**
  * Global container for the active LiveKit room. Mounted ONCE in the
@@ -43,6 +42,10 @@ export function ActiveCallContainer() {
   const { call, setCall, setExpanded } = useActiveCall();
   const router = useRouter();
   const [endPending, startEnd] = useTransition();
+  const [invitePending, startInvite] = useTransition();
+  const [inviteUrl, setInviteUrl] = useState<string | null>(null);
+  const [inviteErr, setInviteErr] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   if (!call) return null;
 
@@ -59,6 +62,38 @@ export function ActiveCallContainer() {
       setCall(null);
       router.refresh();
     });
+  }
+
+  function issueInvite() {
+    if (!call) return;
+    setInviteErr(null);
+    setCopied(false);
+    if (inviteUrl) {
+      // Already have a link — second click hides the panel so it
+      // doesn't clutter the dock.
+      setInviteUrl(null);
+      return;
+    }
+    const id = call.meetingId;
+    startInvite(async () => {
+      const r = await createMeetingInviteAction({ meetingId: id, expiresInHours: 24 });
+      if (!r.ok) {
+        setInviteErr(r.message);
+        return;
+      }
+      setInviteUrl(r.url);
+    });
+  }
+
+  async function copyInvite() {
+    if (!inviteUrl) return;
+    try {
+      await navigator.clipboard.writeText(inviteUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      window.prompt('Скопируйте ссылку вручную:', inviteUrl);
+    }
   }
 
   const rtcConfig: RoomConnectOptions = {
@@ -86,6 +121,16 @@ export function ActiveCallContainer() {
         <div className="flex items-center gap-1">
           <button
             type="button"
+            onClick={issueInvite}
+            disabled={invitePending}
+            className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+            aria-label="Пригласить гостя по ссылке"
+            title="Пригласить гостя по ссылке"
+          >
+            <UserPlus className="size-4" />
+          </button>
+          <button
+            type="button"
             onClick={() => setExpanded(!call.expanded)}
             className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             aria-label={call.expanded ? 'Свернуть' : 'Развернуть'}
@@ -110,14 +155,33 @@ export function ActiveCallContainer() {
         </div>
       </header>
       {/*
-        Guest invite toolbar. Only rendered in the expanded view —
-        the dock has no horizontal room. The button itself enforces
-        creator/ADMIN check server-side, so non-creators clicking it
-        get a clear error instead of a silent no-op.
+        Guest invite result panel. Appears only after the user clicks
+        the UserPlus icon and a token gets issued. Works both in dock
+        and expanded layouts. The "copy" action is inline so guests
+        can be shared without leaving the call surface.
       */}
-      {call.expanded ? (
-        <div className="shrink-0 border-b border-border bg-muted/30 px-3 py-2">
-          <InviteGuestButton meetingId={call.meetingId} />
+      {inviteErr ? (
+        <div className="shrink-0 border-b border-border bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          {inviteErr}
+        </div>
+      ) : null}
+      {inviteUrl ? (
+        <div className="shrink-0 border-b border-border bg-muted/40 px-3 py-2 text-xs">
+          <div className="mb-1 text-muted-foreground">
+            Гостевая ссылка (24 ч). Поделитесь с внешним участником:
+          </div>
+          <div className="flex items-center gap-2">
+            <code className="min-w-0 flex-1 truncate rounded bg-background px-2 py-1 font-mono">
+              {inviteUrl}
+            </code>
+            <button
+              type="button"
+              onClick={copyInvite}
+              className="shrink-0 rounded-md bg-primary px-2 py-1 text-xs font-medium text-primary-foreground hover:opacity-90"
+            >
+              {copied ? '✓' : 'Копировать'}
+            </button>
+          </div>
         </div>
       ) : null}
       <div className="relative flex-1 min-h-0">
