@@ -21,6 +21,7 @@ import { Track, type RoomConnectOptions } from 'livekit-client';
 import { Maximize2, Minimize2, PhoneOff } from 'lucide-react';
 import { useActiveCall } from './ActiveCallProvider';
 import { endMeetingAction } from '@/actions/meetings';
+import { InviteGuestButton } from './InviteGuestButton';
 
 /**
  * Global container for the active LiveKit room. Mounted ONCE in the
@@ -108,6 +109,17 @@ export function ActiveCallContainer() {
           </button>
         </div>
       </header>
+      {/*
+        Guest invite toolbar. Only rendered in the expanded view —
+        the dock has no horizontal room. The button itself enforces
+        creator/ADMIN check server-side, so non-creators clicking it
+        get a clear error instead of a silent no-op.
+      */}
+      {call.expanded ? (
+        <div className="shrink-0 border-b border-border bg-muted/30 px-3 py-2">
+          <InviteGuestButton meetingId={call.meetingId} />
+        </div>
+      ) : null}
       <div className="relative flex-1 min-h-0">
         <LiveKitRoom
           // key forces a single mount per token — without it React

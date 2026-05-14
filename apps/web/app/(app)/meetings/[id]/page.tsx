@@ -9,7 +9,6 @@ import { joinMeetingAction } from '@/actions/meetings';
 import { MeetingRoomMount } from '@/components/domain/MeetingRoomMount';
 import { MeetingReadyView } from '@/components/domain/MeetingReadyView';
 import { MeetingRetryButton } from '@/components/domain/MeetingRetryButton';
-import { InviteGuestButton } from '@/components/domain/InviteGuestButton';
 import { getSignedDownloadUrl } from '@/lib/storage/s3';
 
 export const dynamic = 'force-dynamic';
@@ -106,26 +105,20 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
       // Token error — fall through to the info card below.
       return <ErrorCard meetingId={meeting.id} title={meeting.title} message={join.message} />;
     }
-    const canInviteGuests =
-      me.role === 'ADMIN' || meeting.createdById === me.id;
     return (
-      <>
-        {canInviteGuests ? (
-          <div className="mx-auto mb-2 max-w-4xl px-2 pt-2">
-            <InviteGuestButton meetingId={meeting.id} />
-          </div>
-        ) : null}
-        <MeetingRoomMount
-          meetingId={meeting.id}
-          serverUrl={join.serverUrl}
-          token={join.token}
-          title={meeting.title}
-          defaultName={join.displayName}
-          iceServers={join.iceServers}
-          channelId={null}
-        />
-      </>
+      <MeetingRoomMount
+        meetingId={meeting.id}
+        serverUrl={join.serverUrl}
+        token={join.token}
+        title={meeting.title}
+        defaultName={join.displayName}
+        iceServers={join.iceServers}
+        channelId={null}
+      />
     );
+    // Note: «Пригласить гостя по ссылке» lives in the floating call
+    // toolbar (ActiveCallContainer), not on the page — the room UI
+    // overlays the page once setCall fires.
   }
 
   // ENDED / PROCESSING — info card with auto-poll hint.
