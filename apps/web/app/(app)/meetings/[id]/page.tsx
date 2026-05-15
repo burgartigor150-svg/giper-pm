@@ -57,6 +57,7 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
           summary: true,
           language: true,
           model: true,
+          speakerMap: true,
         },
       },
     },
@@ -144,21 +145,59 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
         })
       : null;
 
-    // Build SPEAKER_xx → real name mapping. WhisperX numbers speakers
-    // in voice-onset order; we approximate that with the join order of
-    // MeetingParticipant rows. Not perfect (a silent participant who
-    // joined first won't claim SPEAKER_00) but it's the right call most
-    // of the time and is correctable later via a manual UI.
+    // Build SPEAKER_xx → display-name mapping. Two sources, in
+    // priority order:
+    //
+    //   1. MeetingTranscript.speakerMap — explicit pins set by a PM
+    //      via the speaker editor on this page. Shape:
+    //        { "SPEAKER_00": { userId?: string|null, name: string } }
+    //   2. Fallback: «Спикер N+1» (1-based for human users).
+    //
+    // The old code used participant-join-order as a heuristic and got
+    // it wrong most of the time (silent listeners stole SPEAKER_00,
+    // late speakers got mismatched). Honest "Спикер N" is more useful
+    // than fabricated names — and the editor turns it into real names
+    // for any segment the PM cares to fix.
+    type SpeakerMapEntry = { userId?: string | null; name: string };
+    const savedMap = (meeting.transcript.speakerMap ?? {}) as Record<
+      string,
+      SpeakerMapEntry
+    >;
+
+    // Collect every SPEAKER_xx that actually appears in the transcript
+    // so the editor offers exactly those labels (not a hard-coded
+    // SPEAKER_00..SPEAKER_09 list).
+    const segArr = (meeting.transcript.segments as unknown as {
+      speaker?: string | null;
+    }[]) || [];
+    const labelSet = new Set<string>();
+    for (const s of segArr) {
+      if (s.speaker && /^SPEAKER_\d+$/.test(s.speaker)) labelSet.add(s.speaker);
+    }
+    const speakerLabels = Array.from(labelSet).sort();
+    const speakerMap: Record<string, string> = {};
+    speakerLabels.forEach((lbl, i) => {
+      const saved = savedMap[lbl];
+      speakerMap[lbl] = saved?.name?.trim() || `Спикер ${i + 1}`;
+    });
+
+    // Participants list for the speaker-editor dropdown — everyone
+    // who actually joined the room.
     const parts = await prisma.meetingParticipant.findMany({
       where: { meetingId: meeting.id },
       orderBy: { joinedAt: 'asc' },
-      select: { displayName: true, user: { select: { name: true } } },
+      select: {
+        id: true,
+        userId: true,
+        displayName: true,
+        user: { select: { name: true } },
+      },
     });
-    const speakerMap: Record<string, string> = {};
-    parts.forEach((p, i) => {
-      const idx = String(i).padStart(2, '0');
-      speakerMap[`SPEAKER_${idx}`] = p.user?.name || p.displayName || `Участник ${i + 1}`;
-    });
+    const participantOptions = parts.map((p) => ({
+      key: p.id,
+      userId: p.userId,
+      label: p.user?.name || p.displayName || 'Участник',
+    }));
 
     // If the meeting has no project yet, surface the PM's manageable
     // projects so they can attach the meeting after the fact and rerun
@@ -201,6 +240,14 @@ export default async function MeetingPage({ params }: { params: Promise<{ id: st
         }}
         projectKey={meeting.project?.key ?? null}
         speakerMap={speakerMap}
+        speakerLabels={speakerLabels}
+        savedSpeakerMap={savedMap}
+        participantOptions={participantOptions}
+        canEditSpeakers={
+          me.role === 'ADMIN' ||
+          meeting.createdById === me.id ||
+          projectAllowed
+        }
         availableProjects={availableProjects}
       />
     );

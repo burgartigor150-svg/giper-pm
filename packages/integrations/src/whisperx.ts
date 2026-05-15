@@ -44,6 +44,16 @@ export async function transcribeAudio(opts: {
   audio: Buffer;
   fileName: string;
   language?: string;
+  /**
+   * Hint WhisperX about how many distinct voices the recording
+   * contains. Without these the diarizer over-splits ("SPEAKER_05"
+   * from a single coughing person) or under-splits two soft-voiced
+   * speakers. Pass the count of unique participants we expect; the
+   * client clamps to a sane range and only sets the query if both
+   * are positive.
+   */
+  minSpeakers?: number | null;
+  maxSpeakers?: number | null;
 }): Promise<TranscribeResult> {
   const url = new URL(`${baseUrl()}/asr`);
   url.searchParams.set('encode', 'true');
@@ -51,7 +61,25 @@ export async function transcribeAudio(opts: {
   url.searchParams.set('output', 'json');
   url.searchParams.set('word_timestamps', 'true');
   if (opts.language) url.searchParams.set('language', opts.language);
-  if (diarize()) url.searchParams.set('diarize', 'true');
+  if (diarize()) {
+    url.searchParams.set('diarize', 'true');
+    // whisper-asr-webservice forwards these as `min_speakers` /
+    // `max_speakers` to pyannote.audio. Clamp 1..20 — pyannote
+    // chokes on extremes, and we never expect 20+ in a giper-pm
+    // meeting (LiveKit room_max_participants is 50).
+    if (opts.minSpeakers && opts.minSpeakers > 0) {
+      url.searchParams.set(
+        'min_speakers',
+        String(Math.min(Math.max(1, opts.minSpeakers), 20)),
+      );
+    }
+    if (opts.maxSpeakers && opts.maxSpeakers > 0) {
+      url.searchParams.set(
+        'max_speakers',
+        String(Math.min(Math.max(1, opts.maxSpeakers), 20)),
+      );
+    }
+  }
 
   const form = new FormData();
   // Convert Buffer → Uint8Array (with a fresh ArrayBuffer copy) to keep

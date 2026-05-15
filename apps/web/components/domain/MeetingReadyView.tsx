@@ -12,6 +12,7 @@ import {
   searchCandidateAssigneesAction,
 } from '@/actions/aiMeeting';
 import { attachProjectAndRerunAiAction } from '@/actions/meetings';
+import { SpeakerEditor } from './SpeakerEditor';
 import type { ApplyOverrides } from '@/actions/aiHarvest';
 
 type Segment = { start: number; end: number; text: string; speaker?: string };
@@ -63,6 +64,10 @@ export function MeetingReadyView({
   transcript,
   projectKey,
   speakerMap,
+  speakerLabels,
+  savedSpeakerMap,
+  participantOptions,
+  canEditSpeakers,
   availableProjects,
 }: {
   meetingId: string;
@@ -77,12 +82,32 @@ export function MeetingReadyView({
   };
   projectKey: string | null;
   /**
-   * Maps WhisperX speaker labels (SPEAKER_00, SPEAKER_01, …) to the
-   * real participant names we have in MeetingParticipant. Applied
-   * both to the per-segment chip and to the AI summary text — the
-   * summary often quotes SPEAKER_00 directly.
+   * Display-name resolution: SPEAKER_00 → "Иван" or fallback
+   * "Спикер 1". Already merged on the server from
+   * MeetingTranscript.speakerMap + default "Спикер N" labels.
+   * Applied both to per-segment chips and to the AI summary text
+   * (which often quotes SPEAKER_00 directly).
    */
   speakerMap?: Record<string, string>;
+  /**
+   * Every SPEAKER_xx label that appears in the transcript, sorted.
+   * The editor renders one row per label so PMs don't see slots that
+   * have no speech behind them.
+   */
+  speakerLabels?: string[];
+  /**
+   * Currently saved map (raw shape with userId pointer). The editor
+   * uses this for its initial state so a partial save doesn't lose
+   * the other rows on the next render.
+   */
+  savedSpeakerMap?: Record<string, { userId?: string | null; name: string }>;
+  /**
+   * Participants who actually joined the room, used as quick-pick
+   * options in the editor's dropdowns.
+   */
+  participantOptions?: { key: string; userId: string | null; label: string }[];
+  /** Editor is hidden for non-PMs. Server-side check is in the action. */
+  canEditSpeakers?: boolean;
   /**
    * Projects the current user can route a no-project meeting into.
    * Only used when projectKey === null — surfaces an "attach to
@@ -165,6 +190,15 @@ export function MeetingReadyView({
           </CardContent>
         </Card>
       )}
+
+      {canEditSpeakers && speakerLabels && speakerLabels.length > 0 ? (
+        <SpeakerEditor
+          meetingId={meetingId}
+          labels={speakerLabels}
+          saved={savedSpeakerMap ?? {}}
+          participants={participantOptions ?? []}
+        />
+      ) : null}
 
       {summaryText ? (
         <Card>

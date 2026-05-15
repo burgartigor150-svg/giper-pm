@@ -192,11 +192,31 @@ async function processMeetingInner(meetingId: string): Promise<void> {
       // eslint-disable-next-line no-console
       console.log(`[transcribe-worker] meeting=${meetingId} wav size=${wav.length}b, calling whisperx`);
 
-      // 3. WhisperX transcribe with diarization.
+      // 3. WhisperX transcribe with diarization. Hint the diarizer with
+      //    the participant count: WhisperX otherwise over-splits soft
+      //    voices ("SPEAKER_05 from a single cougher") or under-splits
+      //    two similar voices into one. We pull DISTINCT participants
+      //    that actually joined the LiveKit room — that's the real
+      //    upper bound; silent listeners don't show up as speakers, but
+      //    the lower bound is safe because pyannote.audio prefers
+      //    splitting over merging.
+      const participantCount = await prisma.meetingParticipant.count({
+        where: { meetingId, joinedAt: { not: undefined } },
+      });
+      // min: cap at 1, max: cap at the larger of (joined count, 2) so
+      // a 1-person recording doesn't get forced into 2 speakers.
+      const hintMin = participantCount > 0 ? Math.max(1, participantCount - 1) : null;
+      const hintMax = participantCount > 0 ? Math.max(2, participantCount) : null;
+      // eslint-disable-next-line no-console
+      console.log(
+        `[transcribe-worker] meeting=${meetingId} diarize hint min=${hintMin} max=${hintMax} (participants=${participantCount})`,
+      );
       const transcript = await transcribeAudio({
         audio: wav,
         fileName: `meeting-${meetingId}.wav`,
         language: 'ru',
+        minSpeakers: hintMin,
+        maxSpeakers: hintMax,
       });
       segments = transcript.segments;
       fullText = segments.map((s) => s.text).join(' ').trim();

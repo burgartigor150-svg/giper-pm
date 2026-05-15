@@ -527,6 +527,13 @@ model MeetingTranscript {
   /// AI-generated meeting summary in Russian (decisions, action items,
   /// open questions). May be null while still PROCESSING.
   summary     String?   @db.Text
+  /// Manual SPEAKER_xx → person mapping. WhisperX diarization labels
+  /// segments with auto-generated SPEAKER_00, SPEAKER_01, … which are
+  /// stable per-transcript but mean nothing semantic. This map lets a
+  /// PM/creator pin "SPEAKER_00 = Иван (userId)" or a free-form name.
+  /// Shape: { SPEAKER_00: { userId?: string|null, name: string } }.
+  /// Unmapped speakers render as «Спикер N» in the UI.
+  speakerMap  Json?
   model       String?   // e.g. "large-v3"
   language    String?   // ISO code detected by Whisper
   createdAt   DateTime  @default(now())

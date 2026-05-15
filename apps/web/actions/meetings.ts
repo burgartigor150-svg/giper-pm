@@ -803,3 +803,60 @@ export async function retranscribeMeetingAction({
   revalidatePath(`/meetings/${meeting.id}`);
   return { ok: true };
 }
+
+/**
+ * Persist the manual SPEAKER_xx → person mapping that a PM/creator
+ * sets via the speaker editor on the meeting page. Replaces the
+ * whole map atomically — caller sends the full desired state, we
+ * overwrite. Each entry can name a giper-pm user (userId set, so
+ * we can later link the transcript to people for search) or carry
+ * a free-form name (guest, ex-employee, etc).
+ *
+ * Permissions mirror retranscribeMeetingAction: ADMIN, creator, or
+ * PM of the attached project.
+ */
+export async function setMeetingSpeakerMapAction(input: {
+  meetingId: string;
+  /** SPEAKER_00 → { userId, name }. Empty object clears the map. */
+  map: Record<string, { userId?: string | null; name: string }>;
+}): Promise<{ ok: true } | { ok: false; message: string }> {
+  const me = await requireAuth();
+  const meeting = await prisma.meeting.findUnique({
+    where: { id: input.meetingId },
+    select: {
+      id: true,
+      createdById: true,
+      project: { select: { ownerId: true, members: { select: { userId: true, role: true } } } },
+      transcript: { select: { id: true } },
+    },
+  });
+  if (!meeting) return { ok: false, message: 'Встреча не найдена' };
+  if (!meeting.transcript) {
+    return { ok: false, message: 'Транскрипт ещё не готов' };
+  }
+  const allowed =
+    me.role === 'ADMIN' ||
+    meeting.createdById === me.id ||
+    (meeting.project &&
+      canManageAssignments({ id: me.id, role: me.role }, meeting.project));
+  if (!allowed) return { ok: false, message: 'Нет прав' };
+
+  // Sanitize: keep only valid SPEAKER_xx keys, trim names, cap length.
+  const clean: Record<string, { userId: string | null; name: string }> = {};
+  for (const [label, raw] of Object.entries(input.map ?? {})) {
+    if (!/^SPEAKER_\d+$/.test(label)) continue;
+    const name = String(raw?.name ?? '').trim().slice(0, 80);
+    if (!name) continue;
+    clean[label] = {
+      userId: raw?.userId ? String(raw.userId).slice(0, 64) : null,
+      name,
+    };
+  }
+
+  await prisma.meetingTranscript.update({
+    where: { id: meeting.transcript.id },
+    data: { speakerMap: clean as unknown as object },
+  });
+  revalidatePath(`/meetings/${meeting.id}`);
+  return { ok: true };
+}
