@@ -145,7 +145,7 @@ export function MeetingRoom({
           {leaving ? 'Завершаю…' : 'Завершить встречу'}
         </button>
       </header>
-      <div className="flex-1">
+      <div className="min-h-0 flex-1">
         <LiveKitRoom
           // key forces a single mount per token — without it React can
           // strict-mode-double-mount the component, which spawns two
@@ -179,9 +179,22 @@ export function MeetingRoom({
           }}
           style={{ height: '100%' }}
         >
-          <ConferenceLayout />
-          <RoomAudioRenderer />
-          <ControlBar />
+          {/*
+            Flex column so ControlBar is always glued to the bottom
+            of the viewport. The previous layout had a hardcoded
+            `calc(100vh - 12rem)` height on ConferenceLayout that
+            overflowed once 6+ participants stacked with a screen
+            share, pushing the ControlBar off-screen.
+          */}
+          <div className="flex h-full flex-col">
+            <div className="min-h-0 flex-1 overflow-hidden">
+              <ConferenceLayout />
+            </div>
+            <RoomAudioRenderer />
+            <div className="shrink-0">
+              <ControlBar />
+            </div>
+          </div>
         </LiveKitRoom>
       </div>
     </div>
@@ -221,13 +234,41 @@ function ConferenceLayout() {
 
   return (
     <LayoutContextProvider value={layoutContext}>
-      <div style={{ height: 'calc(100vh - 12rem)' }}>
+      {/*
+        Fill the parent flex slot rather than a fixed viewport-
+        relative height. Wrapper above is `min-h-0 flex-1
+        overflow-hidden`, which keeps the tiles inside the available
+        space and lets ControlBar own its own row.
+      */}
+      <div className="h-full w-full">
         {focused ? (
           <FocusLayoutContainer>
             <CarouselLayout tracks={others}>
               <ParticipantTile />
             </CarouselLayout>
-            <FocusLayout trackRef={focused} />
+            {/*
+              Double-click the focused tile (typically the screen
+              share) → request native fullscreen on the underlying
+              <video>. Second double-click exits fullscreen. This is
+              the only way to "enlarge" a screen share since
+              FocusLayout has no resize handles.
+            */}
+            <div
+              className="relative h-full w-full"
+              onDoubleClick={(e) => {
+                const root = e.currentTarget;
+                const video = root.querySelector('video');
+                const target = video ?? root;
+                if (document.fullscreenElement) {
+                  void document.exitFullscreen();
+                } else {
+                  void target.requestFullscreen?.();
+                }
+              }}
+              title="Двойной клик — на весь экран"
+            >
+              <FocusLayout trackRef={focused} />
+            </div>
           </FocusLayoutContainer>
         ) : (
           // GridLayout caps simultaneous renders at 9 by default and

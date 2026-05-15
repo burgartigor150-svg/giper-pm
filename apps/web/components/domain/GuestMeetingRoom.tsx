@@ -94,7 +94,7 @@ export function GuestMeetingRoom({
         <h1 className="text-sm font-semibold">{title}</h1>
         <span className="ml-auto text-xs text-muted-foreground">Гость · {defaultName}</span>
       </header>
-      <div className="flex-1">
+      <div className="min-h-0 flex-1">
         <LiveKitRoom
           key={token}
           serverUrl={serverUrl}
@@ -110,9 +110,22 @@ export function GuestMeetingRoom({
             console.error('[guest-meeting] LiveKit error', e);
           }}
         >
-          <GuestGrid />
-          <RoomAudioRenderer />
-          <ControlBar />
+          {/*
+            Flex column with ControlBar in its own shrink-0 row so it
+            stays at the bottom of the viewport even when GridLayout
+            stacks 6+ tiles. Previous GuestGrid used a hardcoded
+            `calc(100% - 60px)` which assumed the ControlBar was 60px
+            and overflowed once tiles ran past that budget.
+          */}
+          <div className="flex h-full flex-col">
+            <div className="min-h-0 flex-1 overflow-hidden">
+              <GuestGrid />
+            </div>
+            <RoomAudioRenderer />
+            <div className="shrink-0">
+              <ControlBar />
+            </div>
+          </div>
         </LiveKitRoom>
       </div>
     </div>
@@ -127,8 +140,42 @@ function GuestGrid() {
     ],
     { onlySubscribed: false },
   );
+  // Find a screen-share track if anyone's sharing — guests get the
+  // same focus-on-screen-share experience as members so they can
+  // actually see the presented content.
+  const screenShare = tracks.find((t) => t.source === Track.Source.ScreenShare);
+  if (screenShare) {
+    const others = tracks.filter((t) => t !== screenShare);
+    return (
+      <div className="flex h-full w-full flex-col">
+        <div
+          className="relative min-h-0 flex-1"
+          onDoubleClick={(e) => {
+            const root = e.currentTarget;
+            const video = root.querySelector('video');
+            const target = video ?? root;
+            if (document.fullscreenElement) {
+              void document.exitFullscreen();
+            } else {
+              void target.requestFullscreen?.();
+            }
+          }}
+          title="Двойной клик — на весь экран"
+        >
+          <ParticipantTile trackRef={screenShare} />
+        </div>
+        {others.length > 0 ? (
+          <div className="shrink-0 border-t border-border" style={{ height: 96 }}>
+            <GridLayout tracks={others}>
+              <ParticipantTile />
+            </GridLayout>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
   return (
-    <GridLayout tracks={tracks} style={{ height: 'calc(100% - 60px)' }}>
+    <GridLayout tracks={tracks}>
       <ParticipantTile />
     </GridLayout>
   );

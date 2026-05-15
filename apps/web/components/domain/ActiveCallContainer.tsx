@@ -213,9 +213,30 @@ export function ActiveCallContainer() {
           }}
           style={{ height: '100%' }}
         >
-          {call.expanded ? <ConferenceLayout /> : <DockLayout />}
-          <RoomAudioRenderer />
-          {call.expanded ? <ControlBar /> : null}
+          {/*
+            Strict flex column so ControlBar is glued to the bottom
+            regardless of how many tiles GridLayout / CarouselLayout
+            stack. Previously ConferenceLayout had a hardcoded
+            `height: calc(100vh - 8rem)` which overflowed once 6+
+            participants joined with a screen share — the bar slid
+            below the viewport.
+          */}
+          {call.expanded ? (
+            <div className="flex h-full flex-col">
+              <div className="min-h-0 flex-1 overflow-hidden">
+                <ConferenceLayout />
+              </div>
+              <RoomAudioRenderer />
+              <div className="shrink-0">
+                <ControlBar />
+              </div>
+            </div>
+          ) : (
+            <>
+              <DockLayout />
+              <RoomAudioRenderer />
+            </>
+          )}
         </LiveKitRoom>
       </div>
     </div>
@@ -240,15 +261,40 @@ function ConferenceLayout() {
   const focused = focusTrack ?? screenShare;
   const others = tracks.filter((t) => t !== focused);
 
+  // Fill the parent flex slot — the wrapper above is a `flex-1
+  // overflow-hidden` row, so this needs to actually claim 100% so
+  // CarouselLayout / GridLayout can size their tiles correctly.
   return (
     <LayoutContextProvider value={layoutContext}>
-      <div style={{ height: 'calc(100vh - 8rem)' }}>
+      <div className="h-full w-full">
         {focused ? (
           <FocusLayoutContainer>
             <CarouselLayout tracks={others}>
               <ParticipantTile />
             </CarouselLayout>
-            <FocusLayout trackRef={focused} />
+            {/*
+              Wrap the focus tile in a div that listens for double-
+              click → request native fullscreen on the underlying
+              video element. Without this users had no way to "open"
+              the screen share full-size — the focus tile sits in a
+              fixed slot and the carousel takes ~25% of the room.
+            */}
+            <div
+              className="relative h-full w-full"
+              onDoubleClick={(e) => {
+                const root = e.currentTarget;
+                const video = root.querySelector('video');
+                const target = video ?? root;
+                if (document.fullscreenElement) {
+                  void document.exitFullscreen();
+                } else {
+                  void target.requestFullscreen?.();
+                }
+              }}
+              title="Двойной клик — на весь экран"
+            >
+              <FocusLayout trackRef={focused} />
+            </div>
           </FocusLayoutContainer>
         ) : (
           <GridLayout tracks={tracks}>
