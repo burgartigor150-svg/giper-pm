@@ -154,6 +154,20 @@ jobs:
             export IMAGE_TAG GHCR_OWNER
             echo "Deploying $IMAGE_TAG"
 
+            # Persist IMAGE_TAG to .env so any out-of-band container
+            # restart (docker daemon update, host reboot, OOM-killed
+            # web) picks up the newly-deployed image instead of the
+            # cached `:latest` from weeks ago. Without this, web
+            # silently rolls back to whatever ghcr returns for
+            # `:latest` (which we don't update on every push).
+            if [ -f .env ]; then
+              if grep -q '^IMAGE_TAG=' .env; then
+                sed -i.bak "s/^IMAGE_TAG=.*/IMAGE_TAG=${IMAGE_TAG}/" .env
+              else
+                echo "IMAGE_TAG=${IMAGE_TAG}" >> .env
+              fi
+            fi
+
             docker compose -f docker-compose.prod.yml pull
             docker compose -f docker-compose.prod.yml up -d --remove-orphans
 
