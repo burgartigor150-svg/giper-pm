@@ -795,6 +795,18 @@ export async function retranscribeMeetingAction({
       canManageAssignments({ id: me.id, role: me.role }, meeting.project));
   if (!allowed) return { ok: false, message: 'Нет прав' };
 
+  // Wipe the existing transcript so the worker runs WhisperX again
+  // from scratch. Without this, processMeeting() takes the
+  // `hasTranscript` shortcut and only reruns the AI summary — every
+  // server-side transcript fix (speaker hints, diarization cap,
+  // language tweaks) silently does nothing for retried meetings.
+  //
+  // speakerMap goes with it: WhisperX assigns fresh SPEAKER_xx
+  // numbers on every run, so an existing "SPEAKER_00 = Иван" pin
+  // will line up against the wrong voice after the rerun. Better
+  // to ask the PM to re-link in the editor than to lie.
+  await prisma.meetingTranscript.deleteMany({ where: { meetingId: meeting.id } });
+
   await prisma.meeting.update({
     where: { id: meeting.id },
     data: { status: 'ENDED', processingError: null },
