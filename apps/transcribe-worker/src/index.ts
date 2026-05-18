@@ -199,16 +199,48 @@ async function processMeetingInner(meetingId: string): Promise<void> {
       //    cough vs a long sentence has different embeddings. Loose
       //    bounds (±1) didn't help in prod; pinning min=max forces
       //    the diarizer to assign every segment to one of N labels.
-      const participantCount = await prisma.meetingParticipant.count({
-        where: { meetingId, joinedAt: { not: undefined } },
+      // Count only identities that could plausibly produce audio.
+      // We have THREE kinds of MeetingParticipant rows:
+      //   - "user:<uid>:<nonce>"  — a real LiveKit member session
+      //   - "guest:<rand>"        — a real LiveKit guest session
+      //   - "invite:<uid>"        — a roster placeholder written at
+      //                             startGroupCallAction time, BEFORE
+      //                             the user actually joined the room
+      //   - "EG_*"                — the egress recorder bot
+      // Only user:/guest: identities are real speakers; invite:* and
+      // EG_* inflate the count. Observed in prod: a 2-person call
+      // came back with 5 participant rows (2 invites + 1 real user +
+      // 1 egress + 1 guest), so hard cap got set to 5 and WhisperX
+      // happily over-split a 2-person dialogue into 5 voices.
+      //
+      // Also dedupe by userId/identity-prefix: a user who reconnects
+      // creates a new row with a fresh nonce; counting both would
+      // still over-cap.
+      const allParts = await prisma.meetingParticipant.findMany({
+        where: { meetingId },
+        select: { livekitIdentity: true, userId: true },
       });
+      const realIdentities = new Set<string>();
+      for (const p of allParts) {
+        const id = p.livekitIdentity || '';
+        if (id.startsWith('user:')) {
+          // Collapse "user:<uid>:<nonce>" → just userId so a reconnect
+          // doesn't count as a second speaker.
+          realIdentities.add(`user:${p.userId ?? id.split(':')[1]}`);
+        } else if (id.startsWith('guest:')) {
+          realIdentities.add(id);
+        }
+        // invite:* and EG_* are skipped entirely.
+      }
+      const participantCount = realIdentities.size;
       // Hard cap on both sides. participantCount=0 (legacy meetings
-      // without participant rows) → leave hints unset, let WhisperX
-      // pick freely. Otherwise force exactly N speakers.
+      // without proper participant rows) → leave hints unset, let
+      // WhisperX pick freely. Otherwise force exactly N speakers.
       const hardCap = participantCount > 0 ? participantCount : null;
       // eslint-disable-next-line no-console
       console.log(
-        `[transcribe-worker] meeting=${meetingId} diarize hard cap=${hardCap} (participants=${participantCount})`,
+        `[transcribe-worker] meeting=${meetingId} diarize hard cap=${hardCap} ` +
+          `(real speakers=${participantCount}, total rows=${allParts.length})`,
       );
       const transcript = await transcribeAudio({
         audio: wav,
