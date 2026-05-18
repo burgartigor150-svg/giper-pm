@@ -19,9 +19,25 @@ export default auth((req) => {
   //                           Without this entry the middleware bounces
   //                           the guest to /login before the page ever
   //                           renders.
+  //   /sw.js, /manifest.*, /icons/*
+  //                         — PWA / service worker assets. Browsers
+  //                           sometimes fetch sw.js WITHOUT the session
+  //                           cookie (background sync, no-cors fetch),
+  //                           and Notification API needs sw to register
+  //                           with a JS-typed response. A 302 to /login
+  //                           returns HTML → register() throws
+  //                           "MIME type 'text/html' is not supported"
+  //                           and the whole push opt-in flow dies
+  //                           silently (the "Включить" button just hangs).
+  //   /api/push/vapid-public-key
+  //                         — public VAPID pubkey. Reading it doesn't
+  //                           expose anything we wouldn't print in the
+  //                           service worker itself; gating it broke
+  //                           guests' push flow + made the opt-in
+  //                           banner non-functional for new tabs.
   // Without these, middleware 302s the request before the route's own
-  // auth runs — silently breaking host cron, inbound webhooks, and
-  // guest call links.
+  // auth runs — silently breaking host cron, inbound webhooks, guest
+  // call links, and the push-opt-in service-worker registration.
   const isPublic =
     pathname.startsWith('/login') ||
     pathname.startsWith('/api/auth') ||
@@ -29,6 +45,10 @@ export default auth((req) => {
     pathname.startsWith('/api/webhooks') ||
     pathname.startsWith('/api/livekit/webhook') ||
     pathname.startsWith('/m/') ||
+    pathname === '/sw.js' ||
+    pathname.startsWith('/manifest.') ||
+    pathname.startsWith('/icons/') ||
+    pathname === '/api/push/vapid-public-key' ||
     pathname === '/api/health' ||
     pathname === '/';
 
