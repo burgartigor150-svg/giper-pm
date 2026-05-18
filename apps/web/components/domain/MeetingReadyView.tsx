@@ -13,6 +13,7 @@ import {
 } from '@/actions/aiMeeting';
 import { attachProjectAndRerunAiAction } from '@/actions/meetings';
 import { SpeakerEditor } from './SpeakerEditor';
+import { MeetingRetryButton } from './MeetingRetryButton';
 import type { ApplyOverrides } from '@/actions/aiHarvest';
 
 type Segment = { start: number; end: number; text: string; speaker?: string };
@@ -164,11 +165,22 @@ export function MeetingReadyView({
             {speakers.length ? ` · спикеров: ${speakers.length}` : ''}
           </p>
         </div>
-        {projectKey ? (
-          <Link href={`/projects/${projectKey}`} className="text-sm font-mono underline">
-            {projectKey} →
-          </Link>
-        ) : null}
+        <div className="flex flex-wrap items-center gap-3">
+          {projectKey ? (
+            <Link href={`/projects/${projectKey}`} className="text-sm font-mono underline">
+              {projectKey} →
+            </Link>
+          ) : null}
+          {/*
+            "Перезапустить транскрибацию" — same action as the FAILED
+            ErrorCard, but exposed on the READY view too so a PM can
+            re-run after we ship a transcribe-worker change (new
+            speaker hints, prompt tweaks, model bump). Gated on the
+            same permission as the speaker editor: creator, ADMIN, or
+            project PM.
+          */}
+          {canEditSpeakers ? <MeetingRetryButton meetingId={meetingId} /> : null}
+        </div>
       </div>
 
       {recordingUrl ? (
