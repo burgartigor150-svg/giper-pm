@@ -192,37 +192,48 @@ async function processMeetingInner(meetingId: string): Promise<void> {
       // eslint-disable-next-line no-console
       console.log(`[transcribe-worker] meeting=${meetingId} wav size=${wav.length}b, calling whisperx`);
 
-      // 3. WhisperX transcribe with diarization. Hint the diarizer with
-      //    the participant count: WhisperX otherwise over-splits soft
-      //    voices ("SPEAKER_05 from a single cougher") or under-splits
-      //    two similar voices into one. We pull DISTINCT participants
-      //    that actually joined the LiveKit room — that's the real
-      //    upper bound; silent listeners don't show up as speakers, but
-      //    the lower bound is safe because pyannote.audio prefers
-      //    splitting over merging.
+      // 3. WhisperX transcribe with diarization. Hint the diarizer
+      //    HARD on participant count: WhisperX/pyannote.audio
+      //    aggressively over-splits — a 2-person call often ends up
+      //    with SPEAKER_00..SPEAKER_03 because the same voice in a
+      //    cough vs a long sentence has different embeddings. Loose
+      //    bounds (±1) didn't help in prod; pinning min=max forces
+      //    the diarizer to assign every segment to one of N labels.
       const participantCount = await prisma.meetingParticipant.count({
         where: { meetingId, joinedAt: { not: undefined } },
       });
-      // min: cap at 1, max: cap at the larger of (joined count, 2) so
-      // a 1-person recording doesn't get forced into 2 speakers.
-      const hintMin = participantCount > 0 ? Math.max(1, participantCount - 1) : null;
-      const hintMax = participantCount > 0 ? Math.max(2, participantCount) : null;
+      // Hard cap on both sides. participantCount=0 (legacy meetings
+      // without participant rows) → leave hints unset, let WhisperX
+      // pick freely. Otherwise force exactly N speakers.
+      const hardCap = participantCount > 0 ? participantCount : null;
       // eslint-disable-next-line no-console
       console.log(
-        `[transcribe-worker] meeting=${meetingId} diarize hint min=${hintMin} max=${hintMax} (participants=${participantCount})`,
+        `[transcribe-worker] meeting=${meetingId} diarize hard cap=${hardCap} (participants=${participantCount})`,
       );
       const transcript = await transcribeAudio({
         audio: wav,
         fileName: `meeting-${meetingId}.wav`,
         language: 'ru',
-        minSpeakers: hintMin,
-        maxSpeakers: hintMax,
+        minSpeakers: hardCap,
+        maxSpeakers: hardCap,
       });
-      segments = transcript.segments;
+      // Belt-and-braces post-process: WhisperX sometimes ignores our
+      // bounds (the parameter forwarding through whisper-asr-webservice
+      // → pyannote is finicky and silently drops bad shapes). If the
+      // result still has > hardCap distinct labels, merge the extras
+      // into existing ones by closest-time-anchored mapping: every
+      // overflow SPEAKER_xx → the SPEAKER_yy whose surrounding
+      // segments are closest in time. This trades a small amount of
+      // accuracy for a stable speaker count that the SpeakerEditor UI
+      // can actually handle.
+      segments = capDiarizationLabels(transcript.segments, hardCap);
       fullText = segments.map((s) => s.text).join(' ').trim();
       transcriptLanguage = transcript.language;
       // eslint-disable-next-line no-console
-      console.log(`[transcribe-worker] meeting=${meetingId} got ${segments.length} segments`);
+      console.log(
+        `[transcribe-worker] meeting=${meetingId} got ${segments.length} segments, ` +
+          `${new Set(segments.map((s) => s.speaker).filter(Boolean)).size} distinct speakers (cap=${hardCap})`,
+      );
 
       // 4. Persist transcript first — even if AI fails, PM has the text.
       await prisma.meetingTranscript.upsert({
@@ -421,6 +432,135 @@ function publishRedis(): Redis {
   if (_pubRedis) return _pubRedis;
   _pubRedis = new Redis(REDIS_URL);
   return _pubRedis;
+}
+
+/**
+ * Post-process WhisperX diarization output: if more SPEAKER_xx labels
+ * exist than the participant count, merge the overflow labels into
+ * existing ones by time-anchored proximity.
+ *
+ * Why: pyannote.audio sometimes ignores min/max bounds (e.g. when the
+ * underlying ECAPA-TDNN model decides a long monologue is two voices
+ * because of energy-level drift). The user then sees SPEAKER_00,
+ * SPEAKER_01, SPEAKER_02, SPEAKER_03 in a 2-person call, which the
+ * SpeakerEditor UI can't handle gracefully.
+ *
+ * Algorithm:
+ *   1. Bucket all segments by their assigned SPEAKER_xx label.
+ *   2. Sort buckets by total speech time (largest = "real" speakers).
+ *   3. Keep the top `cap` buckets as-is. Rename their labels to
+ *      SPEAKER_00..SPEAKER_(cap-1) — pyannote labels are arbitrary,
+ *      contiguous numbering is friendlier for the editor.
+ *   4. For each overflow bucket, walk its segments and reassign each
+ *      to the kept-bucket whose nearest segment in time has the
+ *      smallest gap. Falls back to the longest-time-overlap bucket if
+ *      no temporal neighbor exists.
+ *
+ * Returns segments with their `speaker` field updated. Idempotent;
+ * if labels are already within cap, returns the input unchanged.
+ */
+function capDiarizationLabels(
+  segments: TranscriptSegment[],
+  cap: number | null,
+): TranscriptSegment[] {
+  if (!cap || cap < 1) return segments;
+
+  const byLabel = new Map<string, TranscriptSegment[]>();
+  for (const s of segments) {
+    const lbl = s.speaker;
+    if (!lbl) continue;
+    if (!byLabel.has(lbl)) byLabel.set(lbl, []);
+    byLabel.get(lbl)!.push(s);
+  }
+  if (byLabel.size <= cap) {
+    // Already within bounds — just normalize labels to contiguous
+    // SPEAKER_00.. range, sorted by total speech time so SPEAKER_00
+    // is the loudest/most-talkative.
+    return renumberLabels(segments, byLabel);
+  }
+
+  // Rank labels by total speech duration (sum of end-start).
+  const ranked = Array.from(byLabel.entries())
+    .map(([label, segs]) => ({
+      label,
+      segs,
+      total: segs.reduce((acc, s) => acc + Math.max(0, s.end - s.start), 0),
+    }))
+    .sort((a, b) => b.total - a.total);
+
+  const keep = ranked.slice(0, cap);
+  const overflow = ranked.slice(cap);
+  const keepLabels = new Set(keep.map((r) => r.label));
+
+  // For each overflow segment, find the kept label whose nearest
+  // segment is temporally closest. Ties broken by larger speech-time
+  // bucket (more likely to be the real owner).
+  const reassign = new Map<TranscriptSegment, string>();
+  for (const bucket of overflow) {
+    for (const seg of bucket.segs) {
+      let best: { label: string; distance: number; total: number } | null = null;
+      for (const target of keep) {
+        let minGap = Infinity;
+        for (const ks of target.segs) {
+          // Gap = time between this seg and the nearest kept seg.
+          // Overlap counts as 0 distance.
+          if (seg.end < ks.start) {
+            minGap = Math.min(minGap, ks.start - seg.end);
+          } else if (seg.start > ks.end) {
+            minGap = Math.min(minGap, seg.start - ks.end);
+          } else {
+            minGap = 0;
+            break;
+          }
+        }
+        if (
+          !best ||
+          minGap < best.distance ||
+          (minGap === best.distance && target.total > best.total)
+        ) {
+          best = { label: target.label, distance: minGap, total: target.total };
+        }
+      }
+      if (best) reassign.set(seg, best.label);
+    }
+  }
+
+  // Apply reassignment + normalize labels to SPEAKER_00..SPEAKER_(cap-1).
+  const merged: TranscriptSegment[] = segments.map((s) => {
+    if (!s.speaker) return s;
+    if (keepLabels.has(s.speaker)) return s;
+    const newLabel = reassign.get(s);
+    return newLabel ? { ...s, speaker: newLabel } : s;
+  });
+
+  // Re-bucket on the merged result and renumber.
+  const mergedByLabel = new Map<string, TranscriptSegment[]>();
+  for (const s of merged) {
+    if (!s.speaker) continue;
+    if (!mergedByLabel.has(s.speaker)) mergedByLabel.set(s.speaker, []);
+    mergedByLabel.get(s.speaker)!.push(s);
+  }
+  return renumberLabels(merged, mergedByLabel);
+}
+
+/** Rename SPEAKER_xx → contiguous SPEAKER_00.. sorted by total time. */
+function renumberLabels(
+  segments: TranscriptSegment[],
+  byLabel: Map<string, TranscriptSegment[]>,
+): TranscriptSegment[] {
+  const order = Array.from(byLabel.entries())
+    .map(([label, segs]) => ({
+      label,
+      total: segs.reduce((acc, s) => acc + Math.max(0, s.end - s.start), 0),
+    }))
+    .sort((a, b) => b.total - a.total)
+    .map((x, i) => [x.label, `SPEAKER_${String(i).padStart(2, '0')}`] as const);
+  const renameMap = new Map(order);
+  return segments.map((s) =>
+    s.speaker && renameMap.has(s.speaker)
+      ? { ...s, speaker: renameMap.get(s.speaker)! }
+      : s,
+  );
 }
 
 (async () => {

@@ -133,12 +133,19 @@ export function GuestMeetingRoom({
 }
 
 function GuestGrid() {
-  const tracks = useTracks(
+  const allTracks = useTracks(
     [
       { source: Track.Source.Camera, withPlaceholder: true },
       { source: Track.Source.ScreenShare, withPlaceholder: false },
     ],
     { onlySubscribed: false },
+  );
+  // Mirror-loop guard — guests share Entire Screen just as often as
+  // members; hiding their own screen-share track from their own view
+  // breaks the recursion.
+  const tracks = allTracks.filter(
+    (t) =>
+      !(t.source === Track.Source.ScreenShare && t.participant.isLocal),
   );
   // Find a screen-share track if anyone's sharing — guests get the
   // same focus-on-screen-share experience as members so they can
