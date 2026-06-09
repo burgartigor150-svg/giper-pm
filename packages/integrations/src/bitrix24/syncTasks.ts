@@ -1,7 +1,7 @@
 import type { PrismaClient } from '@giper/db';
 import { Bitrix24Client } from './client';
 import type { BxTask } from './types';
-import { mapBitrixTask } from './mappers';
+import { mapBitrixTask, normalizeBitrixId } from './mappers';
 import { syncTaskAttachments, type SyncFilesResult } from './syncFiles';
 import { syncTaskComments, type SyncCommentsResult } from './syncComments';
 import { syncTaskHistory, type SyncHistoryResult } from './syncHistory';
@@ -176,7 +176,7 @@ export async function syncTasks(
             //  - new "collab" tasks (chatId set) → im.dialog.messages.get
             // Pick exactly one per task to avoid duplicating system
             // events (chat already includes them as author_id=0).
-            const chatId = raw.chatId && raw.chatId !== '0' ? raw.chatId : null;
+            const chatId = normalizeBitrixId(raw.chatId);
             if (chatId) {
               await syncTaskChat(
                 prisma,

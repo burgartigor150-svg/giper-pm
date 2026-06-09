@@ -64,6 +64,9 @@ export type BxTask = {
    * conversation is reachable via `im.dialog.messages.get` with
    * DIALOG_ID = `chat<chatId>`. Old tasks have `forumId` set instead;
    * the two are mutually exclusive in practice.
+   *
+   * Bitrix REST returns this as a JSON number (e.g. 181300), not a
+   * string, so normalize to string at every boundary before use.
    */
-  chatId?: string | null;
+  chatId?: string | number | null;
 };

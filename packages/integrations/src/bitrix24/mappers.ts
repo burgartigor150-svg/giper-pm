@@ -1,5 +1,19 @@
 import type { BxTask } from './types';
 
+/**
+ * Bitrix REST returns ids as JSON numbers or strings depending on the
+ * field and endpoint. Coerce to a clean string id, treating `0`/empty
+ * as absent. Returns null for missing/zero ids so Prisma String? fields
+ * never receive an Int (which throws "Expected String or Null").
+ */
+export function normalizeBitrixId(
+  value: string | number | null | undefined,
+): string | null {
+  if (value === null || value === undefined) return null;
+  const s = String(value).trim();
+  return s && s !== '0' ? s : null;
+}
+
 /** Bitrix24 task status (1..7) → our TaskStatus.
  *
  *  1 — Новая          → TODO
@@ -92,7 +106,7 @@ export function mapBitrixTask(t: BxTask): DomainTaskFromBitrix {
     tags: Array.isArray(t.tags)
       ? t.tags.map((s) => String(s).trim()).filter(Boolean)
       : [],
-    bitrixChatId: t.chatId && t.chatId !== '0' ? t.chatId : null,
+    bitrixChatId: normalizeBitrixId(t.chatId),
   };
 }
 
