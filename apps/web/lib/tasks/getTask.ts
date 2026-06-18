@@ -21,6 +21,7 @@ export async function getTask(projectKey: string, number: number, user: SessionU
       type: true,
       tags: true,
       estimateHours: true,
+      storyPoints: true,
       dueDate: true,
       startedAt: true,
       completedAt: true,

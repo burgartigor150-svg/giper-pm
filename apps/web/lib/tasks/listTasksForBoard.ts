@@ -166,6 +166,7 @@ export async function listTasksForBoard(
       priority: true,
       type: true,
       estimateHours: true,
+      storyPoints: true,
       tags: true,
       externalSource: true,
       assignee: { select: { id: true, name: true, image: true } },

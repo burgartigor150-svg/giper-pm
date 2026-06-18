@@ -92,6 +92,14 @@ export function KanbanCard({ projectKey, task, isOverlay = false }: Props) {
                 {task.openBlockerCount}
               </span>
             ) : null}
+            {task.storyPoints != null ? (
+              <span
+                className="inline-flex items-center rounded bg-violet-100 px-1 py-0.5 font-medium tabular-nums text-violet-700"
+                title="Story points"
+              >
+                {task.storyPoints} SP
+              </span>
+            ) : null}
           </div>
           <Link
             href={`/projects/${projectKey}/tasks/${task.number}`}
