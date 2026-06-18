@@ -357,10 +357,34 @@ model Project {
   automationRules AutomationRule[]
   /// Kaiten-style documents (wiki) in this project.
   documents       Document[]
+  /// Kaiten-style reusable card templates for this project.
+  cardTemplates   CardTemplate[]
 
   @@unique([externalSource, externalId])
   @@index([status])
   @@index([ownerId])
+}
+
+/// Kaiten-style card template: a reusable blueprint for creating tasks with
+/// a predefined title / description / type / priority. Project-scoped.
+model CardTemplate {
+  id           String       @id @default(cuid())
+  projectId    String
+  project      Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  /// Name shown in the template picker (distinct from the card title).
+  name         String
+  /// Default values applied to the new card.
+  title        String       @default("")
+  description  String       @default("")
+  type         TaskType     @default(TASK)
+  priority     TaskPriority @default(MEDIUM)
+  /// Display order in the picker / settings list.
+  order        Int          @default(0)
+  createdById  String?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  @@index([projectId, order])
 }
 
 /// A Telegram group or channel whose messages PM wants to turn into tasks.

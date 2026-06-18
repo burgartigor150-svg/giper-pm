@@ -177,4 +177,23 @@ test.describe('kanban board', () => {
     await expect(page.getByText('Ревью')).toBeVisible();
     await expect(page.getByText('Sub card')).toBeVisible();
   });
+
+  test('creating a card from a template opens the new task', async ({ page }) => {
+    await getPrisma().cardTemplate.create({
+      data: {
+        projectId,
+        name: 'Шаблон ревью',
+        title: 'Провести ревью',
+        type: 'TASK',
+        priority: 'HIGH',
+        order: 0,
+      },
+    });
+    await page.goto(`/projects/${PK}/board`);
+    await page.getByRole('button', { name: /Из шаблона/ }).click();
+    await page.getByRole('button', { name: 'Шаблон ревью' }).click();
+    // The action creates the task and navigates straight to its detail page.
+    await expect(page).toHaveURL(new RegExp(`/projects/${PK}/tasks/\\d+`));
+    await expect(page.getByText('Провести ревью').first()).toBeVisible();
+  });
 });
