@@ -56,7 +56,7 @@ export default async function ProjectBoardPage({
     throw e;
   }
 
-  const { project, tasks, columns } = result;
+  const { project, tasks, columns, swimlanes } = result;
 
   // Members for filters: project members + owner (deduped by id).
   const memberMap = new Map<string, { id: string; name: string }>();
@@ -100,6 +100,7 @@ export default async function ProjectBoardPage({
         projectKey={project.key}
         initialTasks={tasks}
         columns={columns}
+        swimlanes={swimlanes}
       />
     </div>
   );

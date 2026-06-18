@@ -9,7 +9,9 @@ import { EditProjectForm } from '@/components/domain/EditProjectForm';
 import { MemberSearch } from '@/components/domain/MemberSearch';
 import { MemberRow } from '@/components/domain/MemberRow';
 import { BoardColumnsForm } from '@/components/domain/BoardColumnsForm';
+import { SwimlanesForm } from '@/components/domain/SwimlanesForm';
 import { getBoardColumns } from '@/lib/board/getBoardColumns';
+import { getBoardSwimlanes } from '@/lib/board/getBoardSwimlanes';
 import { PublishToBitrixButton } from '@/components/domain/PublishToBitrixButton';
 
 export default async function ProjectSettingsPage({
@@ -41,6 +43,7 @@ export default async function ProjectSettingsPage({
   }
 
   const boardColumns = await getBoardColumns(project.id);
+  const boardSwimlanes = await getBoardSwimlanes(project.id);
   const projectMirrored =
     project.externalSource === 'bitrix24' && !!project.externalId;
 
@@ -82,6 +85,15 @@ export default async function ProjectSettingsPage({
         </CardHeader>
         <CardContent>
           <BoardColumnsForm projectId={project.id} initial={boardColumns} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Дорожки доски</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <SwimlanesForm projectId={project.id} initial={boardSwimlanes} />
         </CardContent>
       </Card>
 

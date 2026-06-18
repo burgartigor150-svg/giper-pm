@@ -114,4 +114,23 @@ test.describe('kanban board', () => {
     // Tasks are unassigned so list should be empty.
     await expect(page.getByText('Todo item')).toBeHidden();
   });
+
+  // Runs last: seeding a swimlane flips the board into band mode, so the rest
+  // of the suite (which asserts the single-lane layout) stays unaffected.
+  test('renders swimlane bands when lanes exist', async ({ page }) => {
+    const prisma = getPrisma();
+    const lane = await prisma.boardSwimlane.create({
+      data: { projectId, name: 'Срочное', order: 0 },
+    });
+    await prisma.task.updateMany({
+      where: { projectId, title: 'Todo item' },
+      data: { swimlaneId: lane.id },
+    });
+    await page.goto(`/projects/${PK}/board`);
+    // Both the configured lane and the implicit "no lane" band render as headings.
+    await expect(page.getByRole('heading', { name: 'Срочное' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Без дорожки' })).toBeVisible();
+    // The card stays visible (now inside its lane band).
+    await expect(page.getByText('Todo item')).toBeVisible();
+  });
 });

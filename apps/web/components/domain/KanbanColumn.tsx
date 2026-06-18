@@ -21,6 +21,8 @@ type Props = {
   cap?: number;
   /** Soft WIP limit for this column. Exceeding it paints the header red. */
   wipLimit?: number | null;
+  /** Swimlane key when rendered inside a band; omitted in single-lane mode. */
+  laneKey?: string;
 };
 
 const COLUMN_BG: Record<Exclude<Status, 'CANCELED'>, string> = {
@@ -32,7 +34,15 @@ const COLUMN_BG: Record<Exclude<Status, 'CANCELED'>, string> = {
   DONE: 'border-green-200',
 };
 
-export function KanbanColumn({ projectKey, status, name, tasks, cap, wipLimit }: Props) {
+export function KanbanColumn({
+  projectKey,
+  status,
+  name,
+  tasks,
+  cap,
+  wipLimit,
+  laneKey,
+}: Props) {
   const tStatus = useT('tasks.status');
   const tBoard = useT('tasks.board');
 
@@ -41,9 +51,11 @@ export function KanbanColumn({ projectKey, status, name, tasks, cap, wipLimit }:
   const hidden = tasks.length - visible.length;
   const overLimit = wipLimit != null && tasks.length > wipLimit;
 
+  // Single-lane mode keeps the original `column-<status>` droppable id (so the
+  // existing board + e2e are unchanged); band mode scopes it to the lane.
   const { setNodeRef, isOver } = useDroppable({
-    id: `column-${status}`,
-    data: { type: 'column', status },
+    id: laneKey ? `cell-${laneKey}-${status}` : `column-${status}`,
+    data: { type: 'column', status, laneKey },
   });
 
   return (
