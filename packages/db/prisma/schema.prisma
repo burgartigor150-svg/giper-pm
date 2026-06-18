@@ -658,6 +658,8 @@ model Task {
   subtasks      Task[]       @relation("TaskSubtasks")
   
   estimateHours Decimal?     @db.Decimal(8, 2)
+  /// Kaiten-style relative size / story points (distinct from time estimate).
+  storyPoints   Int?
   dueDate       DateTime?
   startedAt     DateTime?    // когда впервые ушло в IN_PROGRESS
   completedAt   DateTime?    // когда ушло в DONE

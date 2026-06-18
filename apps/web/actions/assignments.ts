@@ -213,3 +213,46 @@ export async function setInternalStatusAction(
   return { ok: true };
 }
 
+/** Set or clear a task's Kaiten story points (0–999, null clears). */
+export async function setStoryPointsAction(
+  taskId: string,
+  projectKey: string,
+  taskNumber: number,
+  rawPoints: number | null,
+): Promise<ActionResult> {
+  const me = await requireAuth();
+  const task = await prisma.task.findUnique({
+    where: { id: taskId },
+    select: {
+      creatorId: true,
+      assigneeId: true,
+      project: {
+        select: { ownerId: true, members: { select: { userId: true, role: true } } },
+      },
+    },
+  });
+  if (!task) return { ok: false, error: { code: 'NOT_FOUND', message: 'Не найдено' } };
+  const allow =
+    me.role === 'ADMIN' ||
+    me.role === 'PM' ||
+    task.creatorId === me.id ||
+    task.assigneeId === me.id ||
+    task.project.ownerId === me.id ||
+    task.project.members.some((m) => m.userId === me.id && m.role === 'LEAD');
+  if (!allow) {
+    return {
+      ok: false,
+      error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' },
+    };
+  }
+  let points: number | null = null;
+  if (rawPoints != null) {
+    const n = Math.floor(Number(rawPoints));
+    if (Number.isFinite(n) && n >= 0 && n <= 999) points = n;
+  }
+  await prisma.task.update({ where: { id: taskId }, data: { storyPoints: points } });
+  revalidatePath(`/projects/${projectKey}/tasks/${taskNumber}`);
+  revalidatePath(`/projects/${projectKey}/board`);
+  return { ok: true };
+}
+

@@ -17,6 +17,7 @@ import { InlineTitle } from '@/components/domain/InlineTitle';
 import { InlineDescription } from '@/components/domain/InlineDescription';
 import { TaskSidebar } from '@/components/domain/TaskSidebar';
 import { TaskCustomFields } from '@/components/domain/TaskCustomFields';
+import { StoryPointsField } from '@/components/domain/StoryPointsField';
 import { TaskTimeline } from '@/components/domain/TaskTimeline';
 import { LogTaskHoursForm } from '@/components/domain/LogTaskHoursForm';
 import { listTaskTimeEntries } from '@/actions/time';
@@ -569,6 +570,17 @@ export default async function TaskDetailPage({ params }: { params: Params }) {
                 creator={task.creator}
                 startedAt={task.startedAt}
                 completedAt={task.completedAt}
+              />
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="py-3">
+              <StoryPointsField
+                taskId={task.id}
+                projectKey={task.project.key}
+                taskNumber={task.number}
+                initial={task.storyPoints}
+                canEdit={canEdit}
               />
             </CardContent>
           </Card>
