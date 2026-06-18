@@ -8,9 +8,12 @@ import { DomainError } from '@/lib/errors';
 import { getT } from '@/lib/i18n';
 import { KanbanBoard } from '@/components/domain/KanbanBoard';
 import { KanbanFilters } from '@/components/domain/KanbanFilters';
+import { TemplatePicker } from '@/components/domain/TemplatePicker';
 import { RevalidateOnEvent } from '@/components/domain/RevalidateOnEvent';
 import { channelForProject } from '@giper/realtime';
 import { listTagsForProject } from '@/actions/tags';
+import { getCardTemplates } from '@/lib/board/getCardTemplates';
+import { canCreateTask } from '@/lib/permissions';
 
 export default async function ProjectBoardPage({
   params,
@@ -66,6 +69,14 @@ export default async function ProjectBoardPage({
   // Available tags for the multi-select filter.
   const availableTags = await listTagsForProject(project.id);
 
+  // Kaiten card templates: only offer the picker to users who can create
+  // tasks here, and only when the project actually has templates.
+  const canCreate = canCreateTask(
+    { id: me.id, role: me.role },
+    { ownerId: project.ownerId, members: project.members },
+  );
+  const cardTemplates = canCreate ? await getCardTemplates(project.id) : [];
+
   return (
     <div className="mx-auto max-w-[1400px] space-y-4">
       <RevalidateOnEvent
@@ -82,6 +93,10 @@ export default async function ProjectBoardPage({
           </Link>
           <h1 className="text-xl font-semibold">{t('title')}</h1>
         </div>
+        <TemplatePicker
+          projectKey={project.key}
+          templates={cardTemplates.map((tpl) => ({ id: tpl.id, name: tpl.name }))}
+        />
       </div>
 
       <Card className="p-4">

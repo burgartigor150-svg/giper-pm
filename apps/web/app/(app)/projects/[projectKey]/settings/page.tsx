@@ -17,6 +17,8 @@ import { getBoardSwimlanes } from '@/lib/board/getBoardSwimlanes';
 import { getCustomFields } from '@/lib/board/getCustomFields';
 import { AutomationsForm } from '@/components/domain/AutomationsForm';
 import { getAutomations } from '@/lib/board/getAutomations';
+import { CardTemplatesForm } from '@/components/domain/CardTemplatesForm';
+import { getCardTemplates } from '@/lib/board/getCardTemplates';
 import { PublishToBitrixButton } from '@/components/domain/PublishToBitrixButton';
 
 export default async function ProjectSettingsPage({
@@ -51,6 +53,7 @@ export default async function ProjectSettingsPage({
   const boardSwimlanes = await getBoardSwimlanes(project.id);
   const customFields = await getCustomFields(project.id);
   const automations = await getAutomations(project.id);
+  const cardTemplates = await getCardTemplates(project.id);
   const projectMirrored =
     project.externalSource === 'bitrix24' && !!project.externalId;
 
@@ -141,6 +144,15 @@ export default async function ProjectSettingsPage({
               name: m.user.name ?? m.user.id,
             }))}
           />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Шаблоны карточек</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <CardTemplatesForm projectId={project.id} initial={cardTemplates} />
         </CardContent>
       </Card>
 
