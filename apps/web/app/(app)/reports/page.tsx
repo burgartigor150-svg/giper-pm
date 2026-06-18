@@ -8,6 +8,7 @@ import { reportsFilterSchema, resolveRange } from '@/lib/reports/filters';
 import { resolveScope } from '@/lib/reports/scope';
 import {
   getBurndown,
+  getCycleTimeStats,
   getHeatmap,
   getReportsTotals,
   getTimeByTask,
@@ -18,6 +19,7 @@ import {
 import { ReportsFilterBar } from '@/components/domain/reports/ReportsFilterBar';
 import { VelocityChart } from '@/components/domain/reports/VelocityChart';
 import { BurndownChart } from '@/components/domain/reports/BurndownChart';
+import { CycleTimeChart } from '@/components/domain/reports/CycleTimeChart';
 import { HeatmapChart } from '@/components/domain/reports/HeatmapChart';
 import { TopOverrunTable } from '@/components/domain/reports/TopOverrunTable';
 import { TimeByTaskTable } from '@/components/domain/reports/TimeByTaskTable';
@@ -122,6 +124,17 @@ export default async function ReportsPage({ searchParams }: { searchParams: SP }
 
       <Card>
         <CardHeader>
+          <CardTitle className="text-base">Время цикла (control chart)</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <Suspense fallback={<ChartSkeleton />}>
+            <CycleTimeSection scope={scope} range={range} />
+          </Suspense>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
           <CardTitle className="text-base">Куда уходит время</CardTitle>
         </CardHeader>
         <CardContent>
@@ -184,6 +197,11 @@ async function VelocitySection({ scope, range }: SectionProps) {
 async function BurndownSection({ scope, range }: SectionProps) {
   const data = await getBurndown(scope, range);
   return <BurndownChart data={data} />;
+}
+
+async function CycleTimeSection({ scope, range }: SectionProps) {
+  const stats = await getCycleTimeStats(scope, range);
+  return <CycleTimeChart stats={stats} />;
 }
 
 async function HeatmapSection({ scope, range }: SectionProps) {
