@@ -25,6 +25,17 @@ export type BoardColumnView = {
 };
 
 /**
+ * A board swimlane (horizontal lane) as the UI consumes it. Optional — a
+ * project with no swimlanes renders as a single implicit lane.
+ */
+export type BoardSwimlaneView = {
+  id: string;
+  name: string;
+  order: number;
+  wipLimit: number | null;
+};
+
+/**
  * Default columns (Russian labels) for projects with no BoardColumn rows yet —
  * e.g. created before the board migration, or before columns get seeded.
  * CANCELED is intentionally absent: the board hides cancelled work.
@@ -139,6 +150,7 @@ export async function listTasksForBoard(
       // back to status only for non-mirrored tasks where they're equal.
       status: true,
       internalStatus: true,
+      swimlaneId: true,
       priority: true,
       type: true,
       estimateHours: true,
@@ -221,7 +233,20 @@ export async function listTasksForBoard(
     wipLimit: c.wipLimit ?? wipJson?.[c.status] ?? null,
   }));
 
-  return { project, tasks, columns };
+  // Swimlanes are optional: a project with none renders as a single implicit
+  // lane (today's layout). Load fault-tolerantly, same as columns.
+  let swimlanes: BoardSwimlaneView[] = [];
+  try {
+    swimlanes = await prisma.boardSwimlane.findMany({
+      where: { projectId: project.id },
+      orderBy: { order: 'asc' },
+      select: { id: true, name: true, order: true, wipLimit: true },
+    });
+  } catch (e) {
+    console.warn('listTasksForBoard: swimlanes unavailable', e);
+  }
+
+  return { project, tasks, columns, swimlanes };
 }
 
 /**

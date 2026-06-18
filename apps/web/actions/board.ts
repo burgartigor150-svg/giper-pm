@@ -112,3 +112,156 @@ export async function updateBoardColumnsAction(
   revalidatePath(`/projects/${project.key}/settings`);
   return { ok: true };
 }
+
+export type BoardSwimlaneInput = {
+  /** Existing swimlane id, or null to create a new one. */
+  id: string | null;
+  name: string;
+  /** Card-count WIP limit for the lane; null = no limit. */
+  wipLimit: number | null;
+  /** Top → bottom display order. */
+  order: number;
+};
+
+/**
+ * Reconcile a project's board swimlanes against the submitted set: update
+ * existing lanes (matched by id), create new ones (id === null), and delete
+ * lanes that are no longer present. Deleting a lane sets its tasks'
+ * `swimlaneId` to null via the FK (onDelete: SetNull) — the cards fall back to
+ * the implicit "no lane".
+ *
+ * Permissions: ADMIN, project owner, or LEAD.
+ */
+export async function updateBoardSwimlanesAction(
+  projectId: string,
+  swimlanes: BoardSwimlaneInput[],
+): Promise<ActionResult> {
+  const me = await requireAuth();
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: {
+      key: true,
+      ownerId: true,
+      members: { select: { userId: true, role: true } },
+    },
+  });
+  if (!project) {
+    return { ok: false, error: { code: 'NOT_FOUND', message: 'Проект не найден' } };
+  }
+  if (!canEditProject({ id: me.id, role: me.role }, project)) {
+    return {
+      ok: false,
+      error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' },
+    };
+  }
+
+  // Only ids that already belong to this project may be updated; any other id
+  // is treated as a new lane (guards against cross-project id injection).
+  const existing = await prisma.boardSwimlane.findMany({
+    where: { projectId },
+    select: { id: true },
+  });
+  const existingIds = new Set(existing.map((s) => s.id));
+
+  const clean: BoardSwimlaneInput[] = [];
+  const keptIds = new Set<string>();
+  for (const s of swimlanes) {
+    const name = (s.name ?? '').trim();
+    if (name.length === 0 || name.length > MAX_NAME) {
+      return {
+        ok: false,
+        error: { code: 'VALIDATION', message: `Название дорожки: 1–${MAX_NAME} символов` },
+      };
+    }
+    let wipLimit: number | null = null;
+    if (s.wipLimit != null) {
+      const n = Math.floor(Number(s.wipLimit));
+      if (Number.isFinite(n) && n > 0 && n <= MAX_WIP) wipLimit = n;
+    }
+    const order = Number.isFinite(s.order) ? Math.floor(Number(s.order)) : 0;
+    const id = s.id && existingIds.has(s.id) ? s.id : null;
+    if (id) keptIds.add(id);
+    clean.push({ id, name, wipLimit, order });
+  }
+
+  const toDelete = existing.filter((e) => !keptIds.has(e.id)).map((e) => e.id);
+
+  try {
+    await prisma.$transaction([
+      ...clean.map((s) =>
+        s.id
+          ? prisma.boardSwimlane.update({
+              where: { id: s.id },
+              data: { name: s.name, order: s.order, wipLimit: s.wipLimit },
+            })
+          : prisma.boardSwimlane.create({
+              data: { projectId, name: s.name, order: s.order, wipLimit: s.wipLimit },
+            }),
+      ),
+      ...(toDelete.length > 0
+        ? [prisma.boardSwimlane.deleteMany({ where: { id: { in: toDelete } } })]
+        : []),
+    ]);
+  } catch (e) {
+    console.error('updateBoardSwimlanesAction', e);
+    return { ok: false, error: { code: 'INTERNAL', message: 'Не удалось сохранить дорожки' } };
+  }
+
+  revalidatePath(`/projects/${project.key}`);
+  revalidatePath(`/projects/${project.key}/board`);
+  revalidatePath(`/projects/${project.key}/settings`);
+  return { ok: true };
+}
+
+/**
+ * Move a single task into a swimlane (or clear it with null). Used by the board
+ * when a card is dragged across lanes. Permissioned like a board move: the
+ * task's project must be editable by the caller — reuse canEditProject via the
+ * task's project.
+ */
+export async function setTaskSwimlaneAction(
+  taskId: string,
+  swimlaneId: string | null,
+): Promise<ActionResult> {
+  const me = await requireAuth();
+  const task = await prisma.task.findUnique({
+    where: { id: taskId },
+    select: {
+      projectId: true,
+      project: {
+        select: {
+          key: true,
+          ownerId: true,
+          members: { select: { userId: true, role: true } },
+        },
+      },
+    },
+  });
+  if (!task) {
+    return { ok: false, error: { code: 'NOT_FOUND', message: 'Задача не найдена' } };
+  }
+  if (!canEditProject({ id: me.id, role: me.role }, task.project)) {
+    return {
+      ok: false,
+      error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' },
+    };
+  }
+  // A non-null lane must belong to the same project.
+  if (swimlaneId) {
+    const lane = await prisma.boardSwimlane.findUnique({
+      where: { id: swimlaneId },
+      select: { projectId: true },
+    });
+    if (!lane || lane.projectId !== task.projectId) {
+      return { ok: false, error: { code: 'VALIDATION', message: 'Дорожка не найдена' } };
+    }
+  }
+  try {
+    await prisma.task.update({ where: { id: taskId }, data: { swimlaneId } });
+  } catch (e) {
+    console.error('setTaskSwimlaneAction', e);
+    return { ok: false, error: { code: 'INTERNAL', message: 'Не удалось переместить задачу' } };
+  }
+  revalidatePath(`/projects/${task.project.key}/board`);
+  return { ok: true };
+}
