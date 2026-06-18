@@ -29,7 +29,7 @@ export type BoardColumnView = {
  * e.g. created before the board migration, or before columns get seeded.
  * CANCELED is intentionally absent: the board hides cancelled work.
  */
-const DEFAULT_BOARD_COLUMNS: ReadonlyArray<{ status: TaskStatus; name: string }> = [
+export const DEFAULT_BOARD_COLUMNS: ReadonlyArray<{ status: TaskStatus; name: string }> = [
   { status: 'BACKLOG', name: 'Бэклог' },
   { status: 'TODO', name: 'К работе' },
   { status: 'IN_PROGRESS', name: 'В работе' },

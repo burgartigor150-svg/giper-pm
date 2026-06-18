@@ -108,6 +108,18 @@ export function KanbanBoard({ projectKey, initialTasks, columns }: Props) {
     const prevSnapshot = tasks;
     const newStatus = overContainer;
 
+    // Hard WIP enforcement (Kaiten): refuse a move into a column already at its
+    // WIP limit — the card stays put. Reordering within a column is exempt
+    // (that path returned above).
+    const targetCol = columns.find((c) => c.status === newStatus);
+    const targetCount = byStatus.get(newStatus)?.length ?? 0;
+    if (targetCol?.wipLimit != null && targetCount >= targetCol.wipLimit) {
+      setError(
+        `Колонка «${targetCol.name}» заполнена (WIP-лимит ${targetCol.wipLimit}).`,
+      );
+      return;
+    }
+
     // Optimistic state mutation — update internalStatus on the moved
     // card. Mirror status (`status`) is untouched; that's owned by
     // Bitrix and updated only by the sync round-trip.
