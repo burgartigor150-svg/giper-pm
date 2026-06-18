@@ -82,6 +82,22 @@ test.describe('dashboard', () => {
   });
 
   test('shows overdue task in section', async ({ page }) => {
+    // DIAG: replicate listOverdue's filter to see whether the seeded task
+    // qualifies in CI (and with what assignee/status/dueDate).
+    const from = new Date();
+    from.setHours(0, 0, 0, 0);
+    const diag = await getPrisma().task.findMany({
+      where: { dueDate: { lt: from }, status: { notIn: ['DONE', 'CANCELED'] } },
+      select: {
+        title: true,
+        assigneeId: true,
+        status: true,
+        internalStatus: true,
+        dueDate: true,
+      },
+    });
+    // eslint-disable-next-line no-console
+    console.log('OVERDUE_DIAG ' + JSON.stringify({ adminId, from, rows: diag }));
     await page.goto('/dashboard');
     await expect(page.getByText('Overdue task').first()).toBeVisible();
   });

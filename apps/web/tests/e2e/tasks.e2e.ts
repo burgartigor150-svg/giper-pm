@@ -155,10 +155,14 @@ test.describe('tasks list & detail', () => {
   test('comment form submits a new comment', async ({ page }) => {
     await page.goto(`/projects/${PK}/tasks/6`);
     // The visible comment textarea has no `name` — the submitted value rides
-    // a hidden input populated from it. Target the textarea by placeholder.
-    await page
-      .getByPlaceholder('Нажмите @ или + чтобы упомянуть человека')
-      .fill('Hello from E2E');
+    // a hidden input wired from React state. Wait for the controlled textarea
+    // to reflect the value before submitting, otherwise the form Server Action
+    // can serialize an empty body (fill→click race).
+    const commentBox = page.getByPlaceholder(
+      'Нажмите @ или + чтобы упомянуть человека',
+    );
+    await commentBox.fill('Hello from E2E');
+    await expect(commentBox).toHaveValue('Hello from E2E');
     await page.getByRole('button', { name: 'Отправить' }).click();
     await expect(page.getByText('Hello from E2E')).toBeVisible();
     const comments = await getPrisma().comment.count({
