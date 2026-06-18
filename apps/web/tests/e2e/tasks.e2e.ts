@@ -152,6 +152,19 @@ test.describe('tasks list & detail', () => {
     expect(t?.priority).toBe('URGENT');
   });
 
+  test('picking a cover colour persists', async ({ page }) => {
+    await page.goto(`/projects/${PK}/tasks/8`);
+    // CoverField swatch buttons carry an aria-label per preset colour.
+    await page.getByRole('button', { name: 'Цвет обложки #3b82f6' }).click();
+    await page.waitForTimeout(1500);
+    const t = await getPrisma().task.findFirst({
+      where: { projectId, number: 8 },
+      select: { coverColor: true, coverImageKey: true },
+    });
+    expect(t?.coverColor).toBe('#3b82f6');
+    expect(t?.coverImageKey).toBeNull();
+  });
+
   test('comment form submits a new comment', async ({ page }) => {
     await page.goto(`/projects/${PK}/tasks/6`);
     // The visible textarea has no `name`; the submitted body rides a hidden
