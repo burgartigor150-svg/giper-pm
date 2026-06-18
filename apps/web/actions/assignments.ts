@@ -8,6 +8,7 @@ import {
   fanoutToTaskAudience,
 } from '@/lib/notifications/createNotifications';
 import { autoUnblockDependents } from '@/lib/tasks/autoTransitions';
+import { runColumnEnterAutomations } from '@/lib/automations/runColumnEnterAutomations';
 import { canManageAssignments } from '@/lib/permissions';
 
 type ActionResult<T = unknown> =
@@ -205,6 +206,8 @@ export async function setInternalStatusAction(
   if (rawStatus === 'DONE' || rawStatus === 'CANCELED') {
     await autoUnblockDependents(taskId, me.id);
   }
+  // Kaiten automations: run CARD_ENTERS_COLUMN rules best-effort (never throws).
+  await runColumnEnterAutomations(taskId, rawStatus);
   revalidatePath(`/projects/${projectKey}/tasks/${taskNumber}`);
   revalidatePath(`/projects/${projectKey}/board`);
   return { ok: true };

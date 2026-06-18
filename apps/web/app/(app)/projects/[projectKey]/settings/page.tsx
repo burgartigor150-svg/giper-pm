@@ -14,6 +14,8 @@ import { CustomFieldsForm } from '@/components/domain/CustomFieldsForm';
 import { getBoardColumns } from '@/lib/board/getBoardColumns';
 import { getBoardSwimlanes } from '@/lib/board/getBoardSwimlanes';
 import { getCustomFields } from '@/lib/board/getCustomFields';
+import { AutomationsForm } from '@/components/domain/AutomationsForm';
+import { getAutomations } from '@/lib/board/getAutomations';
 import { PublishToBitrixButton } from '@/components/domain/PublishToBitrixButton';
 
 export default async function ProjectSettingsPage({
@@ -47,6 +49,7 @@ export default async function ProjectSettingsPage({
   const boardColumns = await getBoardColumns(project.id);
   const boardSwimlanes = await getBoardSwimlanes(project.id);
   const customFields = await getCustomFields(project.id);
+  const automations = await getAutomations(project.id);
   const projectMirrored =
     project.externalSource === 'bitrix24' && !!project.externalId;
 
@@ -106,6 +109,24 @@ export default async function ProjectSettingsPage({
         </CardHeader>
         <CardContent>
           <CustomFieldsForm projectId={project.id} initial={customFields} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Автоматизации</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <AutomationsForm
+            projectId={project.id}
+            initial={automations}
+            columns={boardColumns.map((c) => ({ status: c.status, name: c.name }))}
+            swimlanes={boardSwimlanes.map((s) => ({ id: s.id, name: s.name }))}
+            members={project.members.map((m) => ({
+              id: m.user.id,
+              name: m.user.name ?? m.user.id,
+            }))}
+          />
         </CardContent>
       </Card>
 
