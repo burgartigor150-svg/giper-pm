@@ -40,6 +40,13 @@ export async function createNotification(
     });
     if (recent) return null;
   }
+  // Respect the recipient's per-kind in-app preference. A row with
+  // inApp=false mutes this category; a missing row = default (deliver).
+  const pref = await prisma.notificationPreference.findUnique({
+    where: { userId_kind: { userId: input.userId, kind: input.kind } },
+    select: { inApp: true },
+  });
+  if (pref && !pref.inApp) return null;
   const created = await prisma.notification.create({
     data: {
       userId: input.userId,

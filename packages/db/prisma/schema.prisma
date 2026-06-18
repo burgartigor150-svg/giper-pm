@@ -67,6 +67,8 @@ model User {
   auditLogs         AuditLog[]
   integrationLinks  UserIntegrationLink[]
   notifications     Notification[]
+  /// Per-kind in-app notification preferences (mute categories).
+  notificationPreferences NotificationPreference[]
   taskWatching      TaskWatcher[]
   positions         UserPosition[]
   taskAssignments   TaskAssignment[]
@@ -1300,8 +1302,24 @@ model Notification {
   sentTelegram  Boolean           @default(false)
   
   createdAt   DateTime            @default(now())
-  
+
   @@index([userId, isRead, createdAt])
+}
+
+/// Per-user, per-kind in-app notification preference. A row with inApp=false
+/// mutes that NotificationKind for the user (createNotification skips it).
+/// Missing row = default (delivered). Kaiten-style notification settings.
+model NotificationPreference {
+  id        String           @id @default(cuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind      NotificationKind
+  /// Deliver this kind to the in-app inbox / bell. false = muted.
+  inApp     Boolean          @default(true)
+  updatedAt DateTime         @updatedAt
+
+  @@unique([userId, kind])
+  @@index([userId])
 }
 
 enum NotificationKind {
