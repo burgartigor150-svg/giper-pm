@@ -35,6 +35,11 @@ test.describe('sidebar navigation', () => {
     await page.goto('/dashboard');
     await page.locator('aside').getByRole('link', { name: 'Отчёты' }).click();
     await expect(page).toHaveURL(/\/reports/);
+    // The cycle-time control chart card is one of the heavier sections — its
+    // presence proves the reports page rendered without 500-ing on the query.
+    await expect(
+      page.getByText('Время цикла (control chart)'),
+    ).toBeVisible();
   });
 
   test('clicking Настройки navigates to /settings', async ({ page }) => {

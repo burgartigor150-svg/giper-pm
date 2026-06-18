@@ -387,4 +387,52 @@ export async function getReportsTotals(
   };
 }
 
+/**
+ * Cycle-time distribution for completed tasks in scope/range: per-task hours
+ * (startedAt → completedAt) in completion order, plus p50/p75/p95 percentiles
+ * and mean / upper control limit (mean + 2σ) for a control chart.
+ */
+export async function getCycleTimeStats(scope: ScopedQuery, range: ReportsRange) {
+  const tasks = await prisma.task.findMany({
+    where: {
+      completedAt: { gte: range.from, lte: range.to },
+      startedAt: { not: null },
+      ...(scope.projectId
+        ? { projectId: scope.projectId }
+        : { projectId: { in: scope.visibleProjectIds } }),
+      ...(scope.userId
+        ? { assigneeId: scope.userId }
+        : { assigneeId: { in: [...scope.visibleUserIds] } }),
+    },
+    select: { number: true, completedAt: true, startedAt: true },
+    orderBy: { completedAt: 'asc' },
+  });
+  const raw = tasks
+    .filter((t) => t.completedAt && t.startedAt)
+    .map((t) => ({
+      date: startOfDay(t.completedAt!).toISOString().slice(0, 10),
+      hours: +((t.completedAt!.getTime() - t.startedAt!.getTime()) / 3_600_000).toFixed(1),
+      number: t.number,
+    }))
+    .filter((p) => p.hours >= 0);
+  const points = raw.map((p, i) => ({ seq: i + 1, ...p }));
+
+  const vals = points.map((p) => p.hours).slice().sort((a, b) => a - b);
+  const pct = (q: number) =>
+    vals.length ? vals[Math.min(vals.length - 1, Math.floor(q * vals.length))]! : null;
+  const mean = vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : 0;
+  const sigma = vals.length
+    ? Math.sqrt(vals.reduce((s, v) => s + (v - mean) ** 2, 0) / vals.length)
+    : 0;
+  return {
+    points,
+    count: vals.length,
+    p50: pct(0.5),
+    p75: pct(0.75),
+    p95: pct(0.95),
+    mean: +mean.toFixed(1),
+    ucl: +(mean + 2 * sigma).toFixed(1),
+  };
+}
+
 export { startOfDay, endOfDay };
