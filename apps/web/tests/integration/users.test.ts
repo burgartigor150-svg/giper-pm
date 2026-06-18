@@ -178,6 +178,8 @@ describe('setUserActive', () => {
   it('reactivation clears deletedAt', async () => {
     const admin = await makeUser({ role: 'ADMIN' });
     const t = await makeUser({ role: 'MEMBER' });
+    // Activation requires a role + at least one position (see setUserActive).
+    await prisma.userPosition.create({ data: { userId: t.id, position: 'BACKEND' } });
     await setUserActive(t.id, false, sessionUser(admin));
     await setUserActive(t.id, true, sessionUser(admin));
     const fresh = await prisma.user.findUnique({

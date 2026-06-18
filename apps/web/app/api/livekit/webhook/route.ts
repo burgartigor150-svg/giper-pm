@@ -148,6 +148,15 @@ async function startEgressWithRetry(
 
 export async function POST(req: Request) {
   const auth = req.headers.get('authorization');
+  // Reject unsigned webhooks early. In production verifyWebhook would also
+  // reject a missing/invalid token, but failing fast here keeps the auth
+  // contract explicit and independent of the verifier implementation.
+  if (!auth) {
+    return NextResponse.json(
+      { ok: false, error: 'Missing Authorization header' },
+      { status: 401 },
+    );
+  }
   const raw = await req.text();
   const verified = await verifyWebhook(auth, raw);
   if (!verified.ok) {

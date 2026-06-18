@@ -239,6 +239,8 @@ describe('setUserActiveAction', () => {
   it('reactivates a user', async () => {
     const admin = await makeUser({ role: 'ADMIN' });
     const other = await makeUser({ role: 'MEMBER', isActive: false });
+    // Activation requires a role + at least one position (see setUserActive).
+    await prisma.userPosition.create({ data: { userId: other.id, position: 'BACKEND' } });
     mockMe.id = admin.id;
     const res = await setUserActiveAction(other.id, true);
     expect(res.ok).toBe(true);
