@@ -28,6 +28,16 @@ export default async function SettingsPage() {
           </Card>
           <Card>
             <CardHeader>
+              <CardTitle>Группы пользователей</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Link href="/settings/groups" className="text-sm underline">
+                Группы пользователей →
+              </Link>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
               <CardTitle>Интеграции</CardTitle>
             </CardHeader>
             <CardContent className="flex flex-col gap-2">

@@ -21,6 +21,8 @@ import { CardTemplatesForm } from '@/components/domain/CardTemplatesForm';
 import { getCardTemplates } from '@/lib/board/getCardTemplates';
 import { RecurringTasksForm } from '@/components/domain/RecurringTasksForm';
 import { getRecurringTasks } from '@/lib/board/getRecurringTasks';
+import { AddGroupToProject } from '@/components/domain/groups/AddGroupToProject';
+import { getUserGroups } from '@/lib/groups/getUserGroups';
 import { PublishToBitrixButton } from '@/components/domain/PublishToBitrixButton';
 
 export default async function ProjectSettingsPage({
@@ -57,6 +59,7 @@ export default async function ProjectSettingsPage({
   const automations = await getAutomations(project.id);
   const cardTemplates = await getCardTemplates(project.id);
   const recurringTasks = await getRecurringTasks(project.id);
+  const userGroups = await getUserGroups();
   const projectMirrored =
     project.externalSource === 'bitrix24' && !!project.externalId;
 
@@ -173,6 +176,14 @@ export default async function ProjectSettingsPage({
           <CardTitle>Участники ({project.members.length})</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          <AddGroupToProject
+            projectId={project.id}
+            groups={userGroups.map((g) => ({
+              id: g.id,
+              name: g.name,
+              memberCount: g.memberCount,
+            }))}
+          />
           <MemberSearch
             projectId={project.id}
             excludeUserIds={project.members.map((m) => m.user.id)}
