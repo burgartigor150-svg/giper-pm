@@ -228,4 +228,15 @@ test.describe('tasks list & detail', () => {
     await expect(page.getByText('Поля', { exact: true })).toBeVisible();
     await expect(page.getByText('Окружение')).toBeVisible();
   });
+
+  test('documents: list + editor render', async ({ page }) => {
+    const prisma = getPrisma();
+    const doc = await prisma.document.create({
+      data: { projectId, title: 'Заметка', content: '# Привет', createdById: adminId },
+    });
+    await page.goto(`/projects/${PK}/docs`);
+    await expect(page.getByText('Заметка')).toBeVisible();
+    await page.goto(`/projects/${PK}/docs/${doc.id}`);
+    await expect(page.getByDisplayValue('Заметка')).toBeVisible();
+  });
 });
