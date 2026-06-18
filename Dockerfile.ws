@@ -56,7 +56,11 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
 
 EXPOSE 3001
 ENTRYPOINT ["/sbin/tini", "--"]
-# Absolute import paths so node's ESM resolver doesn't need to walk
-# node_modules from /app (where tsx is not installed). NODE_PATH does
-# not affect the ESM loader, hence the explicit file:// URLs.
-CMD ["node", "--import", "file:///app/apps/ws/node_modules/tsx/dist/esm/index.mjs", "/app/apps/ws/src/index.ts"]
+# Run via the tsx CLI entry (cli.mjs) — identical to apps/tg-bot and
+# apps/transcribe-worker, which run stably on this same base image. The
+# previous `--import .../tsx/dist/esm/index.mjs` loader form makes Node load
+# the .ts entry through require(); under Node >=20.19 (20.20.2 in prod) that
+# throws ERR_REQUIRE_CYCLE_MODULE on the entry module. The CLI entry imports
+# the entry as ESM and avoids that require() path. Verified on the prod
+# image: --import crashes, cli.mjs boots ("[giper-ws] listening").
+CMD ["node", "/app/apps/ws/node_modules/tsx/dist/cli.mjs", "/app/apps/ws/src/index.ts"]
