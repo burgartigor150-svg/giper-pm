@@ -52,10 +52,6 @@ export async function listTasksForBoard(
       name: true,
       ownerId: true,
       wipLimits: true,
-      boardColumns: {
-        orderBy: { order: 'asc' },
-        select: { id: true, name: true, status: true, order: true, wipLimit: true },
-      },
       members: {
         select: {
           userId: true,
@@ -181,7 +177,29 @@ export async function listTasksForBoard(
   const wipJson = (project.wipLimits ?? null) as Partial<
     Record<TaskStatus, number>
   > | null;
-  const dbCols = project.boardColumns.filter((c) => c.status !== 'CANCELED');
+  // Load board columns in a separate query and tolerate the table not existing
+  // yet: on deploy the new image goes live a beat before `prisma migrate
+  // deploy` runs, so we never want the board to 500 over a missing/empty column
+  // set. Any failure (or no rows) falls back to DEFAULT_BOARD_COLUMNS below.
+  let dbCols: Array<{
+    id: string;
+    name: string;
+    status: TaskStatus;
+    order: number;
+    wipLimit: number | null;
+  }> = [];
+  try {
+    dbCols = await prisma.boardColumn.findMany({
+      where: { projectId: project.id, status: { not: 'CANCELED' } },
+      orderBy: { order: 'asc' },
+      select: { id: true, name: true, status: true, order: true, wipLimit: true },
+    });
+  } catch (e) {
+    console.warn(
+      'listTasksForBoard: board columns unavailable, falling back to defaults',
+      e,
+    );
+  }
   const baseCols: BoardColumnView[] =
     dbCols.length > 0
       ? dbCols.map((c) => ({
