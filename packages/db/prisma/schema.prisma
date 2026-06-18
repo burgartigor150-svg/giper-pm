@@ -353,6 +353,8 @@ model Project {
   boardSwimlanes BoardSwimlane[]
   /// Kaiten-style custom fields defined for this project (Phase 3).
   customFields   CustomFieldDefinition[]
+  /// Kaiten-style automation rules for this project (Phase 4).
+  automationRules AutomationRule[]
 
   @@unique([externalSource, externalId])
   @@index([status])
@@ -1596,4 +1598,39 @@ model CustomFieldValue {
 
   @@unique([fieldId, taskId])
   @@index([taskId])
+}
+
+/// Kaiten-style automations (Phase 4): per-project rules that run an action
+/// when a trigger fires on a task. Additive — best-effort execution never
+/// blocks the underlying task change.
+enum AutomationTrigger {
+  /// Fires when a task's internal status changes to the configured column.
+  CARD_ENTERS_COLUMN
+}
+
+enum AutomationActionType {
+  SET_ASSIGNEE
+  SET_PRIORITY
+  ADD_COMMENT
+  SET_SWIMLANE
+}
+
+model AutomationRule {
+  id            String               @id @default(cuid())
+  projectId     String
+  project       Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name          String
+  enabled       Boolean              @default(true)
+  trigger       AutomationTrigger
+  /// Trigger params, e.g. { "status": "DONE" } — which column entry fires it.
+  triggerConfig Json
+  actionType    AutomationActionType
+  /// Action params, e.g. { "userId": "..." } / { "priority": "HIGH" } /
+  /// { "body": "..." } / { "swimlaneId": "..." }.
+  actionConfig  Json
+  order         Int                  @default(0)
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+
+  @@index([projectId, enabled])
 }
