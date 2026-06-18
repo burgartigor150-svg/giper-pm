@@ -9,6 +9,7 @@ import { EditProjectForm } from '@/components/domain/EditProjectForm';
 import { MemberSearch } from '@/components/domain/MemberSearch';
 import { MemberRow } from '@/components/domain/MemberRow';
 import { BoardColumnsForm } from '@/components/domain/BoardColumnsForm';
+import { BoardSubColumnsForm } from '@/components/domain/BoardSubColumnsForm';
 import { SwimlanesForm } from '@/components/domain/SwimlanesForm';
 import { CustomFieldsForm } from '@/components/domain/CustomFieldsForm';
 import { getBoardColumns } from '@/lib/board/getBoardColumns';
@@ -91,6 +92,19 @@ export default async function ProjectSettingsPage({
         </CardHeader>
         <CardContent>
           <BoardColumnsForm projectId={project.id} initial={boardColumns} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Подколонки</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <BoardSubColumnsForm
+            columns={boardColumns
+              .filter((c) => !c.id.startsWith('default-'))
+              .map((c) => ({ id: c.id, name: c.name, subColumns: c.subColumns }))}
+          />
         </CardContent>
       </Card>
 

@@ -143,4 +143,38 @@ test.describe('kanban board', () => {
       page.getByText('Пропускная способность (задач/неделю)'),
     ).toBeVisible();
   });
+
+  // Self-contained: a fresh project with one real column split into two
+  // sub-columns + a card. Verifies the sub-column render path (the KAN project
+  // above stays on the byte-identical no-subcolumn path).
+  test('board renders sub-column zones', async ({ page }) => {
+    const prisma = getPrisma();
+    const proj = await prisma.project.create({
+      data: { key: 'SUB', name: 'Sub Project', ownerId: adminId },
+    });
+    const col = await prisma.boardColumn.create({
+      data: { projectId: proj.id, name: 'В работе', status: 'IN_PROGRESS', order: 0 },
+    });
+    await prisma.boardSubColumn.create({
+      data: { columnId: col.id, name: 'Разработка', order: 0 },
+    });
+    await prisma.boardSubColumn.create({
+      data: { columnId: col.id, name: 'Ревью', order: 1 },
+    });
+    await prisma.task.create({
+      data: {
+        projectId: proj.id,
+        number: 1,
+        title: 'Sub card',
+        creatorId: adminId,
+        assigneeId: adminId,
+        status: 'IN_PROGRESS',
+        internalStatus: 'IN_PROGRESS',
+      },
+    });
+    await page.goto('/projects/SUB/board');
+    await expect(page.getByText('Разработка')).toBeVisible();
+    await expect(page.getByText('Ревью')).toBeVisible();
+    await expect(page.getByText('Sub card')).toBeVisible();
+  });
 });
