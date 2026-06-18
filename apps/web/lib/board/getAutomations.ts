@@ -4,7 +4,9 @@ export type AutomationView = {
   id: string;
   name: string;
   enabled: boolean;
-  /** Column (status) whose entry fires the rule. */
+  /** 'CARD_ENTERS_COLUMN' | 'TASK_CREATED'. */
+  triggerType: string;
+  /** Column (status) whose entry fires the rule (CARD_ENTERS_COLUMN only). */
   triggerStatus: string;
   actionType: string;
   /** userId / priority / swimlaneId, flattened from actionConfig. */
@@ -37,6 +39,7 @@ export async function getAutomations(projectId: string): Promise<AutomationView[
         id: r.id,
         name: r.name,
         enabled: r.enabled,
+        triggerType: r.trigger,
         triggerStatus: trig.status ?? '',
         actionType: r.actionType,
         actionValue,

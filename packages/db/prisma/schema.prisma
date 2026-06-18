@@ -1606,6 +1606,8 @@ model CustomFieldValue {
 enum AutomationTrigger {
   /// Fires when a task's internal status changes to the configured column.
   CARD_ENTERS_COLUMN
+  /// Fires when a task is created in the project.
+  TASK_CREATED
 }
 
 enum AutomationActionType {
