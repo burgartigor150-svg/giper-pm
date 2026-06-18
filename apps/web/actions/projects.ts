@@ -10,7 +10,7 @@ import {
   type UpdateProjectInput,
   type AddMemberInput,
 } from '@giper/shared';
-import { prisma, Prisma } from '@giper/db';
+import { prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
 import {
   addProjectMember,
@@ -272,71 +272,6 @@ export async function removeProjectMemberAction(
   return { ok: true };
 }
 
-// ----- WIP limits ------------------------------------------------------
-
-const VALID_STATUSES = [
-  'BACKLOG',
-  'TODO',
-  'IN_PROGRESS',
-  'REVIEW',
-  'BLOCKED',
-  'DONE',
-  'CANCELED',
-] as const;
-
-/**
- * Set or clear WIP-limits for a project's kanban columns. Soft-limits:
- * we never block status transitions, just paint the column header red
- * when its task count exceeds the value. `null` for any status removes
- * the limit.
- *
- * Permissions: ADMIN, project owner, or project LEAD — same gate as
- * other project-meta edits.
- */
-export async function setWipLimitsAction(
-  projectId: string,
-  limits: Record<string, number | null>,
-): Promise<ActionResult> {
-  const me = await requireAuth();
-  const project = await prisma.project.findUnique({
-    where: { id: projectId },
-    select: {
-      ownerId: true,
-      key: true,
-      members: { select: { userId: true, role: true } },
-    },
-  });
-  if (!project) {
-    return { ok: false, error: { code: 'NOT_FOUND', message: 'Проект не найден' } };
-  }
-  if (!canEditProject({ id: me.id, role: me.role }, project)) {
-    return {
-      ok: false,
-      error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' },
-    };
-  }
-
-  // Sanitize: drop unknown keys and coerce values to positive ints (or null).
-  const clean: Record<string, number> = {};
-  for (const status of VALID_STATUSES) {
-    const v = limits[status];
-    if (v == null) continue;
-    const n = Math.floor(Number(v));
-    if (Number.isFinite(n) && n > 0 && n < 1000) {
-      clean[status] = n;
-    }
-  }
-  await prisma.project.update({
-    where: { id: projectId },
-    data: {
-      wipLimits:
-        Object.keys(clean).length > 0
-          ? (clean as Prisma.InputJsonValue)
-          : Prisma.JsonNull,
-    },
-  });
-  revalidatePath(`/projects/${project.key}`);
-  revalidatePath(`/projects/${project.key}/board`);
-  revalidatePath(`/projects/${project.key}/settings`);
-  return { ok: true };
-}
+// WIP limits are now managed per-column on BoardColumn (see board.ts /
+// BoardColumnsForm). The legacy per-status `Project.wipLimits` JSON is still
+// read as a fallback in getBoardColumns / listTasksForBoard until migrated.
