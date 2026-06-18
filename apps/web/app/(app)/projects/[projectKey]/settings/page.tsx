@@ -8,7 +8,8 @@ import { getT } from '@/lib/i18n';
 import { EditProjectForm } from '@/components/domain/EditProjectForm';
 import { MemberSearch } from '@/components/domain/MemberSearch';
 import { MemberRow } from '@/components/domain/MemberRow';
-import { WipLimitsForm } from '@/components/domain/WipLimitsForm';
+import { BoardColumnsForm } from '@/components/domain/BoardColumnsForm';
+import { getBoardColumns } from '@/lib/board/getBoardColumns';
 import { PublishToBitrixButton } from '@/components/domain/PublishToBitrixButton';
 
 export default async function ProjectSettingsPage({
@@ -39,6 +40,7 @@ export default async function ProjectSettingsPage({
     notFound();
   }
 
+  const boardColumns = await getBoardColumns(project.id);
   const projectMirrored =
     project.externalSource === 'bitrix24' && !!project.externalId;
 
@@ -76,13 +78,10 @@ export default async function ProjectSettingsPage({
 
       <Card>
         <CardHeader>
-          <CardTitle>WIP-лимиты канбана</CardTitle>
+          <CardTitle>Колонки доски</CardTitle>
         </CardHeader>
         <CardContent>
-          <WipLimitsForm
-            projectId={project.id}
-            initial={(project.wipLimits ?? null) as Record<string, number> | null}
-          />
+          <BoardColumnsForm projectId={project.id} initial={boardColumns} />
         </CardContent>
       </Card>
 
