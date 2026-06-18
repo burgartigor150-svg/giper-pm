@@ -16,6 +16,7 @@ import { getT } from '@/lib/i18n';
 import { InlineTitle } from '@/components/domain/InlineTitle';
 import { InlineDescription } from '@/components/domain/InlineDescription';
 import { TaskSidebar } from '@/components/domain/TaskSidebar';
+import { TaskCustomFields } from '@/components/domain/TaskCustomFields';
 import { TaskTimeline } from '@/components/domain/TaskTimeline';
 import { LogTaskHoursForm } from '@/components/domain/LogTaskHoursForm';
 import { listTaskTimeEntries } from '@/actions/time';
@@ -571,6 +572,7 @@ export default async function TaskDetailPage({ params }: { params: Params }) {
               />
             </CardContent>
           </Card>
+          <TaskCustomFields taskId={task.id} canEdit={canEdit} />
         </div>
       </div>
     </div>

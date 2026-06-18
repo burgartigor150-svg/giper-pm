@@ -206,4 +206,26 @@ test.describe('tasks list & detail', () => {
     const resp = await page.goto(`/projects/${PK}/tasks/9999`);
     expect(resp?.status()).toBe(404);
   });
+
+  // Runs last: seeds a custom field + value, then checks the task detail shows
+  // the "Поля" block. Until now no field exists, so TaskCustomFields renders
+  // nothing on the other task pages (single-lane / no-field path unchanged).
+  test('custom field renders on task detail', async ({ page }) => {
+    const prisma = getPrisma();
+    const t7 = await prisma.task.findFirst({
+      where: { projectId, number: 7 },
+      select: { id: true },
+    });
+    const field = await prisma.customFieldDefinition.create({
+      data: { projectId, name: 'Окружение', type: 'SELECT', options: ['dev', 'prod'], order: 0 },
+    });
+    if (t7) {
+      await prisma.customFieldValue.create({
+        data: { fieldId: field.id, taskId: t7.id, value: 'prod' },
+      });
+    }
+    await page.goto(`/projects/${PK}/tasks/7`);
+    await expect(page.getByText('Поля', { exact: true })).toBeVisible();
+    await expect(page.getByText('Окружение')).toBeVisible();
+  });
 });
