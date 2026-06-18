@@ -355,6 +355,8 @@ model Project {
   customFields   CustomFieldDefinition[]
   /// Kaiten-style automation rules for this project (Phase 4).
   automationRules AutomationRule[]
+  /// Kaiten-style documents (wiki) in this project.
+  documents       Document[]
 
   @@unique([externalSource, externalId])
   @@index([status])
@@ -1659,4 +1661,25 @@ model AutomationRule {
   updatedAt     DateTime             @updatedAt
 
   @@index([projectId, enabled])
+}
+
+/// Kaiten-style document (wiki page) in a project. Nestable into a tree via
+/// parentId; Markdown content.
+model Document {
+  id          String     @id @default(cuid())
+  projectId   String
+  project     Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  title       String
+  content     String     @default("")
+  /// Parent document for nesting; null = top level.
+  parentId    String?
+  parent      Document?  @relation("DocTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children    Document[] @relation("DocTree")
+  order       Int        @default(0)
+  /// User id of the creator (no FK — soft reference).
+  createdById String
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@index([projectId, parentId, order])
 }
