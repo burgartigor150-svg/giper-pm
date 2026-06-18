@@ -164,6 +164,17 @@ test.describe('tasks list & detail', () => {
     await commentBox.fill('Hello from E2E');
     await expect(commentBox).toHaveValue('Hello from E2E');
     await page.getByRole('button', { name: 'Отправить' }).click();
+    await page.waitForTimeout(2000);
+    // DIAG: surface why the comment may not land — action error text, whether
+    // the textarea cleared (cleared = submit succeeded), and the actual rows.
+    const taAfter = await commentBox.inputValue().catch(() => '(detached)');
+    const errText = await page.locator('p.text-destructive').allTextContents();
+    const rows = await getPrisma().comment.findMany({
+      where: { task: { projectId, number: 6 } },
+      select: { body: true, visibility: true },
+    });
+    // eslint-disable-next-line no-console
+    console.log('COMMENT_DIAG ' + JSON.stringify({ taAfter, errText, rows }));
     await expect(page.getByText('Hello from E2E')).toBeVisible();
     const comments = await getPrisma().comment.count({
       where: { task: { projectId, number: 6 } },

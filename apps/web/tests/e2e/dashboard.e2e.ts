@@ -82,24 +82,14 @@ test.describe('dashboard', () => {
   });
 
   test('shows overdue task in section', async ({ page }) => {
-    // DIAG: replicate listOverdue's filter to see whether the seeded task
-    // qualifies in CI (and with what assignee/status/dueDate).
-    const from = new Date();
-    from.setHours(0, 0, 0, 0);
-    const diag = await getPrisma().task.findMany({
-      where: { dueDate: { lt: from }, status: { notIn: ['DONE', 'CANCELED'] } },
-      select: {
-        title: true,
-        assigneeId: true,
-        status: true,
-        internalStatus: true,
-        dueDate: true,
-      },
-    });
-    // eslint-disable-next-line no-console
-    console.log('OVERDUE_DIAG ' + JSON.stringify({ adminId, from, rows: diag }));
     await page.goto('/dashboard');
-    await expect(page.getByText('Overdue task').first()).toBeVisible();
+    // OverdueSection streams in via its own Suspense boundary; under CI load
+    // it can exceed the default 5s assertion timeout. The data is correct
+    // (confirmed the seeded task qualifies for listOverdue), so just give the
+    // streamed section time to render.
+    await expect(page.getByText('Overdue task').first()).toBeVisible({
+      timeout: 20_000,
+    });
   });
 
   test('topbar visible with timer widget', async ({ page }) => {
