@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { resetDb, seedAdmin, seedProject, getPrisma } from './fixtures';
+import { resetDb, seedAdmin, seedProject, seedTask, getPrisma } from './fixtures';
 
 test.describe('projects', () => {
   let adminId: string;
@@ -8,8 +8,14 @@ test.describe('projects', () => {
     await resetDb();
     const admin = await seedAdmin();
     adminId = admin.id;
-    await seedProject({ key: 'GFM', name: 'Giper FM', ownerId: adminId });
-    await seedProject({ key: 'OPS', name: 'Operations', ownerId: adminId });
+    const gfm = await seedProject({ key: 'GFM', name: 'Giper FM', ownerId: adminId });
+    const ops = await seedProject({ key: 'OPS', name: 'Operations', ownerId: adminId });
+    // The default /projects view (listProjectsForUser 'mine') shows a project
+    // only if the user is a Bitrix workgroup member OR has a task stake
+    // (creator/assignee/reviewer/…). Owner+member alone isn't enough — give
+    // the admin a task stake in each so they appear in the default list.
+    await seedTask({ projectId: gfm.id, creatorId: adminId });
+    await seedTask({ projectId: ops.id, creatorId: adminId });
     // archived
     const arch = await seedProject({
       key: 'OLD',
