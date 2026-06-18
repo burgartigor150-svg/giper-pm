@@ -111,6 +111,28 @@ export async function syncTaskChat(
   });
   if (!adminFallback) return;
 
+  // The task can be deleted (or recreated with a new id) by a concurrent
+  // ONTASKDELETE webhook or bulk sync while we paged through the chat above
+  // (im.dialog.messages.get can take many roundtrips). Re-check before
+  // writing — otherwise every comment.create blows up with
+  // Comment_taskId_fkey (P2003) and the whole batch is dropped ("no
+  // messages landed"). If the task is gone, a later sync re-lands these
+  // messages: writes are idempotent on externalId='chat:<id>'.
+  const taskStillExists = await prisma.task.findUnique({
+    where: { id: task.id },
+    select: { id: true },
+  });
+  if (!taskStillExists) {
+    // eslint-disable-next-line no-console
+    console.warn('bitrix24 syncChat: local task gone before write, skipping', {
+      taskId: task.id,
+      bitrixTaskId: task.bitrixTaskId,
+      chatId: task.chatId,
+      pending: all.length,
+    });
+    return;
+  }
+
   // 3. Upsert each message into Comment.
   for (const m of all) {
     stats.totalSeen++;
