@@ -14,6 +14,8 @@ type Status = BoardTask['status'];
 type Props = {
   projectKey: string;
   status: Status;
+  /** Display label. Falls back to the i18n status name for default columns. */
+  name?: string;
   tasks: BoardTask[];
   /** When provided, only first `cap` tasks render until the user expands. */
   cap?: number;
@@ -30,7 +32,7 @@ const COLUMN_BG: Record<Exclude<Status, 'CANCELED'>, string> = {
   DONE: 'border-green-200',
 };
 
-export function KanbanColumn({ projectKey, status, tasks, cap, wipLimit }: Props) {
+export function KanbanColumn({ projectKey, status, name, tasks, cap, wipLimit }: Props) {
   const tStatus = useT('tasks.status');
   const tBoard = useT('tasks.board');
 
@@ -60,7 +62,7 @@ export function KanbanColumn({ projectKey, status, tasks, cap, wipLimit }: Props
         )}
       >
         <span className={cn('font-medium', overLimit ? 'text-red-900' : '')}>
-          {tStatus(status)}
+          {name ?? tStatus(status)}
         </span>
         <span
           className={cn(

@@ -1,4 +1,4 @@
-import { prisma, type Prisma } from '@giper/db';
+import { prisma, type Prisma, type TaskStatus } from '@giper/db';
 import { DomainError } from '../errors';
 import { canViewProject, type SessionUser } from '../permissions';
 import { getTasksSpentMinutes } from '../time/getTaskSpent';
@@ -11,6 +11,32 @@ export type BoardFilter = {
   /** Tag IDs (from Tag model) — task must have ALL of them assigned. */
   tagIds?: string[];
 };
+
+/**
+ * A board column as the UI consumes it — backed by a first-class BoardColumn
+ * row when the project has them, else synthesized from {@link DEFAULT_BOARD_COLUMNS}.
+ */
+export type BoardColumnView = {
+  id: string;
+  name: string;
+  status: TaskStatus;
+  order: number;
+  wipLimit: number | null;
+};
+
+/**
+ * Default columns (Russian labels) for projects with no BoardColumn rows yet —
+ * e.g. created before the board migration, or before columns get seeded.
+ * CANCELED is intentionally absent: the board hides cancelled work.
+ */
+const DEFAULT_BOARD_COLUMNS: ReadonlyArray<{ status: TaskStatus; name: string }> = [
+  { status: 'BACKLOG', name: 'Бэклог' },
+  { status: 'TODO', name: 'К работе' },
+  { status: 'IN_PROGRESS', name: 'В работе' },
+  { status: 'REVIEW', name: 'На ревью' },
+  { status: 'BLOCKED', name: 'Заблокирована' },
+  { status: 'DONE', name: 'Готово' },
+];
 
 /** All non-CANCELED tasks for the project, no pagination — kanban shows everything. */
 export async function listTasksForBoard(
@@ -26,6 +52,10 @@ export async function listTasksForBoard(
       name: true,
       ownerId: true,
       wipLimits: true,
+      boardColumns: {
+        orderBy: { order: 'asc' },
+        select: { id: true, name: true, status: true, order: true, wipLimit: true },
+      },
       members: {
         select: {
           userId: true,
@@ -143,7 +173,37 @@ export async function listTasksForBoard(
     openBlockerCount: openBlockers.get(t.id) ?? 0,
   }));
 
-  return { project, tasks };
+  // Configurable board columns. Prefer the project's first-class BoardColumn
+  // rows; fall back to a synthesized default set for projects that predate the
+  // board migration. CANCELED is filtered out — the board hides cancelled work.
+  // A column's own wipLimit wins; otherwise fall back to the legacy per-status
+  // `wipLimits` JSON so existing limits keep working until they're migrated.
+  const wipJson = (project.wipLimits ?? null) as Partial<
+    Record<TaskStatus, number>
+  > | null;
+  const dbCols = project.boardColumns.filter((c) => c.status !== 'CANCELED');
+  const baseCols: BoardColumnView[] =
+    dbCols.length > 0
+      ? dbCols.map((c) => ({
+          id: c.id,
+          name: c.name,
+          status: c.status,
+          order: c.order,
+          wipLimit: c.wipLimit,
+        }))
+      : DEFAULT_BOARD_COLUMNS.map((c, i) => ({
+          id: `default-${c.status}`,
+          name: c.name,
+          status: c.status,
+          order: i,
+          wipLimit: null,
+        }));
+  const columns: BoardColumnView[] = baseCols.map((c) => ({
+    ...c,
+    wipLimit: c.wipLimit ?? wipJson?.[c.status] ?? null,
+  }));
+
+  return { project, tasks, columns };
 }
 
 /**

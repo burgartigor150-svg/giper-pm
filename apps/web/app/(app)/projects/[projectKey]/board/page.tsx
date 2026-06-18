@@ -56,7 +56,7 @@ export default async function ProjectBoardPage({
     throw e;
   }
 
-  const { project, tasks } = result;
+  const { project, tasks, columns } = result;
 
   // Members for filters: project members + owner (deduped by id).
   const memberMap = new Map<string, { id: string; name: string }>();
@@ -99,20 +99,7 @@ export default async function ProjectBoardPage({
       <KanbanBoard
         projectKey={project.key}
         initialTasks={tasks}
-        wipLimits={
-          (project.wipLimits ?? null) as Partial<
-            Record<
-              | 'BACKLOG'
-              | 'TODO'
-              | 'IN_PROGRESS'
-              | 'REVIEW'
-              | 'BLOCKED'
-              | 'DONE'
-              | 'CANCELED',
-              number
-            >
-          > | null
-        }
+        columns={columns}
       />
     </div>
   );
