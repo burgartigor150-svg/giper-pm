@@ -18,21 +18,29 @@ function TaskRow({ task }: { task: DashboardTask }) {
     <li>
       <Link
         href={`/projects/${task.project.key}/tasks/${task.number}`}
-        className="-mx-2 flex items-center gap-3 rounded-md px-2 py-2.5 transition-colors duration-150 hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="-mx-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md px-2 py-2.5 transition-colors duration-150 hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
-        <span className="font-mono text-xs text-muted-foreground tabular-nums">
+        <span className="shrink-0 font-mono text-xs text-muted-foreground tabular-nums">
           {task.project.key}-{task.number}
         </span>
-        <span className="flex-1 truncate text-sm">{task.title}</span>
-        <TaskStatusBadge status={task.status} />
-        <PriorityBadge priority={task.priority} />
-        <span className="w-20 text-right font-mono text-xs tabular-nums text-muted-foreground">
-          {task.dueDate ? (
-            new Date(task.dueDate).toLocaleDateString('ru-RU')
-          ) : (
-            <span aria-label="срок не задан">—</span>
-          )}
-        </span>
+        {/* min-w guards the title from collapsing to zero width when this row
+            sits in a narrow card (Due-today/Overdue in the xl:grid-cols-2
+            split): `truncate` makes the flex min-width 0, so without a floor
+            the fixed-size badges+date would steal all the space and the title
+            would vanish. The metadata cluster below is shrink-0 and wraps to a
+            second line instead. */}
+        <span className="min-w-[6rem] flex-1 truncate text-sm">{task.title}</span>
+        <div className="flex shrink-0 items-center gap-3">
+          <TaskStatusBadge status={task.status} />
+          <PriorityBadge priority={task.priority} />
+          <span className="w-20 text-right font-mono text-xs tabular-nums text-muted-foreground">
+            {task.dueDate ? (
+              new Date(task.dueDate).toLocaleDateString('ru-RU')
+            ) : (
+              <span aria-label="срок не задан">—</span>
+            )}
+          </span>
+        </div>
       </Link>
     </li>
   );

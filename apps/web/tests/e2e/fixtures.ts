@@ -174,6 +174,11 @@ export async function seedTask(opts: {
       creatorId: opts.creatorId,
       assigneeId: opts.assigneeId ?? null,
       status: opts.status ?? 'TODO',
+      // The kanban board + dashboard bucket/filter by internalStatus
+      // (separate from the Bitrix-mirror status). Keep them in sync for
+      // seeded tasks so column bucketing and the `internalStatus != CANCELED`
+      // board filter behave as the tests expect.
+      internalStatus: opts.status ?? 'TODO',
       priority: opts.priority ?? 'MEDIUM',
     },
   });

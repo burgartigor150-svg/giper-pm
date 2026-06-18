@@ -219,7 +219,15 @@ export function CommentForm({
 
   return (
     <form action={formAction} className="relative flex flex-col gap-2">
-      {showVisibilityToggle ? <input type="hidden" name="visibility" value={visibility} /> : null}
+      {/*
+        Always submit the visibility — even when the toggle is hidden (local,
+        non-mirror tasks). If omitted, the server schema defaults it to
+        EXTERNAL, so a local task's comment is saved EXTERNAL and then filtered
+        out of the only ("internal") timeline tab — the comment vanishes from
+        the UI. For local tasks `visibility` state defaults to INTERNAL, the
+        correct local-only channel; mirror tasks keep their toggle behaviour.
+      */}
+      <input type="hidden" name="visibility" value={visibility} />
       {/*
         Wire the body field via a hidden input so the value the server
         sees is the mention-resolved one ("@<userId>"), not the

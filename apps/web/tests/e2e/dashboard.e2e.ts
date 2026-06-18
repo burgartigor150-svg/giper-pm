@@ -83,6 +83,9 @@ test.describe('dashboard', () => {
 
   test('shows overdue task in section', async ({ page }) => {
     await page.goto('/dashboard');
+    // The Overdue card lives in the narrow xl:grid-cols-2 split; the task title
+    // must stay visible there (it used to collapse to zero width — see the
+    // TaskRow min-w guard in MyTasksSections).
     await expect(page.getByText('Overdue task').first()).toBeVisible();
   });
 

@@ -63,9 +63,7 @@ test.describe('tasks list & detail', () => {
   test('status filter narrows results', async ({ page }) => {
     await page.goto(`/projects/${PK}/list`);
     // First select is status filter (label "Статус:")
-    await page
-      .locator('label:has-text("Статус:") select')
-      .selectOption('IN_PROGRESS');
+    await page.locator('#task-filter-status').selectOption('IN_PROGRESS');
     await expect(page).toHaveURL(/status=IN_PROGRESS/);
   });
 
@@ -91,8 +89,8 @@ test.describe('tasks list & detail', () => {
     page,
   }) => {
     await page.goto(`/projects/${PK}/tasks/1`);
-    await expect(page.getByText('Статус', { exact: true })).toBeVisible();
-    await expect(page.getByText('Исполнитель', { exact: true })).toBeVisible();
+    await expect(page.getByText('Статус (внутренний)', { exact: true })).toBeVisible();
+    await expect(page.getByText('Назначены (роли)', { exact: true })).toBeVisible();
     await expect(page.getByText('Приоритет', { exact: true })).toBeVisible();
   });
 
@@ -127,22 +125,25 @@ test.describe('tasks list & detail', () => {
 
   test('sidebar status change persists', async ({ page }) => {
     await page.goto(`/projects/${PK}/tasks/4`);
-    // Sidebar selects: status, assignee, priority. Status is the first one.
+    // Native sidebar <select>s in order: internal status, priority.
+    // (Assignee/reviewer are UserPickers now, not selects.) Status is first.
     const selects = page.locator('main select');
     await selects.nth(0).selectOption('REVIEW');
     await page.waitForTimeout(1500);
+    // The first select drives the *internal* status (setInternalStatusAction),
+    // independent from the Bitrix-mirror Task.status.
     const t = await getPrisma().task.findFirst({
       where: { projectId, number: 4 },
-      select: { status: true },
+      select: { internalStatus: true },
     });
-    expect(t?.status).toBe('REVIEW');
+    expect(t?.internalStatus).toBe('REVIEW');
   });
 
   test('sidebar priority change persists', async ({ page }) => {
     await page.goto(`/projects/${PK}/tasks/5`);
     const selects = page.locator('main select');
-    // status (0), assignee (1), priority (2)
-    await selects.nth(2).selectOption('URGENT');
+    // Native sidebar <select>s: internal status (0), priority (1).
+    await selects.nth(1).selectOption('URGENT');
     await page.waitForTimeout(1500);
     const t = await getPrisma().task.findFirst({
       where: { projectId, number: 5 },
@@ -153,8 +154,25 @@ test.describe('tasks list & detail', () => {
 
   test('comment form submits a new comment', async ({ page }) => {
     await page.goto(`/projects/${PK}/tasks/6`);
-    await page.locator('textarea[name="body"]').fill('Hello from E2E');
+    // The visible textarea has no `name`; the submitted body rides a hidden
+    // <input name="body"> mirrored from React state. Fill, then assert that
+    // hidden input carries the value before submitting — guards the
+    // fill→submit React-propagation race.
+    const commentBox = page.getByPlaceholder(
+      'Нажмите @ или + чтобы упомянуть человека',
+    );
+    await commentBox.fill('Hello from E2E');
+    await expect(page.locator('input[name="body"]')).toHaveValue(
+      'Hello from E2E',
+    );
     await page.getByRole('button', { name: 'Отправить' }).click();
+    // The form clears the textarea ONLY on a successful submit, so waiting for
+    // the clear is the reliable signal that the Server Action finished and the
+    // timeline revalidated. Asserting getByText('Hello from E2E') first would
+    // match the textarea's own value and race ahead of persistence (count 0).
+    await expect(commentBox).toHaveValue('', { timeout: 15_000 });
+    // Textarea is empty now, so this matches the rendered comment in the
+    // timeline (a local task's default tab shows INTERNAL comments).
     await expect(page.getByText('Hello from E2E')).toBeVisible();
     const comments = await getPrisma().comment.count({
       where: { task: { projectId, number: 6 } },
