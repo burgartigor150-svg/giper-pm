@@ -359,6 +359,8 @@ model Project {
   documents       Document[]
   /// Kaiten-style reusable card templates for this project.
   cardTemplates   CardTemplate[]
+  /// Kaiten-style recurring cards (auto-created on a schedule).
+  recurringTasks  RecurringTask[]
 
   @@unique([externalSource, externalId])
   @@index([status])
@@ -385,6 +387,36 @@ model CardTemplate {
   updatedAt    DateTime     @updatedAt
 
   @@index([projectId, order])
+}
+
+/// Kaiten-style recurring card: a blueprint that auto-creates a task every
+/// `intervalDays` days. The /api/cron/recurring scanner materializes due rows
+/// (nextRunAt <= now) and advances nextRunAt. Recurrence is a simple day
+/// interval (covers daily/weekly/biweekly) — not full RRULE yet.
+model RecurringTask {
+  id           String       @id @default(cuid())
+  projectId    String
+  project      Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  /// Card fields applied to each created task.
+  title        String
+  description  String       @default("")
+  type         TaskType     @default(TASK)
+  priority     TaskPriority @default(MEDIUM)
+  /// Optional default assignee for the created card.
+  assigneeId   String?
+  /// Recurrence cadence in days (>= 1).
+  intervalDays Int
+  /// When the next card is due to be created.
+  nextRunAt    DateTime
+  /// When the last card was actually created (null until first run).
+  lastRunAt    DateTime?
+  active       Boolean      @default(true)
+  createdById  String?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  @@index([active, nextRunAt])
+  @@index([projectId])
 }
 
 /// A Telegram group or channel whose messages PM wants to turn into tasks.
