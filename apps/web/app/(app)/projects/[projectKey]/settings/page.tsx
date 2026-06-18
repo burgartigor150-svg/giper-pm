@@ -10,8 +10,10 @@ import { MemberSearch } from '@/components/domain/MemberSearch';
 import { MemberRow } from '@/components/domain/MemberRow';
 import { BoardColumnsForm } from '@/components/domain/BoardColumnsForm';
 import { SwimlanesForm } from '@/components/domain/SwimlanesForm';
+import { CustomFieldsForm } from '@/components/domain/CustomFieldsForm';
 import { getBoardColumns } from '@/lib/board/getBoardColumns';
 import { getBoardSwimlanes } from '@/lib/board/getBoardSwimlanes';
+import { getCustomFields } from '@/lib/board/getCustomFields';
 import { PublishToBitrixButton } from '@/components/domain/PublishToBitrixButton';
 
 export default async function ProjectSettingsPage({
@@ -44,6 +46,7 @@ export default async function ProjectSettingsPage({
 
   const boardColumns = await getBoardColumns(project.id);
   const boardSwimlanes = await getBoardSwimlanes(project.id);
+  const customFields = await getCustomFields(project.id);
   const projectMirrored =
     project.externalSource === 'bitrix24' && !!project.externalId;
 
@@ -94,6 +97,15 @@ export default async function ProjectSettingsPage({
         </CardHeader>
         <CardContent>
           <SwimlanesForm projectId={project.id} initial={boardSwimlanes} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Поля задач</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <CustomFieldsForm projectId={project.id} initial={customFields} />
         </CardContent>
       </Card>
 
