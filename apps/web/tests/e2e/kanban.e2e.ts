@@ -133,4 +133,14 @@ test.describe('kanban board', () => {
     // The card stays visible (now inside its lane band).
     await expect(page.getByText('Todo item')).toBeVisible();
   });
+
+  test('metrics page renders with charts', async ({ page }) => {
+    await page.goto(`/projects/${PK}/metrics`);
+    await expect(page.getByRole('heading', { name: 'Метрики' })).toBeVisible();
+    await expect(page.getByText('Lead time (медиана)')).toBeVisible();
+    // Confirms the client chart component mounted without crashing.
+    await expect(
+      page.getByText('Пропускная способность (задач/неделю)'),
+    ).toBeVisible();
+  });
 });
