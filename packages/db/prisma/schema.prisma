@@ -348,6 +348,9 @@ model Project {
   meetings      Meeting[]
   /// Lightweight calendar entries scoped to this project.
   calendarEvents CalendarEvent[]
+  /// Kaiten-style configurable board: columns + swimlanes (Phase 0).
+  boardColumns   BoardColumn[]
+  boardSwimlanes BoardSwimlane[]
 
   @@unique([externalSource, externalId])
   @@index([status])
@@ -685,6 +688,16 @@ model Task {
   // the mirror so non-mirrored tasks behave the old way.
   internalStatus  TaskStatus  @default(BACKLOG)
 
+  // --- Kaiten-style board placement (Phase 0). Nullable during rollout,
+  // backfilled from internalStatus. `columnId` is the configurable board
+  // column the card sits in; `boardRank` is a fractional sort key for stable
+  // drag-ordering within a (column, swimlane) cell.
+  columnId      String?
+  column        BoardColumn?   @relation(fields: [columnId], references: [id], onDelete: SetNull)
+  swimlaneId    String?
+  swimlane      BoardSwimlane? @relation(fields: [swimlaneId], references: [id], onDelete: SetNull)
+  boardRank     String?
+
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
 
@@ -707,6 +720,45 @@ model Task {
   @@index([projectId, status])
   @@index([projectId, internalStatus])
   @@index([dueDate])
+  @@index([columnId, swimlaneId])
+}
+
+/// Kaiten-style configurable kanban column for a project board. Maps to the
+/// internal task track (one column per TaskStatus to start) so reports, the
+/// Bitrix mirror, and existing status logic keep working while the board
+/// becomes user-orderable with per-column WIP limits. (Phase 0)
+model BoardColumn {
+  id        String     @id @default(cuid())
+  projectId String
+  project   Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name      String
+  /// The internal-status bucket this column represents.
+  status    TaskStatus
+  /// Left → right display order.
+  order     Int
+  /// WIP limit on card count. null = no limit. Phase 1 adds size-based + hard enforcement.
+  wipLimit  Int?
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  tasks     Task[]
+
+  @@unique([projectId, status])
+  @@index([projectId, order])
+}
+
+/// Horizontal swimlane ("дорожка") on a project board. (Phase 0)
+model BoardSwimlane {
+  id        String   @id @default(cuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name      String
+  order     Int
+  wipLimit  Int?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  tasks     Task[]
+
+  @@index([projectId, order])
 }
 
 // Linked-list of small actionable items inside a task. A task may have

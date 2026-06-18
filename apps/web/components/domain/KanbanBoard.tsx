@@ -13,7 +13,7 @@ import {
   type DragStartEvent,
 } from '@dnd-kit/core';
 import { sortableKeyboardCoordinates, arrayMove } from '@dnd-kit/sortable';
-import type { BoardTask } from '@/lib/tasks';
+import type { BoardTask, BoardColumnView } from '@/lib/tasks';
 import { changeStatusAction } from '@/actions/tasks';
 import { setInternalStatusAction } from '@/actions/assignments';
 import { useT } from '@/lib/useT';
@@ -22,26 +22,21 @@ import { KanbanColumn } from './KanbanColumn';
 
 type Status = BoardTask['status'];
 
-const COLUMNS: Exclude<Status, 'CANCELED'>[] = [
-  'BACKLOG',
-  'TODO',
-  'IN_PROGRESS',
-  'REVIEW',
-  'BLOCKED',
-  'DONE',
-];
-
 const COLUMN_CAP = 50;
 const TOTAL_THRESHOLD = 200;
 
 type Props = {
   projectKey: string;
   initialTasks: BoardTask[];
-  /** Per-status WIP limits. Missing keys = no limit. */
-  wipLimits?: Partial<Record<Status, number>> | null;
+  /**
+   * Board columns in display order — first-class BoardColumn rows (or the
+   * synthesized default set) from listTasksForBoard, each carrying its own
+   * resolved WIP limit.
+   */
+  columns: BoardColumnView[];
 };
 
-export function KanbanBoard({ projectKey, initialTasks, wipLimits }: Props) {
+export function KanbanBoard({ projectKey, initialTasks, columns }: Props) {
   const router = useRouter();
   const tBoard = useT('tasks.board');
 
@@ -63,13 +58,13 @@ export function KanbanBoard({ projectKey, initialTasks, wipLimits }: Props) {
   // Bitrix.
   const byStatus = useMemo(() => {
     const map = new Map<Status, BoardTask[]>();
-    for (const c of COLUMNS) map.set(c, []);
+    for (const c of columns) map.set(c.status, []);
     for (const t of tasks) {
       const arr = map.get(t.internalStatus);
       if (arr) arr.push(t);
     }
     return map;
-  }, [tasks]);
+  }, [tasks, columns]);
 
   const useCap = tasks.length > TOTAL_THRESHOLD;
   const activeTask = activeId ? tasks.find((t) => t.id === activeId) ?? null : null;
@@ -161,14 +156,15 @@ export function KanbanBoard({ projectKey, initialTasks, wipLimits }: Props) {
         onDragCancel={() => setActiveId(null)}
       >
         <div className="flex gap-3 overflow-x-auto pb-4">
-          {COLUMNS.map((status) => (
+          {columns.map((col) => (
             <KanbanColumn
-              key={status}
+              key={col.id}
               projectKey={projectKey}
-              status={status}
-              tasks={byStatus.get(status) ?? []}
+              status={col.status}
+              name={col.name}
+              tasks={byStatus.get(col.status) ?? []}
               cap={useCap ? COLUMN_CAP : undefined}
-              wipLimit={wipLimits?.[status] ?? null}
+              wipLimit={col.wipLimit}
             />
           ))}
         </div>
