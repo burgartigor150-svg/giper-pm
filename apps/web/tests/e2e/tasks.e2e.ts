@@ -237,6 +237,6 @@ test.describe('tasks list & detail', () => {
     await page.goto(`/projects/${PK}/docs`);
     await expect(page.getByText('Заметка')).toBeVisible();
     await page.goto(`/projects/${PK}/docs/${doc.id}`);
-    await expect(page.getByDisplayValue('Заметка')).toBeVisible();
+    await expect(page.getByPlaceholder('Заголовок')).toHaveValue('Заметка');
   });
 });
