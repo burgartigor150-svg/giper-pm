@@ -391,10 +391,37 @@ model Project {
   cardTemplates   CardTemplate[]
   /// Kaiten-style recurring cards (auto-created on a schedule).
   recurringTasks  RecurringTask[]
+  /// Outgoing webhooks fired on card/board events in this project.
+  webhooks        Webhook[]
 
   @@unique([externalSource, externalId])
   @@index([status])
   @@index([ownerId])
+}
+
+/// Kaiten-style outgoing webhook: POSTs a JSON event to an external URL when
+/// a subscribed card/board event fires in the project. Payloads are signed
+/// with HMAC-SHA256 over `secret`. `events` holds subscribed event-type
+/// strings (e.g. "task.created", "card.enters_column").
+model Webhook {
+  id          String   @id @default(cuid())
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  url         String
+  /// Shared secret for the X-Giper-Signature HMAC header.
+  secret      String
+  /// Subscribed event types. Empty = subscribed to nothing (inert).
+  events      String[]
+  active      Boolean  @default(true)
+  /// Lightweight delivery observability — last attempt outcome.
+  lastStatus  Int?
+  lastError   String?
+  lastFiredAt DateTime?
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([projectId, active])
 }
 
 /// Kaiten-style card template: a reusable blueprint for creating tasks with

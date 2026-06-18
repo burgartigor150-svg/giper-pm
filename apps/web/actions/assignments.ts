@@ -9,6 +9,7 @@ import {
 } from '@/lib/notifications/createNotifications';
 import { autoUnblockDependents } from '@/lib/tasks/autoTransitions';
 import { runColumnEnterAutomations } from '@/lib/automations/runColumnEnterAutomations';
+import { dispatchWebhooks } from '@/lib/webhooks/dispatchWebhooks';
 import { canManageAssignments } from '@/lib/permissions';
 
 type ActionResult<T = unknown> =
@@ -174,11 +175,14 @@ export async function setInternalStatusAction(
   const task = await prisma.task.findUnique({
     where: { id: taskId },
     select: {
+      number: true,
+      title: true,
+      projectId: true,
       creatorId: true,
       assigneeId: true,
       externalSource: true,
       project: {
-        select: { ownerId: true, members: { select: { userId: true, role: true } } },
+        select: { key: true, ownerId: true, members: { select: { userId: true, role: true } } },
       },
     },
   });
@@ -208,6 +212,11 @@ export async function setInternalStatusAction(
   }
   // Kaiten automations: run CARD_ENTERS_COLUMN rules best-effort (never throws).
   await runColumnEnterAutomations(taskId, rawStatus);
+  // Kaiten outgoing webhooks: fire 'card.moved' best-effort.
+  await dispatchWebhooks(task.projectId, 'card.moved', {
+    project: { id: task.projectId, key: task.project.key },
+    task: { id: taskId, number: task.number, title: task.title, toStatus: rawStatus },
+  });
   revalidatePath(`/projects/${projectKey}/tasks/${taskNumber}`);
   revalidatePath(`/projects/${projectKey}/board`);
   return { ok: true };
