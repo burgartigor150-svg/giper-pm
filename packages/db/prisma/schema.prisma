@@ -351,6 +351,8 @@ model Project {
   /// Kaiten-style configurable board: columns + swimlanes (Phase 0).
   boardColumns   BoardColumn[]
   boardSwimlanes BoardSwimlane[]
+  /// Kaiten-style custom fields defined for this project (Phase 3).
+  customFields   CustomFieldDefinition[]
 
   @@unique([externalSource, externalId])
   @@index([status])
@@ -714,6 +716,8 @@ model Task {
   // Native tag system (separate from the legacy `tags String[]` mirror
   // of Bitrix24 TAGS payloads above).
   taskTags      TaskTag[]
+  /// Custom field values set on this task (Phase 3).
+  customFieldValues CustomFieldValue[]
 
   @@unique([projectId, number])
   @@index([assigneeId, status])
@@ -1549,4 +1553,47 @@ enum EventResponse {
   ACCEPTED
   DECLINED
   TENTATIVE
+}
+
+/// Kaiten-style custom fields (Phase 3): per-project field definitions and
+/// per-task values. Additive — no existing data to backfill.
+enum CustomFieldType {
+  TEXT
+  NUMBER
+  DATE
+  CHECKBOX
+  SELECT
+  MULTI_SELECT
+  URL
+}
+
+model CustomFieldDefinition {
+  id        String          @id @default(cuid())
+  projectId String
+  project   Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name      String
+  type      CustomFieldType
+  /// SELECT / MULTI_SELECT options (JSON array of strings); null for others.
+  options   Json?
+  /// Display order within the project.
+  order     Int
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+  values    CustomFieldValue[]
+
+  @@index([projectId, order])
+}
+
+model CustomFieldValue {
+  id      String                @id @default(cuid())
+  fieldId String
+  field   CustomFieldDefinition @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+  taskId  String
+  task    Task                  @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  /// Stringified value: raw text/number/ISO-date/url, "true"/"false" for
+  /// CHECKBOX, or a JSON string array for MULTI_SELECT.
+  value   String
+
+  @@unique([fieldId, taskId])
+  @@index([taskId])
 }
