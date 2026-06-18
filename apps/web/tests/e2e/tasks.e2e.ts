@@ -154,13 +154,10 @@ test.describe('tasks list & detail', () => {
 
   test('comment form submits a new comment', async ({ page }) => {
     await page.goto(`/projects/${PK}/tasks/6`);
-    // The visible comment textarea has no `name` — the body that's actually
-    // submitted rides a hidden <input name="body"> mirrored from React state
-    // (`submittedBody`). So fill the textarea, then assert THAT hidden input
-    // carries the value before submitting. Asserting the textarea DOM only
-    // proves Playwright set the DOM value, not that React's onChange has
-    // propagated to the hidden field — submitting early serializes an empty
-    // body and Zod's min(1) rejects it (hydration race → no comment created).
+    // The visible textarea has no `name`; the submitted body rides a hidden
+    // <input name="body"> mirrored from React state. Fill, then assert that
+    // hidden input carries the value before submitting — guards the
+    // fill→submit React-propagation race.
     const commentBox = page.getByPlaceholder(
       'Нажмите @ или + чтобы упомянуть человека',
     );
@@ -169,6 +166,13 @@ test.describe('tasks list & detail', () => {
       'Hello from E2E',
     );
     await page.getByRole('button', { name: 'Отправить' }).click();
+    // The form clears the textarea ONLY on a successful submit, so waiting for
+    // the clear is the reliable signal that the Server Action finished and the
+    // timeline revalidated. Asserting getByText('Hello from E2E') first would
+    // match the textarea's own value and race ahead of persistence (count 0).
+    await expect(commentBox).toHaveValue('', { timeout: 15_000 });
+    // Textarea is empty now, so this matches the rendered comment in the
+    // timeline (a local task's default tab shows INTERNAL comments).
     await expect(page.getByText('Hello from E2E')).toBeVisible();
     const comments = await getPrisma().comment.count({
       where: { task: { projectId, number: 6 } },
