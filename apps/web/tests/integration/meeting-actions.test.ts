@@ -437,9 +437,12 @@ describe('joinMeetingAsGuestAction', () => {
 
   it('usedCount increments per claim', async () => {
     const { token } = await makeInvite();
-    await joinMeetingAsGuestAction({ token, displayName: 'A' });
-    await joinMeetingAsGuestAction({ token, displayName: 'B' });
-    await joinMeetingAsGuestAction({ token, displayName: 'C' });
+    // displayName must be >= 2 chars — joinMeetingAsGuestAction rejects
+    // shorter names before the atomic claim, so the previous single-letter
+    // names ('A'/'B'/'C') were refused and never incremented usedCount.
+    await joinMeetingAsGuestAction({ token, displayName: 'Guest A' });
+    await joinMeetingAsGuestAction({ token, displayName: 'Guest B' });
+    await joinMeetingAsGuestAction({ token, displayName: 'Guest C' });
     const row = await prisma.meetingInvite.findUnique({ where: { token } });
     expect(row?.usedCount).toBe(3);
   });
