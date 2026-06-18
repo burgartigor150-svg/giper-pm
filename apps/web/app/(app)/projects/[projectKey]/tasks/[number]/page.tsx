@@ -18,6 +18,7 @@ import { InlineDescription } from '@/components/domain/InlineDescription';
 import { TaskSidebar } from '@/components/domain/TaskSidebar';
 import { TaskCustomFields } from '@/components/domain/TaskCustomFields';
 import { StoryPointsField } from '@/components/domain/StoryPointsField';
+import { CoverField } from '@/components/domain/CoverField';
 import { TaskTimeline } from '@/components/domain/TaskTimeline';
 import { LogTaskHoursForm } from '@/components/domain/LogTaskHoursForm';
 import { listTaskTimeEntries } from '@/actions/time';
@@ -580,6 +581,18 @@ export default async function TaskDetailPage({ params }: { params: Params }) {
                 projectKey={task.project.key}
                 taskNumber={task.number}
                 initial={task.storyPoints}
+                canEdit={canEdit}
+              />
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="py-3">
+              <CoverField
+                taskId={task.id}
+                projectKey={task.project.key}
+                taskNumber={task.number}
+                coverImageKey={task.coverImageKey}
+                coverColor={task.coverColor}
                 canEdit={canEdit}
               />
             </CardContent>

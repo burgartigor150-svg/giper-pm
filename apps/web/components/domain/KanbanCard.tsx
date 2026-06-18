@@ -59,6 +59,25 @@ export function KanbanCard({ projectKey, task, isOverlay = false }: Props) {
         isOverlay ? 'shadow-lg ring-2 ring-ring' : 'hover:shadow-md',
       )}
     >
+      {task.coverImageKey ? (
+        <div className="-mx-3 -mt-3 mb-2 overflow-hidden rounded-t-md">
+          {/* Served via our perm-checked proxy, not a signed S3 URL. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={`/api/covers/${task.id}`}
+            alt=""
+            className="h-24 w-full object-cover"
+            loading="lazy"
+          />
+        </div>
+      ) : task.coverColor ? (
+        <div
+          className="-mx-3 -mt-3 mb-2 h-2 rounded-t-md"
+          style={{ backgroundColor: task.coverColor }}
+          aria-hidden
+        />
+      ) : null}
+
       <div className="flex items-start gap-2">
         <span
           className={cn(

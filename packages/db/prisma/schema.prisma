@@ -709,6 +709,12 @@ model Task {
   subColumnId   String?
   subColumn     BoardSubColumn? @relation(fields: [subColumnId], references: [id], onDelete: SetNull)
 
+  /// Kaiten-style card cover. Either an uploaded image (S3 object key,
+  /// served via /api/covers/[taskId]) or a solid colour (hex). At most one
+  /// is set; both null = no cover (card renders as before).
+  coverImageKey String?
+  coverColor    String?
+
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
 

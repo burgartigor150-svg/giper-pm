@@ -167,6 +167,8 @@ export async function listTasksForBoard(
       type: true,
       estimateHours: true,
       storyPoints: true,
+      coverImageKey: true,
+      coverColor: true,
       tags: true,
       externalSource: true,
       assignee: { select: { id: true, name: true, image: true } },
