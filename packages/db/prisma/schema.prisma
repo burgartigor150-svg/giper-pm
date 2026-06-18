@@ -701,6 +701,9 @@ model Task {
   swimlaneId    String?
   swimlane      BoardSwimlane? @relation(fields: [swimlaneId], references: [id], onDelete: SetNull)
   boardRank     String?
+  /// Kaiten sub-column (sub-stage) the card sits in within its column.
+  subColumnId   String?
+  subColumn     BoardSubColumn? @relation(fields: [subColumnId], references: [id], onDelete: SetNull)
 
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
@@ -747,9 +750,30 @@ model BoardColumn {
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
   tasks     Task[]
+  subColumns BoardSubColumn[]
 
   @@unique([projectId, status])
   @@index([projectId, order])
+}
+
+/// Kaiten-style sub-column (sub-stage) inside a BoardColumn. A column with one
+/// or more sub-columns splits into ordered child lanes; a card then sits in a
+/// leaf sub-column. Columns with no sub-columns behave exactly as before.
+model BoardSubColumn {
+  id        String      @id @default(cuid())
+  columnId  String
+  column    BoardColumn @relation(fields: [columnId], references: [id], onDelete: Cascade)
+  name      String
+  /// Left → right display order within the parent column.
+  order     Int
+  /// WIP limit on card count for this sub-column. null = no limit.
+  wipLimit  Int?
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  tasks     Task[]
+
+  @@unique([columnId, name])
+  @@index([columnId, order])
 }
 
 /// Horizontal swimlane ("дорожка") on a project board. (Phase 0)

@@ -16,12 +16,23 @@ export type BoardFilter = {
  * A board column as the UI consumes it — backed by a first-class BoardColumn
  * row when the project has them, else synthesized from {@link DEFAULT_BOARD_COLUMNS}.
  */
+/** A sub-column (sub-stage) inside a board column. */
+export type BoardSubColumnView = {
+  id: string;
+  columnId: string;
+  name: string;
+  order: number;
+  wipLimit: number | null;
+};
+
 export type BoardColumnView = {
   id: string;
   name: string;
   status: TaskStatus;
   order: number;
   wipLimit: number | null;
+  /** Sub-columns under this column; [] = none (column behaves as before). */
+  subColumns: BoardSubColumnView[];
 };
 
 /**
@@ -151,6 +162,7 @@ export async function listTasksForBoard(
       status: true,
       internalStatus: true,
       swimlaneId: true,
+      subColumnId: true,
       priority: true,
       type: true,
       estimateHours: true,
@@ -220,6 +232,7 @@ export async function listTasksForBoard(
           status: c.status,
           order: c.order,
           wipLimit: c.wipLimit,
+          subColumns: [],
         }))
       : DEFAULT_BOARD_COLUMNS.map((c, i) => ({
           id: `default-${c.status}`,
@@ -227,10 +240,32 @@ export async function listTasksForBoard(
           status: c.status,
           order: i,
           wipLimit: null,
+          subColumns: [],
         }));
+
+  // Sub-columns (sub-stages) are optional, load fault-tolerantly, grouped under
+  // their parent column. Empty for every column until an admin adds them → the
+  // board renders exactly as before.
+  const subColsByColumn = new Map<string, BoardSubColumnView[]>();
+  try {
+    const subs = await prisma.boardSubColumn.findMany({
+      where: { column: { projectId: project.id } },
+      orderBy: { order: 'asc' },
+      select: { id: true, columnId: true, name: true, order: true, wipLimit: true },
+    });
+    for (const s of subs) {
+      const arr = subColsByColumn.get(s.columnId);
+      if (arr) arr.push(s);
+      else subColsByColumn.set(s.columnId, [s]);
+    }
+  } catch (e) {
+    console.warn('listTasksForBoard: sub-columns unavailable', e);
+  }
+
   const columns: BoardColumnView[] = baseCols.map((c) => ({
     ...c,
     wipLimit: c.wipLimit ?? wipJson?.[c.status] ?? null,
+    subColumns: subColsByColumn.get(c.id) ?? [],
   }));
 
   // Swimlanes are optional: a project with none renders as a single implicit

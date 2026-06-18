@@ -16,7 +16,7 @@ import { sortableKeyboardCoordinates, arrayMove } from '@dnd-kit/sortable';
 import type { BoardTask, BoardColumnView, BoardSwimlaneView } from '@/lib/tasks';
 import { changeStatusAction } from '@/actions/tasks';
 import { setInternalStatusAction } from '@/actions/assignments';
-import { setTaskSwimlaneAction } from '@/actions/board';
+import { setTaskSwimlaneAction, setTaskSubColumnAction } from '@/actions/board';
 import { useT } from '@/lib/useT';
 import { KanbanCard } from './KanbanCard';
 import { KanbanColumn } from './KanbanColumn';
@@ -38,7 +38,7 @@ type Props = {
 };
 
 /** A drop target resolved from a droppable/card id: which column + which lane. */
-type DropTarget = { status: Status; laneKey: string };
+type DropTarget = { status: Status; laneKey: string; subColumnId?: string };
 
 export function KanbanBoard({
   projectKey,
@@ -98,6 +98,14 @@ export function KanbanBoard({
   );
 
   function findTarget(id: string): DropTarget | null {
+    // Sub-column droppable: `subcol-<laneKey>-<STATUS>-<subColumnId>`. None of
+    // laneKey (cuid / NO_LANE), STATUS (A-Z_) or subColumnId (cuid) contain a
+    // dash, so split('-') yields exactly [laneKey, status, subColumnId].
+    if (id.startsWith('subcol-')) {
+      const parts = id.slice('subcol-'.length).split('-');
+      if (parts.length !== 3) return null;
+      return { laneKey: parts[0]!, status: parts[1] as Status, subColumnId: parts[2] };
+    }
     // Band droppable: `cell-<laneKey>-<STATUS>` (laneKey is a cuid or NO_LANE,
     // status has no dash — split on the last dash).
     if (id.startsWith('cell-')) {
@@ -112,7 +120,11 @@ export function KanbanBoard({
     }
     const t = tasks.find((tt) => tt.id === id);
     if (!t) return null;
-    return { laneKey: t.swimlaneId ?? NO_LANE, status: t.internalStatus };
+    return {
+      laneKey: t.swimlaneId ?? NO_LANE,
+      status: t.internalStatus,
+      subColumnId: t.subColumnId ?? undefined,
+    };
   }
 
   function handleDragStart(e: DragStartEvent) {
@@ -132,8 +144,9 @@ export function KanbanBoard({
     const taskId = String(active.id);
     const sameStatus = from.status === to.status;
     const sameLane = from.laneKey === to.laneKey;
+    const sameSubColumn = (from.subColumnId ?? null) === (to.subColumnId ?? null);
 
-    if (sameStatus && sameLane) {
+    if (sameStatus && sameLane && sameSubColumn) {
       // Reorder within the same cell — local only, not persisted.
       const arr = hasLanes
         ? byLaneStatus.get(`${from.laneKey}::${from.status}`) ?? []
@@ -151,6 +164,7 @@ export function KanbanBoard({
     const prevSnapshot = tasks;
     const newStatus = to.status;
     const newSwimlaneId = to.laneKey === NO_LANE ? null : to.laneKey;
+    const newSubColumnId = to.subColumnId ?? null;
 
     // Hard WIP enforcement (Kaiten). Column WIP is board-wide (per status); a
     // lane move also checks the destination lane's own WIP. Refuse → card stays.
@@ -170,6 +184,16 @@ export function KanbanBoard({
         return;
       }
     }
+    if (!sameSubColumn && newSubColumnId) {
+      const targetSub = columns
+        .find((c) => c.status === newStatus)
+        ?.subColumns.find((s) => s.id === newSubColumnId);
+      const subCount = tasks.filter((t) => t.subColumnId === newSubColumnId).length;
+      if (targetSub?.wipLimit != null && subCount >= targetSub.wipLimit) {
+        setError(`Подколонка «${targetSub.name}» заполнена (WIP-лимит ${targetSub.wipLimit}).`);
+        return;
+      }
+    }
 
     const moved = prevSnapshot.find((t) => t.id === taskId);
     if (!moved) return;
@@ -178,7 +202,9 @@ export function KanbanBoard({
     // `status` is owned by Bitrix and only updated by the sync round-trip.
     setTasks((cur) =>
       cur.map((t) =>
-        t.id === taskId ? { ...t, internalStatus: newStatus, swimlaneId: newSwimlaneId } : t,
+        t.id === taskId
+          ? { ...t, internalStatus: newStatus, swimlaneId: newSwimlaneId, subColumnId: newSubColumnId }
+          : t,
       ),
     );
 
@@ -196,6 +222,12 @@ export function KanbanBoard({
       }
       if (ok && !sameLane) {
         const res = await setTaskSwimlaneAction(taskId, newSwimlaneId);
+        ok = res.ok;
+      }
+      // Sub-column write runs AFTER the status write, so the action validates
+      // the leaf against the now-current internalStatus.
+      if (ok && !sameSubColumn) {
+        const res = await setTaskSubColumnAction(taskId, newSubColumnId);
         ok = res.ok;
       }
       if (!ok) {
@@ -255,6 +287,7 @@ export function KanbanBoard({
                         tasks={byLaneStatus.get(`${lane.id}::${col.status}`) ?? []}
                         cap={useCap ? COLUMN_CAP : undefined}
                         wipLimit={col.wipLimit}
+                        subColumns={col.subColumns}
                       />
                     ))}
                   </div>
@@ -273,6 +306,7 @@ export function KanbanBoard({
                 tasks={byStatus.get(col.status) ?? []}
                 cap={useCap ? COLUMN_CAP : undefined}
                 wipLimit={col.wipLimit}
+                subColumns={col.subColumns}
               />
             ))}
           </div>

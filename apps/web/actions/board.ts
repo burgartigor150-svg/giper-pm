@@ -265,3 +265,170 @@ export async function setTaskSwimlaneAction(
   revalidatePath(`/projects/${task.project.key}/board`);
   return { ok: true };
 }
+
+export type BoardSubColumnInput = {
+  id: string | null;
+  name: string;
+  wipLimit: number | null;
+  order: number;
+};
+
+/**
+ * Reconcile a board column's sub-columns (create/update/delete). Sub-column
+ * names are unique within the column. ADMIN / owner / LEAD of the column's
+ * project only. Deleting a sub-column returns its cards to column-level
+ * placement via the FK (onDelete: SetNull).
+ */
+export async function updateBoardSubColumnsAction(
+  columnId: string,
+  subColumns: BoardSubColumnInput[],
+): Promise<ActionResult> {
+  const me = await requireAuth();
+  const column = await prisma.boardColumn.findUnique({
+    where: { id: columnId },
+    select: {
+      project: {
+        select: {
+          key: true,
+          ownerId: true,
+          members: { select: { userId: true, role: true } },
+        },
+      },
+    },
+  });
+  if (!column) {
+    return { ok: false, error: { code: 'NOT_FOUND', message: 'Колонка не найдена' } };
+  }
+  if (!canEditProject({ id: me.id, role: me.role }, column.project)) {
+    return {
+      ok: false,
+      error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' },
+    };
+  }
+
+  const existing = await prisma.boardSubColumn.findMany({
+    where: { columnId },
+    select: { id: true },
+  });
+  const existingIds = new Set(existing.map((s) => s.id));
+  const seenNames = new Set<string>();
+  const clean: BoardSubColumnInput[] = [];
+  const keptIds = new Set<string>();
+  for (const s of subColumns) {
+    const name = (s.name ?? '').trim();
+    if (name.length === 0 || name.length > MAX_NAME) {
+      return {
+        ok: false,
+        error: { code: 'VALIDATION', message: `Название подколонки: 1–${MAX_NAME} символов` },
+      };
+    }
+    const lower = name.toLowerCase();
+    if (seenNames.has(lower)) {
+      return { ok: false, error: { code: 'VALIDATION', message: `Дубликат подколонки «${name}»` } };
+    }
+    seenNames.add(lower);
+    let wipLimit: number | null = null;
+    if (s.wipLimit != null) {
+      const n = Math.floor(Number(s.wipLimit));
+      if (Number.isFinite(n) && n > 0 && n <= MAX_WIP) wipLimit = n;
+    }
+    const id = s.id && existingIds.has(s.id) ? s.id : null;
+    if (id) keptIds.add(id);
+    const order = Number.isFinite(s.order) ? Math.floor(Number(s.order)) : 0;
+    clean.push({ id, name, wipLimit, order });
+  }
+  const toDelete = existing.filter((e) => !keptIds.has(e.id)).map((e) => e.id);
+
+  try {
+    await prisma.$transaction([
+      ...clean.map((s) =>
+        s.id
+          ? prisma.boardSubColumn.update({
+              where: { id: s.id },
+              data: { name: s.name, order: s.order, wipLimit: s.wipLimit },
+            })
+          : prisma.boardSubColumn.create({
+              data: { columnId, name: s.name, order: s.order, wipLimit: s.wipLimit },
+            }),
+      ),
+      ...(toDelete.length > 0
+        ? [prisma.boardSubColumn.deleteMany({ where: { id: { in: toDelete } } })]
+        : []),
+    ]);
+  } catch (e) {
+    console.error('updateBoardSubColumnsAction', e);
+    return { ok: false, error: { code: 'INTERNAL', message: 'Не удалось сохранить подколонки' } };
+  }
+
+  revalidatePath(`/projects/${column.project.key}/board`);
+  revalidatePath(`/projects/${column.project.key}/settings`);
+  return { ok: true };
+}
+
+/**
+ * Move a task into a sub-column (or clear with null). Called by the board after
+ * the status write, so the leaf stays consistent: a non-null sub-column must
+ * belong to the same project AND its parent column's status must equal the
+ * task's current internalStatus. Permissioned like a board move.
+ */
+export async function setTaskSubColumnAction(
+  taskId: string,
+  subColumnId: string | null,
+): Promise<ActionResult> {
+  const me = await requireAuth();
+  const task = await prisma.task.findUnique({
+    where: { id: taskId },
+    select: {
+      projectId: true,
+      number: true,
+      internalStatus: true,
+      assigneeId: true,
+      creatorId: true,
+      reviewerId: true,
+      project: {
+        select: {
+          key: true,
+          ownerId: true,
+          members: { select: { userId: true, role: true } },
+        },
+      },
+    },
+  });
+  if (!task) {
+    return { ok: false, error: { code: 'NOT_FOUND', message: 'Задача не найдена' } };
+  }
+  const isStakeholder =
+    task.assigneeId === me.id || task.creatorId === me.id || task.reviewerId === me.id;
+  if (!isStakeholder && !canEditProject({ id: me.id, role: me.role }, task.project)) {
+    return {
+      ok: false,
+      error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' },
+    };
+  }
+  if (subColumnId) {
+    const sub = await prisma.boardSubColumn.findUnique({
+      where: { id: subColumnId },
+      select: { column: { select: { projectId: true, status: true } } },
+    });
+    if (!sub || sub.column.projectId !== task.projectId) {
+      return { ok: false, error: { code: 'VALIDATION', message: 'Подколонка не найдена' } };
+    }
+    // Leaf-consistency: the sub-column's parent column status must match the
+    // card's current internal status (the board commits the status move first).
+    if (sub.column.status !== task.internalStatus) {
+      return {
+        ok: false,
+        error: { code: 'VALIDATION', message: 'Подколонка относится к другой колонке' },
+      };
+    }
+  }
+  try {
+    await prisma.task.update({ where: { id: taskId }, data: { subColumnId } });
+  } catch (e) {
+    console.error('setTaskSubColumnAction', e);
+    return { ok: false, error: { code: 'INTERNAL', message: 'Не удалось переместить задачу' } };
+  }
+  revalidatePath(`/projects/${task.project.key}/board`);
+  revalidatePath(`/projects/${task.project.key}/tasks/${task.number}`);
+  return { ok: true };
+}
