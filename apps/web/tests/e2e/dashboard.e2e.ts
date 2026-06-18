@@ -83,13 +83,10 @@ test.describe('dashboard', () => {
 
   test('shows overdue task in section', async ({ page }) => {
     await page.goto('/dashboard');
-    // OverdueSection streams in via its own Suspense boundary; under CI load
-    // it can exceed the default 5s assertion timeout. The data is correct
-    // (confirmed the seeded task qualifies for listOverdue), so just give the
-    // streamed section time to render.
-    await expect(page.getByText('Overdue task').first()).toBeVisible({
-      timeout: 20_000,
-    });
+    // The Overdue card lives in the narrow xl:grid-cols-2 split; the task title
+    // must stay visible there (it used to collapse to zero width — see the
+    // TaskRow min-w guard in MyTasksSections).
+    await expect(page.getByText('Overdue task').first()).toBeVisible();
   });
 
   test('topbar visible with timer widget', async ({ page }) => {
