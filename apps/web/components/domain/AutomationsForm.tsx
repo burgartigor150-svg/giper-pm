@@ -28,6 +28,7 @@ type Row = {
   id: string | null;
   name: string;
   enabled: boolean;
+  triggerType: 'CARD_ENTERS_COLUMN' | 'TASK_CREATED';
   triggerStatus: string;
   actionType: AutomationActionKind;
   actionValue: string;
@@ -59,6 +60,7 @@ export function AutomationsForm({ projectId, initial, columns, swimlanes, member
       id: r.id,
       name: r.name,
       enabled: r.enabled,
+      triggerType: r.triggerType === 'TASK_CREATED' ? 'TASK_CREATED' : 'CARD_ENTERS_COLUMN',
       triggerStatus: r.triggerStatus || firstStatus,
       actionType: (ACTION_KINDS as string[]).includes(r.actionType)
         ? (r.actionType as AutomationActionKind)
@@ -83,6 +85,7 @@ export function AutomationsForm({ projectId, initial, columns, swimlanes, member
         id: r.id,
         name: r.name.trim(),
         enabled: r.enabled,
+        triggerType: r.triggerType,
         triggerStatus: r.triggerStatus,
         actionType: r.actionType,
         actionValue: r.actionValue,
@@ -106,6 +109,7 @@ export function AutomationsForm({ projectId, initial, columns, swimlanes, member
         id: null,
         name: '',
         enabled: true,
+        triggerType: 'CARD_ENTERS_COLUMN',
         triggerStatus: firstStatus,
         actionType: 'SET_PRIORITY',
         actionValue: 'HIGH',
@@ -156,19 +160,34 @@ export function AutomationsForm({ projectId, initial, columns, swimlanes, member
                 </button>
               </div>
               <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-                <span>Когда карточка → в</span>
+                <span>Когда</span>
                 <select
-                  value={r.triggerStatus}
-                  onChange={(e) => patch(i, { triggerStatus: e.target.value })}
+                  value={r.triggerType}
+                  onChange={(e) =>
+                    patch(i, {
+                      triggerType: e.target.value as 'CARD_ENTERS_COLUMN' | 'TASK_CREATED',
+                    })
+                  }
                   disabled={pending}
                   className={sel}
                 >
-                  {columns.map((c) => (
-                    <option key={c.status} value={c.status}>
-                      {c.name}
-                    </option>
-                  ))}
+                  <option value="CARD_ENTERS_COLUMN">карточка попадает в</option>
+                  <option value="TASK_CREATED">создаётся задача</option>
                 </select>
+                {r.triggerType === 'CARD_ENTERS_COLUMN' ? (
+                  <select
+                    value={r.triggerStatus}
+                    onChange={(e) => patch(i, { triggerStatus: e.target.value })}
+                    disabled={pending}
+                    className={sel}
+                  >
+                    {columns.map((c) => (
+                      <option key={c.status} value={c.status}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                ) : null}
                 <span>→</span>
                 <select
                   value={r.actionType}

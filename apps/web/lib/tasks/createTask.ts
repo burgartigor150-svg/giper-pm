@@ -4,6 +4,7 @@ import { DomainError } from '../errors';
 import { isUniqueConstraintError } from '../prisma-errors';
 import { canCreateTask, type SessionUser } from '../permissions';
 import { auditTask } from '../audit';
+import { runTaskCreatedAutomations } from '../automations/runTaskCreatedAutomations';
 
 /**
  * Creates a task with auto-incremented `number` (per project).
@@ -97,6 +98,9 @@ export async function createTask(input: CreateTaskInput, user: SessionUser) {
         after: { number: created.number, title: input.title },
         userId: user.id,
       });
+
+      // Kaiten automations: run TASK_CREATED rules best-effort (never throws).
+      await runTaskCreatedAutomations(created.id, project.id);
 
       return created;
     } catch (e) {

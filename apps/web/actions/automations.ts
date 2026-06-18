@@ -25,7 +25,9 @@ export type AutomationRuleInput = {
   id: string | null;
   name: string;
   enabled: boolean;
-  /** Column (status) whose entry fires the rule. */
+  /** What fires the rule. */
+  triggerType: 'CARD_ENTERS_COLUMN' | 'TASK_CREATED';
+  /** Column (status) whose entry fires the rule (CARD_ENTERS_COLUMN only). */
   triggerStatus: string;
   actionType: AutomationActionKind;
   /** userId (SET_ASSIGNEE) | priority (SET_PRIORITY) | swimlaneId or '' (SET_SWIMLANE). */
@@ -71,6 +73,7 @@ export async function updateAutomationsAction(
     id: string | null;
     name: string;
     enabled: boolean;
+    trigger: 'CARD_ENTERS_COLUMN' | 'TASK_CREATED';
     triggerConfig: Prisma.InputJsonValue;
     actionType: AutomationActionKind;
     actionConfig: Prisma.InputJsonValue;
@@ -86,7 +89,8 @@ export async function updateAutomationsAction(
         error: { code: 'VALIDATION', message: `Название правила: 1–${MAX_NAME} символов` },
       };
     }
-    if (!STATUSES.includes(r.triggerStatus as TaskStatus)) {
+    const isColumnTrigger = r.triggerType !== 'TASK_CREATED';
+    if (isColumnTrigger && !STATUSES.includes(r.triggerStatus as TaskStatus)) {
       return { ok: false, error: { code: 'VALIDATION', message: 'Неверная колонка-триггер' } };
     }
     if (!ACTION_TYPES.includes(r.actionType)) {
@@ -114,7 +118,8 @@ export async function updateAutomationsAction(
       id,
       name,
       enabled: !!r.enabled,
-      triggerConfig: { status: r.triggerStatus },
+      trigger: isColumnTrigger ? 'CARD_ENTERS_COLUMN' : 'TASK_CREATED',
+      triggerConfig: isColumnTrigger ? { status: r.triggerStatus } : {},
       actionType: r.actionType,
       actionConfig,
       order,
@@ -132,7 +137,7 @@ export async function updateAutomationsAction(
               data: {
                 name: r.name,
                 enabled: r.enabled,
-                trigger: 'CARD_ENTERS_COLUMN',
+                trigger: r.trigger,
                 triggerConfig: r.triggerConfig,
                 actionType: r.actionType,
                 actionConfig: r.actionConfig,
@@ -144,7 +149,7 @@ export async function updateAutomationsAction(
                 projectId,
                 name: r.name,
                 enabled: r.enabled,
-                trigger: 'CARD_ENTERS_COLUMN',
+                trigger: r.trigger,
                 triggerConfig: r.triggerConfig,
                 actionType: r.actionType,
                 actionConfig: r.actionConfig,
