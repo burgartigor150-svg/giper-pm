@@ -154,27 +154,21 @@ test.describe('tasks list & detail', () => {
 
   test('comment form submits a new comment', async ({ page }) => {
     await page.goto(`/projects/${PK}/tasks/6`);
-    // The visible comment textarea has no `name` — the submitted value rides
-    // a hidden input wired from React state. Wait for the controlled textarea
-    // to reflect the value before submitting, otherwise the form Server Action
-    // can serialize an empty body (fill→click race).
+    // The visible comment textarea has no `name` — the body that's actually
+    // submitted rides a hidden <input name="body"> mirrored from React state
+    // (`submittedBody`). So fill the textarea, then assert THAT hidden input
+    // carries the value before submitting. Asserting the textarea DOM only
+    // proves Playwright set the DOM value, not that React's onChange has
+    // propagated to the hidden field — submitting early serializes an empty
+    // body and Zod's min(1) rejects it (hydration race → no comment created).
     const commentBox = page.getByPlaceholder(
       'Нажмите @ или + чтобы упомянуть человека',
     );
     await commentBox.fill('Hello from E2E');
-    await expect(commentBox).toHaveValue('Hello from E2E');
+    await expect(page.locator('input[name="body"]')).toHaveValue(
+      'Hello from E2E',
+    );
     await page.getByRole('button', { name: 'Отправить' }).click();
-    await page.waitForTimeout(2000);
-    // DIAG: surface why the comment may not land — action error text, whether
-    // the textarea cleared (cleared = submit succeeded), and the actual rows.
-    const taAfter = await commentBox.inputValue().catch(() => '(detached)');
-    const errText = await page.locator('p.text-destructive').allTextContents();
-    const rows = await getPrisma().comment.findMany({
-      where: { task: { projectId, number: 6 } },
-      select: { body: true, visibility: true },
-    });
-    // eslint-disable-next-line no-console
-    console.log('COMMENT_DIAG ' + JSON.stringify({ taAfter, errText, rows }));
     await expect(page.getByText('Hello from E2E')).toBeVisible();
     const comments = await getPrisma().comment.count({
       where: { task: { projectId, number: 6 } },
