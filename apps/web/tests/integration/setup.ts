@@ -18,6 +18,13 @@ if (!process.env.DATABASE_URL || !/test/i.test(process.env.DATABASE_URL)) {
   process.env.DATABASE_URL = TEST_DB;
 }
 
+// Some routes (e.g. the LiveKit webhook) read REDIS_URL before constructing
+// an ioredis client. ioredis is mocked in those tests, but the lazy client
+// factory still throws if the env var is absent — set a harmless default.
+if (!process.env.REDIS_URL) {
+  process.env.REDIS_URL = 'redis://localhost:6379';
+}
+
 // Lazy import so DATABASE_URL is set first.
 const { prisma } = await import('@giper/db');
 const { resetDb } = await import('./helpers/reset');
