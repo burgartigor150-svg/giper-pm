@@ -41,7 +41,7 @@ export default async function ProjectGanttPage({
 
       <Card className="p-4">
         <CardContent className="p-0">
-          <GanttChart projectKey={data.project.key} tasks={data.tasks} />
+          <GanttChart projectKey={data.project.key} tasks={data.tasks} deps={data.deps} />
         </CardContent>
       </Card>
     </div>

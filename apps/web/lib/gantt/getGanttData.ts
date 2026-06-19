@@ -3,6 +3,7 @@ import { DomainError } from '../errors';
 import { canViewProject, type SessionUser } from '../permissions';
 
 export type GanttTask = {
+  id: string;
   number: number;
   title: string;
   status: TaskStatus;
@@ -64,6 +65,7 @@ export async function getGanttData(projectKey: string, user: SessionUser) {
     },
     orderBy: [{ startedAt: 'asc' }, { createdAt: 'asc' }],
     select: {
+      id: true,
       number: true,
       title: true,
       internalStatus: true,
@@ -82,6 +84,7 @@ export async function getGanttData(projectKey: string, user: SessionUser) {
     const end = t.completedAt ?? t.dueDate ?? start;
     const isOpen = t.internalStatus !== 'DONE';
     return {
+      id: t.id,
       number: t.number,
       title: t.title,
       status: t.internalStatus,
@@ -94,5 +97,18 @@ export async function getGanttData(projectKey: string, user: SessionUser) {
     };
   });
 
-  return { project: { key: project.key, name: project.name }, tasks };
+  // Dependency edges among the VISIBLE tasks only (both endpoints in scope —
+  // never leak a task the viewer can't see). fromTask blocks toTask.
+  const ids = rows.map((r) => r.id);
+  const depRows = ids.length
+    ? await prisma.taskDependency.findMany({
+        where: { fromTaskId: { in: ids }, toTaskId: { in: ids } },
+        select: { fromTaskId: true, toTaskId: true },
+      })
+    : [];
+  const deps = depRows.map((d) => ({ from: d.fromTaskId, to: d.toTaskId }));
+
+  return { project: { key: project.key, name: project.name }, tasks, deps };
 }
+
+export type GanttDep = { from: string; to: string };
