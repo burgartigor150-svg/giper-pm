@@ -97,11 +97,13 @@ export async function proposeAiHarvestAction({
   | { ok: false; message: string }
 > {
   const me = await requireAuth();
-  const cooldown = await redis().get(RATE_LIMIT_KEY(me.id));
-  if (cooldown) {
+  // Use the key's TTL for the real remaining seconds — the stored value is a
+  // sentinel ('1'), so interpolating it always showed "~1 с".
+  const remaining = await redis().ttl(RATE_LIMIT_KEY(me.id));
+  if (remaining > 0) {
     return {
       ok: false,
-      message: `Подождите ещё ~${cooldown} с — анализ можно запускать раз в ${RATE_LIMIT_SECONDS} с.`,
+      message: `Подождите ещё ~${remaining} с — анализ можно запускать раз в ${RATE_LIMIT_SECONDS} с.`,
     };
   }
 
