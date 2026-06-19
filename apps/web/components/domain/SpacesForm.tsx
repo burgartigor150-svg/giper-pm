@@ -66,7 +66,7 @@ export function SpacesForm({ initial, canManage }: Props) {
   return (
     <div className="flex flex-col gap-3">
       <p className="text-sm text-muted-foreground">
-        Пространства — папки для группировки проектов (как в Кайтене). Проект
+        Пространства — папки для группировки проектов. Проект
         кладётся в пространство из его настроек. Видимость проектов не меняется.
       </p>
       {initial.length > 0 ? (

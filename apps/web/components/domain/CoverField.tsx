@@ -19,7 +19,7 @@ type Props = {
   canEdit: boolean;
 };
 
-/** Kaiten-style card-cover control: image upload, colour swatch, or clear. */
+/** Card-cover control: image upload, colour swatch, or clear. */
 export function CoverField({
   taskId,
   projectKey,

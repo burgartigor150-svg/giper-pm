@@ -5,7 +5,7 @@ import { requireAuth } from '@/lib/auth';
 import { getUserGroups } from '@/lib/groups/getUserGroups';
 import { CreateGroupForm } from '@/components/domain/groups/CreateGroupForm';
 
-/** Admin-only: org-level user groups (Kaiten-style) for bulk project add. */
+/** Admin-only: org-level user groups for bulk project add. */
 export default async function UserGroupsPage() {
   const me = await requireAuth();
   if (me.role !== 'ADMIN') notFound();

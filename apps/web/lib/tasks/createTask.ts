@@ -100,10 +100,10 @@ export async function createTask(input: CreateTaskInput, user: SessionUser) {
         userId: user.id,
       });
 
-      // Kaiten automations: run TASK_CREATED rules best-effort (never throws).
+      // Automations: run TASK_CREATED rules best-effort (never throws).
       await runTaskCreatedAutomations(created.id, project.id);
 
-      // Kaiten outgoing webhooks: fire 'task.created' best-effort.
+      // Outgoing webhooks: fire 'task.created' best-effort.
       await dispatchWebhooks(project.id, 'task.created', {
         project: { id: project.id, key: created.project.key },
         task: { id: created.id, number: created.number, title: input.title },

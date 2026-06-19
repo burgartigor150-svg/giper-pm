@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 /**
- * Integration tests for Kaiten Scrum sprints — per the design spec's test plan:
+ * Integration tests for Scrum sprints — per the design spec's test plan:
  * one-active enforcement, assign, Bitrix-mirror safety, close-carries-incomplete,
  * delete→backlog, burndown off internalStatus, per-stake board scope, RBAC.
  *
