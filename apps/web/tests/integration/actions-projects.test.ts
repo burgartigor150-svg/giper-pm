@@ -158,6 +158,27 @@ describe('updateProjectAction', () => {
     expect(updated?.name).toBe('New name');
   });
 
+  it('preserves budgetHours/hourlyRate when the form omits them (no data loss)', async () => {
+    const u = await makeUser({ role: 'ADMIN' });
+    mockMe.id = u.id;
+    const p = await makeProject({ ownerId: u.id, name: 'Budgeted' });
+    // Budget/rate are set outside the edit form (e.g. Bitrix sync / seed).
+    await prisma.project.update({
+      where: { id: p.id },
+      data: { budgetHours: 120, hourlyRate: 3000 },
+    });
+
+    const fd = new FormData();
+    fd.set('name', 'Renamed'); // form has no budget/rate inputs
+    const res = await updateProjectAction(p.id, null, fd);
+    expect(res).toEqual({ ok: true });
+
+    const updated = await prisma.project.findUniqueOrThrow({ where: { id: p.id } });
+    expect(updated.name).toBe('Renamed');
+    expect(updated.budgetHours?.toString()).toBe('120'); // not wiped to null
+    expect(updated.hourlyRate?.toString()).toBe('3000');
+  });
+
   it('returns VALIDATION when name too short', async () => {
     const u = await makeUser({ role: 'ADMIN' });
     mockMe.id = u.id;

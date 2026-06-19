@@ -28,8 +28,12 @@ export async function updateProject(
       description: input.description,
       client: input.client,
       deadline: input.deadline,
-      budgetHours: input.budgetHours ?? null,
-      hourlyRate: input.hourlyRate ?? null,
+      // Only touch budget/rate when the caller actually sent them. The edit
+      // form has no inputs for these, so `?? null` previously WIPED any
+      // existing values (e.g. set via Bitrix sync) on every save. Prisma
+      // skips `undefined`, so this preserves them when absent.
+      ...(input.budgetHours !== undefined ? { budgetHours: input.budgetHours } : {}),
+      ...(input.hourlyRate !== undefined ? { hourlyRate: input.hourlyRate } : {}),
       ...(input.status ? { status: input.status } : {}),
     },
   });
