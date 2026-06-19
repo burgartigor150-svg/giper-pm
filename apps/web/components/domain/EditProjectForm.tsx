@@ -1,6 +1,7 @@
 'use client';
 
 import { useActionState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Button } from '@giper/ui/components/Button';
 import { Input } from '@giper/ui/components/Input';
 import { updateProjectAction, archiveProjectAction, type ActionResult } from '@/actions/projects';
@@ -21,6 +22,7 @@ type ProjectInput = {
 };
 
 export function EditProjectForm({ project }: { project: ProjectInput }) {
+  const router = useRouter();
   const t = useT('projects.form');
   const tDetail = useT('projects.detail');
   const tStatus = useT('projects.status');
@@ -34,7 +36,15 @@ export function EditProjectForm({ project }: { project: ProjectInput }) {
 
   async function handleArchive() {
     if (!confirm(tDetail('archiveConfirm'))) return;
-    await archiveProjectAction(project.id);
+    // Was a fire-and-forget no-op: the result was ignored and the settings
+    // route was never refreshed (the action revalidates only /projects), so
+    // the page looked unchanged even though the project was archived.
+    const res = await archiveProjectAction(project.id);
+    if (res && !res.ok) {
+      alert(res.error.message);
+      return;
+    }
+    router.push('/projects');
   }
 
   return (

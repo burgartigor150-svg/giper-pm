@@ -69,9 +69,9 @@ export async function listAuditLogs(filter: AuditFilter): Promise<{
   };
 }
 
-/** Distinct entities + actions for the filter dropdowns. */
+/** Distinct entities + actions + actors for the filter dropdowns. */
 export async function getAuditFacets() {
-  const [entityRows, actionRows] = await Promise.all([
+  const [entityRows, actionRows, actorRows] = await Promise.all([
     prisma.auditLog.findMany({
       distinct: ['entity'],
       select: { entity: true },
@@ -82,9 +82,26 @@ export async function getAuditFacets() {
       select: { action: true },
       take: 50,
     }),
+    prisma.auditLog.findMany({
+      distinct: ['userId'],
+      where: { userId: { not: null } },
+      select: { userId: true },
+      take: 200,
+    }),
   ]);
+  const userIds = actorRows
+    .map((r) => r.userId)
+    .filter((x): x is string => !!x);
+  const users = userIds.length
+    ? await prisma.user.findMany({
+        where: { id: { in: userIds } },
+        select: { id: true, name: true },
+        orderBy: { name: 'asc' },
+      })
+    : [];
   return {
     entities: entityRows.map((r) => r.entity).sort(),
     actions: actionRows.map((r) => r.action).sort(),
+    users,
   };
 }
