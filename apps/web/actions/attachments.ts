@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
-import { canViewTask } from '@/lib/permissions';
+import { canEditTaskInternal } from '@/lib/permissions';
 import { buildAttachmentKey, deleteObject, putObject } from '@/lib/storage/s3';
 
 const MAX_BYTES = 25 * 1024 * 1024; // 25 MB per file — sane default for screenshots / PDFs.
@@ -19,8 +19,9 @@ type ActionResult<T = unknown> =
  * each picked file — keeps the server action simple and enables per-file
  * progress / failure handling.
  *
- * Permission: any task viewer can attach. Files visibility follows the
- * task — if you can see the task, you can read its attachments.
+ * Permission: task editors (canEditTaskInternal — ADMIN / owner / LEAD /
+ * creator / assignee), matching the upload UI's render guard. Files
+ * visibility follows the task — if you can see the task you can read them.
  */
 export async function uploadAttachmentAction(
   formData: FormData,
@@ -61,7 +62,11 @@ export async function uploadAttachmentAction(
     },
   });
   if (!task) return { ok: false, error: { code: 'NOT_FOUND', message: 'Задача не найдена' } };
-  if (!canViewTask({ id: me.id, role: me.role }, task)) {
+  // Gate on the same permission as the upload UI (canEditTaskInternal:
+  // ADMIN / owner / LEAD / creator / assignee). Previously this used the
+  // per-stake canViewTask with an incomplete select, so project owners,
+  // LEADs and ADMINs who saw the dropzone got "Нет доступа".
+  if (!canEditTaskInternal({ id: me.id, role: me.role }, task)) {
     return {
       ok: false,
       error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Нет доступа' },
