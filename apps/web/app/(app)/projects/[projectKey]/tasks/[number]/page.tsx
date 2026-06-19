@@ -569,6 +569,8 @@ export default async function TaskDetailPage({ params }: { params: Params }) {
                 internalStatus={task.internalStatus}
                 priority={task.priority}
                 reviewer={task.reviewer}
+                primaryAssignee={task.assignee}
+                isMirror={task.externalSource === 'bitrix24'}
                 assignments={task.assignments}
                 estimate={task.estimateHours?.toString() ?? null}
                 spentMinutes={spentMinutes}

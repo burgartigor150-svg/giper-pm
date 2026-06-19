@@ -152,6 +152,32 @@ test.describe('tasks list & detail', () => {
     expect(t?.priority).toBe('URGENT');
   });
 
+  test('sidebar assignee picker reassigns the primary assignee', async ({
+    page,
+  }) => {
+    const assignee = await seedUser({
+      email: 'assignee-pick@e2e.test',
+      name: 'Assignee Pick',
+    });
+    const created = await seedTask({
+      projectId,
+      creatorId: adminId,
+      title: 'Assign Me',
+      assigneeId: null,
+    });
+    await page.goto(`/projects/${PK}/tasks/${created.number}`);
+    // The assignee UserPicker shows its placeholder until someone is picked.
+    await page.getByRole('button', { name: '— без исполнителя —' }).click();
+    // Pick the seeded user from the preloaded list (all active users preload).
+    await page.getByRole('button', { name: 'Assignee Pick' }).click();
+    await page.waitForTimeout(1500);
+    const t = await getPrisma().task.findFirst({
+      where: { projectId, number: created.number },
+      select: { assigneeId: true },
+    });
+    expect(t?.assigneeId).toBe(assignee.id);
+  });
+
   test('picking a cover colour persists', async ({ page }) => {
     await page.goto(`/projects/${PK}/tasks/8`);
     // CoverField swatch buttons carry an aria-label per preset colour.
