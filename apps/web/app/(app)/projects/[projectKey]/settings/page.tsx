@@ -23,6 +23,8 @@ import { RecurringTasksForm } from '@/components/domain/RecurringTasksForm';
 import { getRecurringTasks } from '@/lib/board/getRecurringTasks';
 import { AddGroupToProject } from '@/components/domain/groups/AddGroupToProject';
 import { getUserGroups } from '@/lib/groups/getUserGroups';
+import { WebhooksForm } from '@/components/domain/WebhooksForm';
+import { getWebhooks } from '@/lib/webhooks/getWebhooks';
 import { PublishToBitrixButton } from '@/components/domain/PublishToBitrixButton';
 
 export default async function ProjectSettingsPage({
@@ -60,6 +62,7 @@ export default async function ProjectSettingsPage({
   const cardTemplates = await getCardTemplates(project.id);
   const recurringTasks = await getRecurringTasks(project.id);
   const userGroups = await getUserGroups();
+  const webhooks = await getWebhooks(project.id);
   const projectMirrored =
     project.externalSource === 'bitrix24' && !!project.externalId;
 
@@ -168,6 +171,15 @@ export default async function ProjectSettingsPage({
         </CardHeader>
         <CardContent>
           <RecurringTasksForm projectId={project.id} initial={recurringTasks} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Вебхуки</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <WebhooksForm projectId={project.id} initial={webhooks} />
         </CardContent>
       </Card>
 
