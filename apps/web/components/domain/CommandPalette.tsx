@@ -313,7 +313,10 @@ function UserRow({
   hit: { id: string; name: string; email: string; image: string | null };
   onSelect: (href: string) => void;
 }) {
-  const href = `/team/${hit.id}`;
+  // Open a DM with the person. There is no /team/[id] profile route, so the
+  // previous href was a guaranteed 404; a direct-message is the universally
+  // available action and the route exists for every user.
+  const href = `/messages/dm/${hit.id}`;
   return (
     <Command.Item
       value={`user ${hit.name} ${hit.email}`}

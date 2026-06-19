@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
-import { canWorkTickets } from '@/lib/permissions';
+import { canSeeServiceDesk, canWorkTickets } from '@/lib/permissions';
 import { computeDueAts, type Priority } from '@/lib/servicedesk/sla';
 
 type ActionResult<T = unknown> =
@@ -24,7 +24,10 @@ export async function createTicketAction(input: {
   priority?: string;
 }): Promise<ActionResult<{ id: string }>> {
   const me = await requireAuth();
-  if (!canWorkTickets({ id: me.id, role: me.role })) return DENY;
+  // Intake is an agent action: gate it like queue visibility (ADMIN/PM), so a
+  // creator can always see the ticket they just logged. Was canWorkTickets,
+  // which let a MEMBER create tickets they could never open.
+  if (!canSeeServiceDesk({ id: me.id, role: me.role })) return DENY;
   if (input.subject.trim().length < 2) {
     return { ok: false, error: { code: 'VALIDATION', message: 'Тема ≥ 2 символов' } };
   }

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Hash, Lock, MessageSquare, Megaphone } from 'lucide-react';
+import { Hash, Lock, MessageSquare, Megaphone, Search } from 'lucide-react';
 import { Avatar } from '@giper/ui/components/Avatar';
 import { Button } from '@giper/ui/components/Button';
 import { cn } from '@giper/ui/cn';
@@ -180,7 +180,17 @@ export function MessagesShell({
       >
         <div className="flex items-center justify-between border-b border-border px-3 py-2">
           <h2 className="text-sm font-semibold">Чаты</h2>
-          <CreateChannelDialog />
+          <div className="flex items-center gap-1">
+            <Link
+              href="/messages/search"
+              aria-label="Поиск по сообщениям"
+              title="Поиск по сообщениям"
+              className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <Search className="size-4" />
+            </Link>
+            <CreateChannelDialog />
+          </div>
         </div>
         <div className="flex-1 overflow-y-auto p-2 text-sm">
           <Section title="Каналы">
