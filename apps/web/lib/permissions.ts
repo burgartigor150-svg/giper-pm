@@ -243,3 +243,11 @@ export function canEditCrm(user: SessionUser): boolean {
 export function canDeleteCrmPipeline(user: SessionUser): boolean {
   return user.role === 'ADMIN';
 }
+
+/** Service-desk agent queue is for ADMIN/PM; everyone but VIEWER can log/work tickets. */
+export function canSeeServiceDesk(user: SessionUser): boolean {
+  return user.role === 'ADMIN' || user.role === 'PM';
+}
+export function canWorkTickets(user: SessionUser): boolean {
+  return user.role !== 'VIEWER';
+}

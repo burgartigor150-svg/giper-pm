@@ -2,7 +2,7 @@ import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
-import { canSeeReports, canSeeSettings, canSeeCrm, type SessionUser } from '@/lib/permissions';
+import { canSeeReports, canSeeSettings, canSeeCrm, canSeeServiceDesk, type SessionUser } from '@/lib/permissions';
 import { getActiveTimerWithHealth } from '@/lib/time';
 import { AppShell } from '@/components/domain/AppShell';
 import { PushOptInBanner } from '@/components/domain/PushOptIn';
@@ -31,6 +31,7 @@ function buildNav(user: SessionUser): NavItem[] {
   }
   if (canSeeReports(user)) items.push({ key: 'reports', href: '/reports' });
   if (canSeeCrm(user)) items.push({ key: 'crm', href: '/crm' });
+  if (canSeeServiceDesk(user)) items.push({ key: 'servicedesk', href: '/servicedesk' });
   if (canSeeSettings(user)) items.push({ key: 'settings', href: '/settings' });
   return items;
 }

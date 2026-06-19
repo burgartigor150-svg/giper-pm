@@ -19,6 +19,7 @@ const TABLES_IN_DELETE_ORDER = [
   'Contact',
   'Sprint',
   'Space',
+  'Ticket',
   // Leaves first (no incoming FKs that matter).
   'AuditLog',
   'Notification',
