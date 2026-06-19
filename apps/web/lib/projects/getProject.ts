@@ -16,6 +16,7 @@ export async function getProject(projectKey: string, user: SessionUser) {
       hourlyRate: true,
       startDate: true,
       deadline: true,
+      spaceId: true,
       ownerId: true,
       owner: { select: { id: true, name: true, email: true, image: true } },
       wipLimits: true,

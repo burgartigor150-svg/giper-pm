@@ -25,6 +25,8 @@ import { AddGroupToProject } from '@/components/domain/groups/AddGroupToProject'
 import { getUserGroups } from '@/lib/groups/getUserGroups';
 import { WebhooksForm } from '@/components/domain/WebhooksForm';
 import { getWebhooks } from '@/lib/webhooks/getWebhooks';
+import { ProjectSpaceSelect } from '@/components/domain/ProjectSpaceSelect';
+import { getSpaces } from '@/lib/spaces/getSpaces';
 import { PublishToBitrixButton } from '@/components/domain/PublishToBitrixButton';
 
 export default async function ProjectSettingsPage({
@@ -63,6 +65,7 @@ export default async function ProjectSettingsPage({
   const recurringTasks = await getRecurringTasks(project.id);
   const userGroups = await getUserGroups();
   const webhooks = await getWebhooks(project.id);
+  const spaces = await getSpaces();
   const projectMirrored =
     project.externalSource === 'bitrix24' && !!project.externalId;
 
@@ -94,6 +97,20 @@ export default async function ProjectSettingsPage({
               deadline: project.deadline,
               status: project.status,
             }}
+          />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Пространство</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ProjectSpaceSelect
+            projectKey={project.key}
+            currentSpaceId={project.spaceId}
+            spaces={spaces.map((s) => ({ id: s.id, name: s.name }))}
+            canEdit
           />
         </CardContent>
       </Card>

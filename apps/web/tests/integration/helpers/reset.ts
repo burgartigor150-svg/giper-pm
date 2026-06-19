@@ -12,12 +12,13 @@ import type { PrismaClient } from '@giper/db';
  * Sequence resetting isn't needed — every model uses cuid().
  */
 const TABLES_IN_DELETE_ORDER = [
-  // CRM (Deal → Pipeline/Stage/Contact) + Sprint (Task.sprintId is SetNull).
+  // CRM (Deal → Pipeline/Stage/Contact) + Sprint + Space (Project.spaceId SetNull).
   'Deal',
   'PipelineStage',
   'Pipeline',
   'Contact',
   'Sprint',
+  'Space',
   // Leaves first (no incoming FKs that matter).
   'AuditLog',
   'Notification',
