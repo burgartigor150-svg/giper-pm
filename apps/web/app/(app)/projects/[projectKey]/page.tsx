@@ -84,6 +84,11 @@ export default async function ProjectOverviewPage({
             <Button variant="outline" size="sm">Документы</Button>
           </Link>
           {canCreate ? (
+            <Link href={`/projects/${project.key}/import`}>
+              <Button variant="outline" size="sm">Импорт</Button>
+            </Link>
+          ) : null}
+          {canCreate ? (
             <Link href={`/projects/${project.key}/tasks/new`}>
               <Button size="sm">+ Задача</Button>
             </Link>
