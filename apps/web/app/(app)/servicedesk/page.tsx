@@ -5,6 +5,7 @@ import { Card } from '@giper/ui/components/Card';
 import { requireAuth } from '@/lib/auth';
 import { canSeeServiceDesk, canWorkTickets } from '@/lib/permissions';
 import { listTickets } from '@/lib/servicedesk';
+import { listUsers } from '@/lib/users/listUsers';
 import { TicketQueueTable } from '@/components/domain/servicedesk/TicketQueueTable';
 
 export const dynamic = 'force-dynamic';
@@ -14,6 +15,14 @@ export default async function ServiceDeskPage() {
   if (!canSeeServiceDesk({ id: me.id, role: me.role })) notFound();
   const canEdit = canWorkTickets({ id: me.id, role: me.role });
   const tickets = await listTickets();
+  // Agents eligible for assignment = active non-VIEWER users (same gate
+  // the action enforces via canWorkTickets). Only needed when the viewer
+  // can edit; viewers see read-only names.
+  const assignableUsers = canEdit
+    ? (await listUsers())
+        .filter((u) => u.role !== 'VIEWER')
+        .map((u) => ({ id: u.id, name: u.name }))
+    : [];
 
   return (
     <div className="mx-auto max-w-6xl space-y-4">
@@ -27,7 +36,11 @@ export default async function ServiceDeskPage() {
       </div>
 
       <Card className="overflow-hidden">
-        <TicketQueueTable tickets={tickets} canEdit={canEdit} />
+        <TicketQueueTable
+          tickets={tickets}
+          canEdit={canEdit}
+          assignableUsers={assignableUsers}
+        />
       </Card>
     </div>
   );

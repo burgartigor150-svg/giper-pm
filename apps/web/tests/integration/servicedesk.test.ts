@@ -89,6 +89,11 @@ describe('service desk — intake & SLA', () => {
     expect(res.ok).toBe(true);
     const t = await prisma.ticket.findUniqueOrThrow({ where: { id } });
     expect(t.assigneeId).toBe(agent.id);
+    // The queue row carries assigneeId (the <select> binds to it) + name.
+    const rows = await listTickets();
+    const row = rows.find((r) => r.id === id);
+    expect(row?.assigneeId).toBe(agent.id);
+    expect(row?.assigneeName).toBe(agent.name);
   });
 
   it('forbids a VIEWER from logging a ticket', async () => {
