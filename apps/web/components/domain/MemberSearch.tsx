@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import { Avatar } from '@giper/ui/components/Avatar';
 import { Button } from '@giper/ui/components/Button';
 import { Input } from '@giper/ui/components/Input';
@@ -17,6 +18,7 @@ type Props = {
 };
 
 export function MemberSearch({ projectId, excludeUserIds }: Props) {
+  const router = useRouter();
   const t = useT('projects.settings');
   const tRoles = useT('projects.memberRole');
   const tErr = useT('projects.errors');
@@ -68,6 +70,10 @@ export function MemberSearch({ projectId, excludeUserIds }: Props) {
       setQuery('');
       setResults([]);
       setOpen(false);
+      // The settings page server-renders the member list; the action only
+      // revalidates /projects, so refresh the current route to show the
+      // new member without a manual reload.
+      router.refresh();
     });
   }
 

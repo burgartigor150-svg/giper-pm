@@ -1,6 +1,7 @@
 'use client';
 
 import { useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import { Avatar } from '@giper/ui/components/Avatar';
 import { Button } from '@giper/ui/components/Button';
 import { useT } from '@/lib/useT';
@@ -17,13 +18,22 @@ type Props = {
 };
 
 export function MemberRow({ projectId, member, isOwner }: Props) {
+  const router = useRouter();
   const t = useT('projects.settings');
   const tRoles = useT('projects.memberRole');
   const [pending, startTransition] = useTransition();
 
   function handleRemove() {
     startTransition(async () => {
-      await removeProjectMemberAction(projectId, member.user.id);
+      const res = await removeProjectMemberAction(projectId, member.user.id);
+      if (!res.ok) {
+        // eslint-disable-next-line no-alert
+        alert(res.error.message);
+        return;
+      }
+      // Settings page server-renders the list; action revalidates only
+      // /projects, so refresh the current route to drop the removed row.
+      router.refresh();
     });
   }
 

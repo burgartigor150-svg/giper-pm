@@ -102,4 +102,12 @@ describe('service desk — intake & SLA', () => {
     const res = await createTicketAction({ subject: 'Нельзя', requesterName: 'Кто-то' });
     expect(res.ok).toBe(false);
   });
+
+  it('forbids a MEMBER from logging a ticket (intake = ADMIN/PM, matches queue)', async () => {
+    mockMe.id = (await makeUser({ role: 'MEMBER' })).id;
+    mockMe.role = 'MEMBER';
+    const res = await createTicketAction({ subject: 'Тоже нельзя', requesterName: 'Кто-то' });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error.code).toBe('INSUFFICIENT_PERMISSIONS');
+  });
 });
