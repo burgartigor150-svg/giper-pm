@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import {
   addMemberSchema,
+  memberRoleSchema,
   createProjectSchema,
   updateProjectSchema,
   type CreateProjectInput,
@@ -17,6 +18,7 @@ import {
   archiveProject,
   createProject,
   removeProjectMember,
+  updateProjectMemberRole,
   updateProject,
 } from '@/lib/projects';
 import { canEditProject } from '@/lib/permissions';
@@ -265,6 +267,28 @@ export async function removeProjectMemberAction(
   const user = await requireAuth();
   try {
     await removeProjectMember(projectId, userIdToRemove, { id: user.id, role: user.role });
+  } catch (e) {
+    return toErr(e);
+  }
+  revalidatePath('/projects');
+  return { ok: true };
+}
+
+export async function updateProjectMemberRoleAction(
+  projectId: string,
+  userId: string,
+  role: string,
+): Promise<ActionResult> {
+  const user = await requireAuth();
+  const parsed = memberRoleSchema.safeParse(role);
+  if (!parsed.success) {
+    return { ok: false, error: { code: 'VALIDATION', message: 'Невалидная роль' } };
+  }
+  try {
+    await updateProjectMemberRole(projectId, userId, parsed.data, {
+      id: user.id,
+      role: user.role,
+    });
   } catch (e) {
     return toErr(e);
   }

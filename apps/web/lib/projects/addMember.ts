@@ -69,3 +69,30 @@ export async function removeProjectMember(
     where: { projectId, userId: userIdToRemove },
   });
 }
+
+export async function updateProjectMemberRole(
+  projectId: string,
+  userIdToUpdate: string,
+  role: 'LEAD' | 'CONTRIBUTOR' | 'REVIEWER' | 'OBSERVER',
+  user: SessionUser,
+) {
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: {
+      ownerId: true,
+      members: { select: { userId: true, role: true } },
+    },
+  });
+  if (!project) throw new DomainError('NOT_FOUND', 404);
+  if (!canEditProject(user, project)) {
+    throw new DomainError('INSUFFICIENT_PERMISSIONS', 403);
+  }
+  const res = await prisma.projectMember.updateMany({
+    where: { projectId, userId: userIdToUpdate },
+    data: { role },
+  });
+  if (res.count === 0) {
+    throw new DomainError('NOT_FOUND', 404, 'Участник не найден');
+  }
+  return res;
+}

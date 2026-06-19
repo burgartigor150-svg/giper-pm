@@ -5,6 +5,7 @@ import { requireAuth } from '@/lib/auth';
 import { canSeeCrm, canEditCrm } from '@/lib/permissions';
 import { listContacts } from '@/lib/crm';
 import { NewContactForm } from '@/components/domain/crm/NewContactForm';
+import { ContactRow } from '@/components/domain/crm/ContactRow';
 
 export const dynamic = 'force-dynamic';
 
@@ -42,17 +43,7 @@ export default async function CrmContactsPage() {
           ) : (
             <ul className="divide-y">
               {contacts.map((c) => (
-                <li key={c.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
-                  <span className="min-w-0">
-                    <span className="font-medium">{c.name}</span>
-                    {c.company ? <span className="text-muted-foreground"> · {c.company}</span> : null}
-                  </span>
-                  <span className="flex items-center gap-3 text-xs text-muted-foreground">
-                    {c.email ? <span>{c.email}</span> : null}
-                    {c.phone ? <span>{c.phone}</span> : null}
-                    <span className="tabular-nums">{c.dealCount} сд.</span>
-                  </span>
-                </li>
+                <ContactRow key={c.id} contact={c} canEdit={canEdit} />
               ))}
             </ul>
           )}

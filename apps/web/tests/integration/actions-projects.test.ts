@@ -43,6 +43,7 @@ import {
   archiveProjectAction,
   addProjectMemberAction,
   removeProjectMemberAction,
+  updateProjectMemberRoleAction,
 } from '@/actions/projects';
 import { revalidatePath } from 'next/cache';
 import { prisma } from '@giper/db';
@@ -348,6 +349,50 @@ describe('removeProjectMemberAction', () => {
     await addMember(p.id, m2.id, 'CONTRIBUTOR');
 
     const res = await removeProjectMemberAction(p.id, m2.id);
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error.code).toBe('INSUFFICIENT_PERMISSIONS');
+  });
+});
+
+describe('updateProjectMemberRoleAction', () => {
+  it('changes a member role (happy path)', async () => {
+    const owner = await makeUser({ role: 'ADMIN' });
+    const target = await makeUser({ role: 'MEMBER' });
+    mockMe.id = owner.id;
+    const p = await makeProject({ ownerId: owner.id });
+    await addMember(p.id, target.id, 'CONTRIBUTOR');
+
+    const res = await updateProjectMemberRoleAction(p.id, target.id, 'LEAD');
+    expect(res).toEqual({ ok: true });
+    const row = await prisma.projectMember.findFirst({
+      where: { projectId: p.id, userId: target.id },
+    });
+    expect(row?.role).toBe('LEAD');
+  });
+
+  it('returns VALIDATION on bad role', async () => {
+    const owner = await makeUser({ role: 'ADMIN' });
+    const target = await makeUser({ role: 'MEMBER' });
+    mockMe.id = owner.id;
+    const p = await makeProject({ ownerId: owner.id });
+    await addMember(p.id, target.id, 'CONTRIBUTOR');
+
+    const res = await updateProjectMemberRoleAction(p.id, target.id, 'BOSS');
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error.code).toBe('VALIDATION');
+  });
+
+  it('returns INSUFFICIENT_PERMISSIONS for a non-LEAD MEMBER', async () => {
+    const owner = await makeUser({ role: 'PM' });
+    const m1 = await makeUser({ role: 'MEMBER' });
+    const m2 = await makeUser({ role: 'MEMBER' });
+    const p = await makeProject({ ownerId: owner.id });
+    await addMember(p.id, m1.id, 'CONTRIBUTOR');
+    await addMember(p.id, m2.id, 'CONTRIBUTOR');
+    mockMe.id = m1.id;
+    mockMe.role = 'MEMBER';
+
+    const res = await updateProjectMemberRoleAction(p.id, m2.id, 'LEAD');
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.error.code).toBe('INSUFFICIENT_PERMISSIONS');
   });
