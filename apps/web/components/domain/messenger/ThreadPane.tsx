@@ -147,6 +147,10 @@ export function ThreadPane({ rootMessageId, meId, onClose }: Props) {
               parentId: rootMessageId,
             });
             if (!res.ok) throw new Error(res.error.message);
+            // Show the reply immediately instead of waiting for the WS echo
+            // (which may be briefly delayed/dropped) — mirrors the video-note
+            // path's onVideoNoteSent={reload}.
+            void reload();
           }}
         />
       </div>

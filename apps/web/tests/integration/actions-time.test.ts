@@ -40,6 +40,7 @@ import {
   logTimeAction,
   editTimeEntryAction,
   deleteTimeEntryAction,
+  resolveAutoStoppedAction,
 } from '@/actions/time';
 import { revalidatePath } from 'next/cache';
 import { prisma } from '@giper/db';
@@ -62,6 +63,42 @@ async function makeClosedEntry(userId: string) {
     },
   });
 }
+
+describe('resolveAutoStoppedAction — trim', () => {
+  async function makeAutoStopped(userId: string) {
+    return prisma.timeEntry.create({
+      data: {
+        userId,
+        startedAt: new Date('2025-03-01T09:00:00'),
+        endedAt: new Date('2025-03-01T10:00:00'), // 60 min original
+        durationMin: 60,
+        source: 'MANUAL_TIMER',
+        flag: 'AUTO_STOPPED',
+      },
+    });
+  }
+
+  it('clamps trim to the original duration (cannot make it longer)', async () => {
+    const u = await makeUser({ role: 'ADMIN' });
+    mockMe.id = u.id;
+    const entry = await makeAutoStopped(u.id);
+    const res = await resolveAutoStoppedAction(entry.id, 'trim', 9999);
+    expect(res.ok).toBe(true);
+    const row = await prisma.timeEntry.findUniqueOrThrow({ where: { id: entry.id } });
+    expect(row.durationMin).toBe(60); // capped at original, not 9999
+    expect(row.flag).toBeNull();
+  });
+
+  it('trims down to a smaller value', async () => {
+    const u = await makeUser({ role: 'ADMIN' });
+    mockMe.id = u.id;
+    const entry = await makeAutoStopped(u.id);
+    const res = await resolveAutoStoppedAction(entry.id, 'trim', 15);
+    expect(res.ok).toBe(true);
+    const row = await prisma.timeEntry.findUniqueOrThrow({ where: { id: entry.id } });
+    expect(row.durationMin).toBe(15);
+  });
+});
 
 describe('startTimerAction', () => {
   it('starts a timer (happy path)', async () => {

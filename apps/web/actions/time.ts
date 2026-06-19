@@ -264,6 +264,7 @@ export async function resolveAutoStoppedAction(
       id: true,
       userId: true,
       startedAt: true,
+      endedAt: true,
       flag: true,
     },
   });
@@ -286,9 +287,18 @@ export async function resolveAutoStoppedAction(
   if (resolution === 'delete') {
     await prisma.timeEntry.delete({ where: { id: entry.id } });
   } else if (resolution === 'trim') {
-    const minutes = Math.max(1, Math.floor(trimToMinutes ?? 0));
+    let minutes = Math.max(1, Math.floor(trimToMinutes ?? 0));
     if (!Number.isFinite(minutes) || minutes < 1) {
       return { ok: false, error: { code: 'VALIDATION', message: 'Минимум 1 минута' } };
+    }
+    // Trim must only SHORTEN — cap at the original auto-stopped duration so a
+    // big number can't make the "trimmed" entry longer than the original
+    // (the `max` attr on the input is advisory; enforce it server-side).
+    if (entry.endedAt) {
+      const originalMinutes = Math.round(
+        (entry.endedAt.getTime() - entry.startedAt.getTime()) / 60_000,
+      );
+      if (originalMinutes >= 1) minutes = Math.min(minutes, originalMinutes);
     }
     const newEndedAt = new Date(entry.startedAt.getTime() + minutes * 60_000);
     await prisma.timeEntry.update({
@@ -357,7 +367,12 @@ export async function logTaskHoursAction(
   // to keep entries clustered visibly in /me timeline. The math doesn't
   // mind which clock hour we pick — it's the date and duration that
   // matter for everything downstream.
-  const day = date ? new Date(date) : new Date();
+  // A bare YYYY-MM-DD parses as UTC midnight; combined with setHours (local)
+  // below that lands on the previous day for west-of-UTC users. Parse it as
+  // LOCAL midnight so the entry stays on the day the user picked.
+  const day = date
+    ? new Date(/^\d{4}-\d{2}-\d{2}$/.test(date) ? `${date}T00:00:00` : date)
+    : new Date();
   if (Number.isNaN(day.getTime())) {
     return { ok: false, error: { code: 'VALIDATION', message: 'Неверная дата' } };
   }
