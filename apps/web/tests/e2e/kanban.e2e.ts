@@ -196,4 +196,12 @@ test.describe('kanban board', () => {
     await expect(page).toHaveURL(new RegExp(`/projects/${PK}/tasks/\\d+`));
     await expect(page.getByText('Провести ревью').first()).toBeVisible();
   });
+
+  test('gantt/timeline renders task rows', async ({ page }) => {
+    await page.goto(`/projects/${PK}/gantt`);
+    await expect(page.getByRole('heading', { name: 'Гант / таймлайн' })).toBeVisible();
+    // Admin is the creator of the seeded cards, so they appear in the timeline.
+    await expect(page.getByText('Backlog item').first()).toBeVisible();
+    await expect(page.getByText('сегодня').first()).toBeVisible();
+  });
 });
