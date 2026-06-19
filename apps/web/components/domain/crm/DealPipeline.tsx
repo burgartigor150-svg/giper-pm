@@ -3,7 +3,7 @@
 import { useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { cn } from '@giper/ui/cn';
-import { moveDealStageAction } from '@/actions/crm';
+import { moveDealStageAction, setDealStatusAction } from '@/actions/crm';
 import type { BoardDeal, PipelineView } from '@/lib/crm';
 
 const STAGE_TINT: Record<'NORMAL' | 'WON' | 'LOST', string> = {
@@ -39,10 +39,25 @@ export function DealPipeline({
   const [pending, startTransition] = useTransition();
 
   function move(dealId: string, stageId: string) {
+    // Moving into a LOST stage: capture an optional reason. setDealStatusAction
+    // already supports lostReason but nothing reached it before — the stage
+    // move alone set status=LOST with the reason permanently null.
+    const stage = pipeline.stages.find((s) => s.id === stageId);
+    const lostReason =
+      stage?.kind === 'LOST'
+        ? (window.prompt('Причина проигрыша (необязательно):', '') ?? '').trim()
+        : '';
     startTransition(async () => {
       const res = await moveDealStageAction(dealId, stageId);
-      if (res.ok) router.refresh();
-      else alert(res.error.message);
+      if (!res.ok) {
+        alert(res.error.message);
+        return;
+      }
+      if (lostReason) {
+        const r2 = await setDealStatusAction(dealId, 'LOST', { lostReason });
+        if (!r2.ok) alert(r2.error.message);
+      }
+      router.refresh();
     });
   }
 

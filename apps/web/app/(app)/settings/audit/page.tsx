@@ -80,13 +80,28 @@ export default async function AuditLogPage({
               ))}
             </select>
           </label>
+          <label className="flex items-center gap-1 text-muted-foreground">
+            Кто:
+            <select
+              name="userId"
+              defaultValue={filter.userId ?? ''}
+              className="h-9 rounded-md border border-input bg-background px-2"
+            >
+              <option value="">все</option>
+              {facets.users.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.name}
+                </option>
+              ))}
+            </select>
+          </label>
           <button
             type="submit"
             className="rounded-md border border-input bg-background px-3 py-1.5 hover:bg-accent"
           >
             Применить
           </button>
-          {filter.entity || filter.action || filter.q ? (
+          {filter.entity || filter.action || filter.q || filter.userId ? (
             <Link
               href="/settings/audit"
               className="text-xs text-muted-foreground hover:text-foreground"
