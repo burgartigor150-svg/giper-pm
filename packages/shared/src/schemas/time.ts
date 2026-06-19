@@ -17,6 +17,10 @@ export const timeFlagSchema = z.enum([
   'OVERLAPPING',
   'EXCESSIVE',
   'IDLE_LOGGED',
+  // Written by enforceTimerLimits (timeLimits.ts) when a runaway timer is
+  // closed by the system. Was missing here, so anything validating a flag
+  // through this schema rejected a value the DB legitimately produces.
+  'AUTO_STOPPED',
 ]);
 
 const dateTimeLike = z
