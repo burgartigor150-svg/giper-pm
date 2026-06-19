@@ -23,6 +23,7 @@ export type BoardDeal = {
   contactId: string | null;
   contactName: string | null;
   ownerName: string | null;
+  lostReason: string | null;
 };
 
 export type PipelineSummary = {
@@ -76,6 +77,7 @@ export async function listDealsForPipeline(pipelineId: string): Promise<BoardDea
         currency: true,
         status: true,
         contactId: true,
+        lostReason: true,
         contact: { select: { name: true } },
         owner: { select: { name: true } },
       },
@@ -90,6 +92,7 @@ export async function listDealsForPipeline(pipelineId: string): Promise<BoardDea
       contactId: d.contactId ?? null,
       contactName: d.contact?.name ?? null,
       ownerName: d.owner?.name ?? null,
+      lostReason: d.lostReason ?? null,
     }));
   } catch (e) {
     console.warn('listDealsForPipeline: unavailable', e);
