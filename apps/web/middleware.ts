@@ -13,6 +13,10 @@ export default auth((req) => {
   //   /api/cron/*           — gated by CRON_SECRET (Bearer) inside the route
   //   /api/webhooks/*       — gated by per-integration signature inside the
   //                           route (HMAC for GitHub, ?token= for Bitrix24)
+  //   /api/public/*         — public REST API, gated by Bearer ApiToken
+  //                           inside the route (resolveApiToken). Without
+  //                           this, token requests get 302'd to /login
+  //                           instead of a proper 401/200.
   //   /m/<token>            — guest meeting landing page. Auth is the
   //                           unguessable token in the URL; server-side
   //                           validation lives in joinMeetingAsGuestAction.
@@ -43,6 +47,7 @@ export default auth((req) => {
     pathname.startsWith('/api/auth') ||
     pathname.startsWith('/api/cron') ||
     pathname.startsWith('/api/webhooks') ||
+    pathname.startsWith('/api/public') ||
     pathname.startsWith('/api/livekit/webhook') ||
     pathname.startsWith('/m/') ||
     pathname === '/sw.js' ||
