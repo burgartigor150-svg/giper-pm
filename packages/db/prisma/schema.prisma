@@ -78,6 +78,8 @@ model User {
   pmTeam            PmTeamMember[]       @relation("PmTeamOwner")
   /// Org-level user-group memberships (Kaiten-style groups).
   groupMemberships  UserGroupMember[]
+  /// Personal API tokens for the public REST API (act-as this user).
+  apiTokens         ApiToken[]
 
   // Tags assigned by this user (audit trail of tag activity).
   tagAssignments    TaskTag[]            @relation("TaskTagAssigner")
@@ -232,6 +234,25 @@ model UserGroupMember {
   addedAt   DateTime  @default(now())
 
   @@unique([groupId, userId])
+  @@index([userId])
+}
+
+/// Personal API token for the public REST API. The raw token (gpm_<hex>) is
+/// shown once at creation; only its SHA-256 hash is stored. Requests using it
+/// act as the owning user — visibility/permissions are the user's own.
+model ApiToken {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name       String
+  /// SHA-256 hex of the raw token.
+  tokenHash  String    @unique
+  /// Leading chars of the token for display (e.g. "gpm_ab12cd…").
+  prefix     String
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
   @@index([userId])
 }
 

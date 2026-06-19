@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle } from '@giper/ui/components/Card';
 import { requireAuth } from '@/lib/auth';
 import { PushToggle } from '@/components/domain/PushOptIn';
@@ -40,6 +41,17 @@ export default async function NotificationsSettingsPage() {
         </CardHeader>
         <CardContent>
           <NotificationPreferencesForm initial={prefs} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">API-токены</CardTitle>
+        </CardHeader>
+        <CardContent className="text-sm">
+          <Link href="/me/api-tokens" className="underline">
+            Личные токены для публичного REST API →
+          </Link>
         </CardContent>
       </Card>
     </div>
