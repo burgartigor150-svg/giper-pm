@@ -7,6 +7,7 @@ import { Input } from '@giper/ui/components/Input';
 import type { Position } from '@giper/db';
 import { EstimateVsActual } from './EstimateVsActual';
 import {
+  assignTaskAction,
   setReviewerAction,
   updateTaskAction,
 } from '@/actions/tasks';
@@ -66,6 +67,13 @@ type Props = {
   internalStatus: (typeof STATUSES)[number];
   priority: (typeof PRIORITIES)[number];
   reviewer: { id: string; name: string; image: string | null } | null;
+  /** Primary assignee (Task.assigneeId). Editable picker is shown for
+   *  local tasks only; on Bitrix-mirror tasks the assignee is rendered
+   *  read-only by BitrixMirrorPanel (upstream source of truth). */
+  primaryAssignee: { id: string; name: string; image: string | null } | null;
+  /** Bitrix-mirror task — hides the editable assignee picker here to
+   *  avoid a second, conflicting "Исполнитель" field. */
+  isMirror: boolean;
   assignments: Assignment[];
   estimate: string | null; // string from Decimal
   /** Total minutes spent on this task across all time entries (includes live timer). */
@@ -157,6 +165,29 @@ export function TaskSidebar(props: Props) {
           ))}
         </select>
       </Field>
+
+      {!props.isMirror ? (
+        <Field label="Исполнитель" saved={savedField === 'assignee'}>
+          <UserPicker
+            value={props.primaryAssignee ?? null}
+            preload={props.members}
+            disabled={!props.canManage || pending}
+            placeholder="— без исполнителя —"
+            onPick={(user) => {
+              startTransition(async () => {
+                const res = await assignTaskAction(
+                  props.taskId,
+                  props.projectKey,
+                  props.taskNumber,
+                  user?.id ?? null,
+                );
+                if (res.ok) flash('assignee');
+                else alert(res.error.message);
+              });
+            }}
+          />
+        </Field>
+      ) : null}
 
       <Field label="Назначены (роли)" saved={savedField === 'assignments'}>
         <AssignmentList
