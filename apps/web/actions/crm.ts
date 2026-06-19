@@ -90,6 +90,32 @@ export async function createDealAction(input: {
   return { ok: true, data: { id: deal.id } };
 }
 
+/** Edit a deal's title / amount / contact. CRM editors (ADMIN/PM) only. */
+export async function updateDealAction(
+  dealId: string,
+  input: { title: string; amount?: string | number | null; contactId?: string | null },
+): Promise<ActionResult> {
+  const me = await requireAuth();
+  if (!canEditCrm({ id: me.id, role: me.role })) return DENY;
+  if (input.title.trim().length < 2) {
+    return { ok: false, error: { code: 'VALIDATION', message: 'Название сделки ≥ 2 символов' } };
+  }
+  try {
+    await prisma.deal.update({
+      where: { id: dealId },
+      data: {
+        title: input.title.trim().slice(0, 200),
+        amount: parseAmount(input.amount),
+        contactId: input.contactId || null,
+      },
+    });
+  } catch {
+    return { ok: false, error: { code: 'NOT_FOUND', message: 'Сделка не найдена' } };
+  }
+  revalidatePath('/crm');
+  return { ok: true };
+}
+
 /** Move a deal to another stage in the same pipeline; flips WON/LOST on terminal stages. */
 export async function moveDealStageAction(dealId: string, stageId: string): Promise<ActionResult> {
   const me = await requireAuth();

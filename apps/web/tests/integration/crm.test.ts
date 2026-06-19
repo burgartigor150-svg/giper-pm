@@ -30,6 +30,7 @@ import { prisma } from '@giper/db';
 import {
   createDefaultPipelineAction,
   createDealAction,
+  updateDealAction,
   moveDealStageAction,
   setDealStatusAction,
   createContactAction,
@@ -96,6 +97,32 @@ describe('CRM — pipeline & deals', () => {
     d = await prisma.deal.findUniqueOrThrow({ where: { id: dealId } });
     expect(d.status).toBe('OPEN');
     expect(d.closedAt).toBeNull();
+  });
+
+  it('edits a deal title/amount/contact', async () => {
+    const { pipelineId } = await setup();
+    const created = await createDealAction({ pipelineId, title: 'Черновик', amount: '10' });
+    const dealId = created.ok ? created.data!.id : '';
+    const contact = await createContactAction({ name: 'Клиент Контакт' });
+    const contactId = contact.ok ? contact.data!.id : '';
+
+    const res = await updateDealAction(dealId, { title: 'Финал', amount: '5000', contactId });
+    expect(res.ok).toBe(true);
+    const d = await prisma.deal.findUniqueOrThrow({ where: { id: dealId } });
+    expect(d.title).toBe('Финал');
+    expect(d.amount?.toString()).toBe('5000');
+    expect(d.contactId).toBe(contactId);
+  });
+
+  it('forbids a MEMBER from editing a deal', async () => {
+    const { pipelineId } = await setup();
+    const created = await createDealAction({ pipelineId, title: 'Защита', amount: '1' });
+    const dealId = created.ok ? created.data!.id : '';
+    const member = await makeUser({ role: 'MEMBER' });
+    mockMe.id = member.id;
+    mockMe.role = 'MEMBER';
+    const res = await updateDealAction(dealId, { title: 'Взлом' });
+    expect(res.ok).toBe(false);
   });
 
   it('rejects moving a deal to a stage from another pipeline', async () => {

@@ -20,6 +20,7 @@ export type BoardDeal = {
   amount: number | null;
   currency: string;
   status: 'OPEN' | 'WON' | 'LOST';
+  contactId: string | null;
   contactName: string | null;
   ownerName: string | null;
 };
@@ -74,6 +75,7 @@ export async function listDealsForPipeline(pipelineId: string): Promise<BoardDea
         amount: true,
         currency: true,
         status: true,
+        contactId: true,
         contact: { select: { name: true } },
         owner: { select: { name: true } },
       },
@@ -85,6 +87,7 @@ export async function listDealsForPipeline(pipelineId: string): Promise<BoardDea
       amount: num(d.amount),
       currency: d.currency,
       status: d.status,
+      contactId: d.contactId ?? null,
       contactName: d.contact?.name ?? null,
       ownerName: d.owner?.name ?? null,
     }));
