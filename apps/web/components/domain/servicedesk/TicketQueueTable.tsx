@@ -2,7 +2,7 @@
 
 import { useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { setTicketStatusAction } from '@/actions/servicedesk';
+import { setTicketStatusAction, assignTicketAction } from '@/actions/servicedesk';
 import { ticketSlaState } from '@/lib/servicedesk/sla';
 import type { TicketRow } from '@/lib/servicedesk';
 import { SlaBadge } from './SlaBadge';
@@ -22,7 +22,15 @@ const PRIORITY_LABELS: Record<TicketRow['priority'], string> = {
 };
 const SEVERITY: Record<string, number> = { breached: 4, 'due-soon': 3, 'on-track': 2, met: 1, none: 0 };
 
-export function TicketQueueTable({ tickets, canEdit }: { tickets: TicketRow[]; canEdit: boolean }) {
+export function TicketQueueTable({
+  tickets,
+  canEdit,
+  assignableUsers = [],
+}: {
+  tickets: TicketRow[];
+  canEdit: boolean;
+  assignableUsers?: { id: string; name: string }[];
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const now = Date.now();
@@ -34,6 +42,14 @@ export function TicketQueueTable({ tickets, canEdit }: { tickets: TicketRow[]; c
   function setStatus(id: string, status: string) {
     startTransition(async () => {
       const res = await setTicketStatusAction(id, status);
+      if (res.ok) router.refresh();
+      else alert(res.error.message);
+    });
+  }
+
+  function setAssignee(id: string, assigneeId: string) {
+    startTransition(async () => {
+      const res = await assignTicketAction(id, assigneeId || null);
       if (res.ok) router.refresh();
       else alert(res.error.message);
     });
@@ -85,7 +101,24 @@ export function TicketQueueTable({ tickets, canEdit }: { tickets: TicketRow[]; c
                   <span className="text-muted-foreground">{STATUS_LABELS[t.status]}</span>
                 )}
               </td>
-              <td className="px-3 py-2 text-muted-foreground">{t.assigneeName ?? '—'}</td>
+              <td className="px-3 py-2">
+                {canEdit ? (
+                  <select
+                    value={t.assigneeId ?? ''}
+                    disabled={pending}
+                    onChange={(e) => setAssignee(t.id, e.target.value)}
+                    aria-label="Исполнитель"
+                    className="h-8 max-w-[12rem] rounded border border-input bg-background px-1 text-xs"
+                  >
+                    <option value="">— не назначен —</option>
+                    {assignableUsers.map((u) => (
+                      <option key={u.id} value={u.id}>{u.name}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <span className="text-muted-foreground">{t.assigneeName ?? '—'}</span>
+                )}
+              </td>
             </tr>
           ))}
         </tbody>

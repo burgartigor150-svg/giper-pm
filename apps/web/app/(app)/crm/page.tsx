@@ -2,12 +2,13 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@giper/ui/components/Card';
 import { requireAuth } from '@/lib/auth';
-import { canSeeCrm, canEditCrm } from '@/lib/permissions';
+import { canSeeCrm, canEditCrm, canDeleteCrmPipeline } from '@/lib/permissions';
 import { listPipelines, listDealsForPipeline, getPipelineSummary, listContacts } from '@/lib/crm';
 import { DealPipeline } from '@/components/domain/crm/DealPipeline';
 import { NewDealForm } from '@/components/domain/crm/NewDealForm';
 import { PipelineSummary } from '@/components/domain/crm/PipelineSummary';
 import { CreateDefaultPipelineButton } from '@/components/domain/crm/CreateDefaultPipelineButton';
+import { ArchivePipelineButton } from '@/components/domain/crm/ArchivePipelineButton';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,6 +19,7 @@ export default async function CrmPage({ searchParams }: { searchParams: SP }) {
   if (!canSeeCrm({ id: me.id, role: me.role })) notFound();
 
   const canEdit = canEditCrm({ id: me.id, role: me.role });
+  const canArchivePipeline = canDeleteCrmPipeline({ id: me.id, role: me.role });
   const pipelines = await listPipelines();
 
   if (pipelines.length === 0) {
@@ -66,6 +68,12 @@ export default async function CrmPage({ searchParams }: { searchParams: SP }) {
           <Link href="/crm/contacts" className="rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-muted/60">
             Контакты
           </Link>
+          {canArchivePipeline ? (
+            <ArchivePipelineButton
+              pipelineId={pipeline.id}
+              pipelineName={pipeline.name}
+            />
+          ) : null}
         </div>
       </div>
 

@@ -7,6 +7,7 @@ export type TicketRow = {
   requesterEmail: string | null;
   priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
   status: 'OPEN' | 'IN_PROGRESS' | 'WAITING' | 'RESOLVED' | 'CLOSED';
+  assigneeId: string | null;
   assigneeName: string | null;
   firstResponseDueAt: Date | null;
   resolutionDueAt: Date | null;
@@ -35,6 +36,7 @@ export async function listTickets(): Promise<TicketRow[]> {
         firstRespondedAt: true,
         resolvedAt: true,
         createdAt: true,
+        assigneeId: true,
         assignee: { select: { name: true } },
       },
     });
@@ -45,6 +47,7 @@ export async function listTickets(): Promise<TicketRow[]> {
       requesterEmail: t.requesterEmail,
       priority: t.priority,
       status: t.status,
+      assigneeId: t.assigneeId,
       assigneeName: t.assignee?.name ?? null,
       firstResponseDueAt: t.firstResponseDueAt,
       resolutionDueAt: t.resolutionDueAt,

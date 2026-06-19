@@ -33,6 +33,7 @@ import {
   moveDealStageAction,
   setDealStatusAction,
   createContactAction,
+  archivePipelineAction,
 } from '@/actions/crm';
 import { listPipelines, getPipelineSummary } from '@/lib/crm';
 import { makeUser } from './helpers/factories';
@@ -157,5 +158,27 @@ describe('CRM — contacts & rbac', () => {
     mockMe.role = 'MEMBER';
     expect((await createDefaultPipelineAction()).ok).toBe(false);
     expect((await createContactAction({ name: 'X Y' })).ok).toBe(false);
+  });
+
+  it('ADMIN archives a pipeline → archivedAt set, drops from listPipelines', async () => {
+    const { pipelineId } = await setup();
+    const res = await archivePipelineAction(pipelineId);
+    expect(res.ok).toBe(true);
+    const row = await prisma.pipeline.findUniqueOrThrow({ where: { id: pipelineId } });
+    expect(row.archivedAt).not.toBeNull();
+    const list = await listPipelines();
+    expect(list.find((p) => p.id === pipelineId)).toBeUndefined();
+  });
+
+  it('non-ADMIN (PM) cannot archive a pipeline → DENY, stays active', async () => {
+    const { pipelineId } = await setup();
+    const pm = await makeUser({ role: 'PM' });
+    mockMe.id = pm.id;
+    mockMe.role = 'PM';
+    const res = await archivePipelineAction(pipelineId);
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error.code).toBe('INSUFFICIENT_PERMISSIONS');
+    const row = await prisma.pipeline.findUniqueOrThrow({ where: { id: pipelineId } });
+    expect(row.archivedAt).toBeNull();
   });
 });
