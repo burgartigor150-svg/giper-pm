@@ -2,13 +2,14 @@
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Play, Square, Trash2, Plus } from 'lucide-react';
+import { Play, Square, Trash2, Plus, Pencil } from 'lucide-react';
 import { Button } from '@giper/ui/components/Button';
 import {
   createSprintAction,
   startSprintAction,
   closeSprintAction,
   deleteSprintAction,
+  updateSprintAction,
 } from '@/actions/sprints';
 import type { SprintView, SprintStatusValue } from '@/lib/sprints/getSprints';
 
@@ -34,7 +35,40 @@ export function SprintsForm({ projectKey, initial, canManage }: Props) {
   const [start, setStart] = useState('');
   const [end, setEnd] = useState('');
 
-  function run(fn: () => Promise<{ ok: boolean; error?: { message: string }; data?: { carried?: number } }>) {
+  // Inline edit of an existing sprint.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [eName, setEName] = useState('');
+  const [eGoal, setEGoal] = useState('');
+  const [eStart, setEStart] = useState('');
+  const [eEnd, setEEnd] = useState('');
+
+  function startEdit(s: SprintView) {
+    setError(null);
+    setEditingId(s.id);
+    setEName(s.name);
+    setEGoal(s.goal ?? '');
+    setEStart(s.startDate ?? '');
+    setEEnd(s.endDate ?? '');
+  }
+
+  function saveEdit(s: SprintView) {
+    if (eName.trim().length < 2) {
+      setError('Название ≥ 2 символов');
+      return;
+    }
+    run(async () => {
+      const res = await updateSprintAction(s.id, {
+        name: eName.trim(),
+        goal: eGoal.trim() || undefined,
+        startDate: eStart || undefined,
+        endDate: eEnd || undefined,
+      });
+      if (res.ok) setEditingId(null);
+      return res;
+    });
+  }
+
+  function run(fn: () => Promise<{ ok: boolean; error?: { message: string } }>) {
     setError(null);
     startTransition(async () => {
       const res = await fn();
@@ -115,6 +149,15 @@ export function SprintsForm({ projectKey, initial, canManage }: Props) {
                     ) : null}
                     <button
                       type="button"
+                      title="Редактировать"
+                      onClick={() => startEdit(s)}
+                      disabled={pending}
+                      className="rounded p-1 text-muted-foreground hover:bg-accent disabled:opacity-50"
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
                       title="Удалить"
                       onClick={() => remove(s)}
                       disabled={pending}
@@ -125,7 +168,69 @@ export function SprintsForm({ projectKey, initial, canManage }: Props) {
                   </span>
                 ) : null}
               </div>
-              {s.goal ? <p className="mt-1 text-xs text-muted-foreground">{s.goal}</p> : null}
+              {s.goal && editingId !== s.id ? (
+                <p className="mt-1 text-xs text-muted-foreground">{s.goal}</p>
+              ) : null}
+              {editingId === s.id ? (
+                <div className="mt-2 flex flex-col gap-2 rounded-md border border-dashed p-2">
+                  <input
+                    value={eName}
+                    onChange={(e) => setEName(e.target.value)}
+                    disabled={pending}
+                    maxLength={120}
+                    placeholder="Название спринта"
+                    className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                  />
+                  <div className="flex flex-wrap gap-2">
+                    <label className="flex items-center gap-1 text-xs text-muted-foreground">
+                      с
+                      <input
+                        type="date"
+                        value={eStart}
+                        onChange={(e) => setEStart(e.target.value)}
+                        disabled={pending}
+                        className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+                      />
+                    </label>
+                    <label className="flex items-center gap-1 text-xs text-muted-foreground">
+                      по
+                      <input
+                        type="date"
+                        value={eEnd}
+                        onChange={(e) => setEEnd(e.target.value)}
+                        disabled={pending}
+                        className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+                      />
+                    </label>
+                  </div>
+                  <input
+                    value={eGoal}
+                    onChange={(e) => setEGoal(e.target.value)}
+                    disabled={pending}
+                    maxLength={2000}
+                    placeholder="Цель спринта (необязательно)"
+                    className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                  />
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => saveEdit(s)}
+                      disabled={pending || eName.trim() === ''}
+                    >
+                      {pending ? 'Сохраняю…' : 'Сохранить'}
+                    </Button>
+                    <button
+                      type="button"
+                      onClick={() => setEditingId(null)}
+                      disabled={pending}
+                      className="rounded-md border border-input px-2 py-1 text-xs hover:bg-accent disabled:opacity-50"
+                    >
+                      Отмена
+                    </button>
+                  </div>
+                </div>
+              ) : null}
             </li>
           ))}
         </ul>
