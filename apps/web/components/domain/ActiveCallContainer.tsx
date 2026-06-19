@@ -18,7 +18,7 @@ import {
 } from '@livekit/components-react';
 import '@livekit/components-styles';
 import { Track, type RoomConnectOptions } from 'livekit-client';
-import { Maximize2, Minimize2, PhoneOff, UserPlus } from 'lucide-react';
+import { LogOut, Maximize2, Minimize2, PhoneOff, UserPlus } from 'lucide-react';
 import { useActiveCall } from './ActiveCallProvider';
 import { createMeetingInviteAction, endMeetingAction } from '@/actions/meetings';
 
@@ -49,15 +49,25 @@ export function ActiveCallContainer() {
 
   if (!call) return null;
 
-  function hangUp() {
+  // Leave the call for THIS participant only — disconnect locally (unmount
+  // the LiveKitRoom by clearing the call) without ending the meeting for
+  // everyone else. The meeting stays ACTIVE in the DB for the others.
+  function leave() {
+    setCall(null);
+    router.refresh();
+  }
+
+  // End the meeting FOR EVERYONE. Server-gated (creator / project PM / ADMIN);
+  // a non-host gets a clear error instead of silently ending nothing.
+  function endForAll() {
     if (!call) return;
     const id = call.meetingId;
     startEnd(async () => {
-      try {
-        await endMeetingAction({ meetingId: id });
-      } catch {
-        /* swallow — the room close below is what really ends the
-           session for this client */
+      const r = await endMeetingAction({ meetingId: id });
+      if (!r.ok) {
+        // eslint-disable-next-line no-alert
+        alert(r.message);
+        return;
       }
       setCall(null);
       router.refresh();
@@ -144,11 +154,20 @@ export function ActiveCallContainer() {
           </button>
           <button
             type="button"
-            onClick={hangUp}
+            onClick={leave}
+            className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            aria-label="Выйти из звонка"
+            title="Выйти (звонок продолжится у остальных)"
+          >
+            <LogOut className="size-4" />
+          </button>
+          <button
+            type="button"
+            onClick={endForAll}
             disabled={endPending}
             className="rounded-md p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
-            aria-label="Завершить звонок"
-            title="Завершить звонок"
+            aria-label="Завершить звонок для всех"
+            title="Завершить для всех"
           >
             <PhoneOff className="size-4" />
           </button>
