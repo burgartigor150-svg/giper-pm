@@ -98,7 +98,7 @@ export function ContactRow({ contact, canEdit }: { contact: Contact; canEdit: bo
   }
 
   return (
-    <li className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
+    <li id={`contact-${contact.id}`} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm scroll-mt-20">
       <span className="min-w-0">
         <span className="font-medium">{contact.name}</span>
         {contact.company ? <span className="text-muted-foreground"> · {contact.company}</span> : null}
