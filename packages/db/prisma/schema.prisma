@@ -419,10 +419,14 @@ model Project {
   webhooks        Webhook[]
   /// Kaiten-style Scrum sprints (time-boxed iterations) for this project.
   sprints         Sprint[]
+  /// Kaiten-style Space (folder) this project belongs to. Nullable = ungrouped.
+  spaceId         String?
+  space           Space?          @relation(fields: [spaceId], references: [id], onDelete: SetNull)
 
   @@unique([externalSource, externalId])
   @@index([status])
   @@index([ownerId])
+  @@index([spaceId])
 }
 
 /// Kaiten-style outgoing webhook: POSTs a JSON event to an external URL when
@@ -564,6 +568,25 @@ model Contact {
 
   @@index([ownerId])
   @@index([email])
+}
+
+/// Kaiten-style Space: an org-level folder that GROUPS projects. Additive —
+/// projects with spaceId=null are simply ungrouped (today's behavior). v1 does
+/// NOT re-root tasks/boards under spaces (that's a future epic) and grants no
+/// access by itself; project visibility is unchanged.
+model Space {
+  id          String    @id @default(cuid())
+  name        String
+  description String?
+  order       Int       @default(0)
+  color       String?
+  archivedAt  DateTime?
+  createdById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  projects    Project[]
+
+  @@index([archivedAt, order])
 }
 
 /// A named sales pipeline. "Selected" pipeline is URL state; first-by-order = default.

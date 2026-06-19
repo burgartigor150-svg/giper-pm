@@ -4,16 +4,29 @@ import { Card, CardContent, CardHeader, CardTitle } from '@giper/ui/components/C
 import { requireAuth } from '@/lib/auth';
 import { canSeeSettings } from '@/lib/permissions';
 import { getT } from '@/lib/i18n';
+import { getSpaces } from '@/lib/spaces/getSpaces';
+import { SpacesForm } from '@/components/domain/SpacesForm';
 
 export default async function SettingsPage() {
   const user = await requireAuth();
   if (!canSeeSettings({ id: user.id, role: user.role })) notFound();
   const t = await getT('settings');
   const tUsers = await getT('users');
+  const spaces = await getSpaces();
 
   return (
     <div className="mx-auto max-w-3xl space-y-4">
       <h1 className="text-xl font-semibold">{t('title')}</h1>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Пространства</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <SpacesForm initial={spaces} canManage={canSeeSettings({ id: user.id, role: user.role })} />
+        </CardContent>
+      </Card>
+
       {user.role === 'ADMIN' ? (
         <>
           <Card>

@@ -89,6 +89,10 @@ export async function listProjectsForUser(user: SessionUser, filter: ListFilter 
       owner: { select: { id: true, name: true, email: true, image: true } },
       _count: { select: { members: true, tasks: true } },
       updatedAt: true,
+      // Space grouping. SELECT only — the `where` (per-stake visibility) is
+      // untouched, so grouping by space can never widen what a user sees.
+      spaceId: true,
+      space: { select: { id: true, name: true, order: true } },
     },
   });
 }
