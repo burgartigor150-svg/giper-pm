@@ -10,6 +10,12 @@ export type BoardFilter = {
   onlyMine?: boolean;
   /** Tag IDs (from Tag model) — task must have ALL of them assigned. */
   tagIds?: string[];
+  /**
+   * Sprint scope. A sprint id restricts to that sprint's cards; `null`
+   * restricts to the backlog (no sprint); undefined = no sprint filter.
+   * Applied as a top-level AND so the per-stake OR is preserved.
+   */
+  sprintId?: string | null;
 };
 
 /**
@@ -133,6 +139,10 @@ export async function listTasksForBoard(
   } else if (filter.assigneeId) {
     where.assigneeId = filter.assigneeId;
   }
+
+  // Sprint scope: top-level key → ANDed with the per-stake OR (never clobbers
+  // it). `null` means backlog (sprintId IS NULL); a string means that sprint.
+  if (filter.sprintId !== undefined) where.sprintId = filter.sprintId;
 
   if (filter.priority) where.priority = filter.priority;
   if (filter.q) {
