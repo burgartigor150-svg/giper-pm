@@ -143,6 +143,12 @@ function ymd(d: Date): string {
 function dayKey(d: Date): string {
   return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
 }
+/** dayKey() equivalent for an ISO `YYYY-MM-DD` string (month is 1-based
+ *  in the ISO form, 0-based in dayKey) — no Date parse, so TZ-safe. */
+function dayKeyFromIso(iso: string): string {
+  const [y, m, d] = iso.split('-').map(Number);
+  return `${y}-${(m ?? 1) - 1}-${d}`;
+}
 function startOfDay(d: Date): Date {
   const x = new Date(d);
   x.setHours(0, 0, 0, 0);
@@ -660,7 +666,10 @@ export function Calendar({
               <DayList
                 anchor={anchor}
                 buckets={buckets}
-                events={eventBuckets.get(anchor) ?? []}
+                // eventBuckets is keyed by dayKey() (0-based month), but
+                // `anchor` is an ISO ymd string (1-based, padded) — looking it
+                // up directly silently dropped every event in day view.
+                events={eventBuckets.get(dayKeyFromIso(anchor)) ?? []}
                 currentUserId={currentUserId}
               />
             )}
