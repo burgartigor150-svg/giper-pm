@@ -231,3 +231,15 @@ export function canSeeReports(user: SessionUser): boolean {
 export function canSeeSettings(user: SessionUser): boolean {
   return user.role === 'ADMIN' || user.role === 'PM';
 }
+
+/** CRM is org-level sales data — ADMIN/PM see and edit it; others are excluded. */
+export function canSeeCrm(user: SessionUser): boolean {
+  return user.role === 'ADMIN' || user.role === 'PM';
+}
+export function canEditCrm(user: SessionUser): boolean {
+  return user.role === 'ADMIN' || user.role === 'PM';
+}
+/** Destructive pipeline ops (archive/delete) are ADMIN-only. */
+export function canDeleteCrmPipeline(user: SessionUser): boolean {
+  return user.role === 'ADMIN';
+}
