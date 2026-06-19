@@ -68,6 +68,14 @@ export function LeadRow({
     setEditing(false);
   }
 
+  function resetConvert() {
+    setDealTitle('');
+    setAmount('');
+    setCreateDeal(hasPipeline);
+    setError(null);
+    setConverting(false);
+  }
+
   function save() {
     setError(null);
     if (name.trim().length < 2) {
@@ -178,7 +186,12 @@ export function LeadRow({
           {lead.source ? <span className="italic">{lead.source}</span> : null}
           {lead.status === 'CONVERTED' ? (
             <span className="flex items-center gap-2">
-              <Link href="/crm/contacts" className="hover:underline">→ контакт</Link>
+              <Link
+                href={lead.convertedContactId ? `/crm/contacts#contact-${lead.convertedContactId}` : '/crm/contacts'}
+                className="hover:underline"
+              >
+                → контакт
+              </Link>
               {lead.convertedDealId ? (
                 <Link href="/crm" className="hover:underline">→ сделка</Link>
               ) : null}
@@ -188,7 +201,7 @@ export function LeadRow({
             <span className="flex items-center gap-1">
               <button
                 type="button"
-                onClick={() => { setConverting((v) => !v); setError(null); }}
+                onClick={() => (converting ? resetConvert() : (setConverting(true), setError(null)))}
                 disabled={pending}
                 aria-label={`Конвертировать ${lead.name}`}
                 className="rounded-md p-1 hover:bg-emerald-500/10 hover:text-emerald-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
@@ -287,7 +300,7 @@ export function LeadRow({
               size="sm"
               variant="outline"
               disabled={pending}
-              onClick={() => { setConverting(false); setError(null); }}
+              onClick={resetConvert}
             >
               <X className="h-3.5 w-3.5" /> Отмена
             </Button>

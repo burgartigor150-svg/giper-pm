@@ -15,7 +15,9 @@ export default async function CrmLeadsPage() {
   const canEdit = canEditCrm({ id: me.id, role: me.role });
   const [leads, pipelines] = await Promise.all([listLeads(), listPipelines()]);
   const hasPipeline = pipelines.length > 0;
-  const active = leads.filter((l) => l.status !== 'CONVERTED').length;
+  // "Active" = still in the funnel and actionable. DISQUALIFIED leads are
+  // out of work (LeadRow only offers reactivate/delete), so exclude them too.
+  const active = leads.filter((l) => l.status === 'NEW').length;
 
   return (
     <div className="mx-auto max-w-4xl space-y-4">
