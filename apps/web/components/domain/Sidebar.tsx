@@ -9,6 +9,7 @@ import {
   Clock,
   BarChart3,
   Handshake,
+  LifeBuoy,
   Settings,
   Users,
   User,
@@ -38,6 +39,7 @@ export type NavKey =
   | 'meetings'
   | 'reports'
   | 'crm'
+  | 'servicedesk'
   | 'settings';
 
 export type NavItem = {
@@ -57,6 +59,7 @@ const ICONS: Record<NavKey, React.ComponentType<{ className?: string }>> = {
   meetings: Video,
   reports: BarChart3,
   crm: Handshake,
+  servicedesk: LifeBuoy,
   settings: Settings,
 };
 

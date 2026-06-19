@@ -57,6 +57,8 @@ model User {
   /// CRM ownership (org-level sales).
   ownedContacts     Contact[]            @relation("ContactOwner")
   ownedDeals        Deal[]               @relation("DealOwner")
+  /// Service-desk tickets assigned to this agent.
+  assignedTickets   Ticket[]             @relation("TicketAssignee")
   memberProjects    ProjectMember[]
   /// Bitrix-mirror project memberships. Used by visibility checks
   /// alongside task stakes (see ProjectBitrixMember).
@@ -587,6 +589,43 @@ model Space {
   projects    Project[]
 
   @@index([archivedAt, order])
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING     // ждём ответа заявителя
+  RESOLVED
+  CLOSED
+}
+
+/// Kaiten-style service-desk ticket. Standalone v1 (NOT a Task) — an agent
+/// logs a request from an external/internal requester (free-text). SLA due
+/// times are stamped at creation from a per-priority policy; the on-track /
+/// breached STATE is derived at render from due times + now (no stored flag).
+/// (Future v2 may re-flavor tickets as Task type=REQUEST — see design spec.)
+model Ticket {
+  id                 String       @id @default(cuid())
+  subject            String
+  description        String?      @db.Text
+  requesterName      String
+  requesterEmail     String?
+  priority           TaskPriority @default(MEDIUM)
+  status             TicketStatus @default(OPEN)
+  assigneeId         String?
+  assignee           User?        @relation("TicketAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  /// SLA targets stamped at creation from the priority policy.
+  firstResponseDueAt DateTime?
+  resolutionDueAt    DateTime?
+  /// Lifecycle stamps — stop the respective SLA clock.
+  firstRespondedAt   DateTime?
+  resolvedAt         DateTime?
+  createdById        String?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  @@index([status, resolutionDueAt])
+  @@index([assigneeId, status])
 }
 
 /// A named sales pipeline. "Selected" pipeline is URL state; first-by-order = default.
