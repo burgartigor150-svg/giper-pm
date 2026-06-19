@@ -30,6 +30,17 @@ export async function signInWithCredentials(
   }
 }
 
+/** True when SSO (Google) is configured on this deployment. */
+export async function isSsoEnabled(): Promise<boolean> {
+  return !!(process.env.AUTH_GOOGLE_ID && process.env.AUTH_GOOGLE_SECRET);
+}
+
+/** Start the Google OAuth flow. Only works when SSO is configured. */
+export async function signInWithGoogle(callbackUrl = '/dashboard'): Promise<void> {
+  // signIn() throws NEXT_REDIRECT on success — let Next handle it.
+  await signIn('google', { redirectTo: callbackUrl });
+}
+
 export async function signOutAction() {
   await signOut({ redirectTo: '/login' });
 }
