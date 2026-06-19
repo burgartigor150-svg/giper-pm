@@ -80,11 +80,17 @@ export function QuickAddDialog() {
     if (!open || projects !== null) return;
     listMyProjects().then((list) => {
       setProjects(list);
-      const last =
-        typeof window !== 'undefined' ? window.localStorage.getItem(LAST_PROJECT_KEY) : null;
-      const initial =
-        list.find((p) => p.key === last)?.key ?? list[0]?.key ?? '';
-      setProjectKey(initial);
+      // Don't override a project the open-event already chose (e.g.
+      // "+ Подзадача" locks the dialog to the parent task's project — the
+      // select is disabled, so overriding it here made subtask creation
+      // fail with "must be in the same project"). Functional updater keeps
+      // an already-set key; otherwise fall back to last-used / first.
+      setProjectKey((cur) => {
+        if (cur) return cur;
+        const last =
+          typeof window !== 'undefined' ? window.localStorage.getItem(LAST_PROJECT_KEY) : null;
+        return list.find((p) => p.key === last)?.key ?? list[0]?.key ?? '';
+      });
     });
   }, [open, projects]);
 

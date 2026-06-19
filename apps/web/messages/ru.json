@@ -114,6 +114,8 @@
     "closeMenu": "Закрыть меню",
     "userMenu": {
       "security": "Безопасность",
+      "notifications": "Уведомления",
+      "apiTokens": "API-токены",
       "signOut": "Выйти"
     }
   },
