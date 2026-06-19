@@ -45,6 +45,62 @@ export function SprintBurndownChart({ data }: { data: SprintBurndown }) {
         />
       </div>
 
+      {/* Real historical burn line from daily snapshots, once ≥2 exist. */}
+      {data.history.length >= 2
+        ? (() => {
+            const W = 300;
+            const H = 80;
+            const maxY = Math.max(
+              1,
+              data.committed,
+              ...data.history.map((h) => h.remaining),
+            );
+            const n = data.history.length;
+            const x = (i: number) => (i / (n - 1)) * W;
+            const y = (v: number) =>
+              H - (Math.max(0, Math.min(maxY, v)) / maxY) * H;
+            const line = data.history
+              .map(
+                (h, i) =>
+                  `${i === 0 ? 'M' : 'L'} ${x(i).toFixed(1)} ${y(h.remaining).toFixed(1)}`,
+              )
+              .join(' ');
+            const startRemaining = data.history[0]!.remaining;
+            return (
+              <div>
+                <svg
+                  viewBox={`0 0 ${W} ${H}`}
+                  className="h-24 w-full rounded-md border bg-muted/20"
+                  preserveAspectRatio="none"
+                  aria-label="Burndown по дням"
+                >
+                  <line
+                    x1={0}
+                    y1={y(startRemaining)}
+                    x2={W}
+                    y2={y(0)}
+                    className="stroke-muted-foreground/40"
+                    strokeWidth={1}
+                    strokeDasharray="4 3"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                  <path
+                    d={line}
+                    fill="none"
+                    className="stroke-emerald-500"
+                    strokeWidth={1.5}
+                    vectorEffect="non-scaling-stroke"
+                  />
+                </svg>
+                <div className="flex justify-between text-[10px] text-muted-foreground">
+                  <span>{data.history[0]!.date}</span>
+                  <span>{data.history[n - 1]!.date}</span>
+                </div>
+              </div>
+            );
+          })()
+        : null}
+
       {idealRemaining != null ? (
         <p className="text-xs text-muted-foreground">
           Идеальный темп на сегодня: осталось бы ≈ {idealRemaining} {unit}.{' '}
@@ -58,9 +114,10 @@ export function SprintBurndownChart({ data }: { data: SprintBurndown }) {
 
       <p className="text-[11px] text-muted-foreground">
         Прогресс считается по внутреннему статусу доски (DONE/CANCELED = сожжено),
-        а не по Bitrix-статусу. Это срез на сейчас — историческую линию по дням
-        пока не строим (нет посуточных снимков; перетаскивание на доске их не
-        пишет). Полноценный исторический burndown — отдельная доработка.
+        а не по Bitrix-статусу.{' '}
+        {data.history.length >= 2
+          ? 'Линия — фактический остаток по дням (посуточные снимки), пунктир — идеальный темп.'
+          : 'Историческая линия появится, когда накопятся посуточные снимки (пишутся ежедневным cron).'}
       </p>
     </div>
   );

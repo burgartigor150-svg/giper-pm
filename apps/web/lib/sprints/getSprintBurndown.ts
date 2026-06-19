@@ -14,6 +14,9 @@ export type SprintBurndown = {
   totalCount: number;
   startDate: string | null;
   endDate: string | null;
+  /** Real per-day remaining, from SprintSnapshot (daily cron). Empty until
+   *  snapshots accumulate — the chart falls back to the projection then. */
+  history: { date: string; remaining: number }[];
 };
 
 /**
@@ -56,6 +59,16 @@ export async function getSprintBurndown(sprintId: string): Promise<SprintBurndow
       remaining = totalCount - doneCount;
     }
 
+    const snaps = await prisma.sprintSnapshot.findMany({
+      where: { sprintId },
+      orderBy: { date: 'asc' },
+      select: { date: true, remainingPoints: true, remainingTasks: true },
+    });
+    const history = snaps.map((s) => ({
+      date: s.date.toISOString().slice(0, 10),
+      remaining: usePoints ? s.remainingPoints : s.remainingTasks,
+    }));
+
     return {
       usePoints,
       committed,
@@ -64,6 +77,7 @@ export async function getSprintBurndown(sprintId: string): Promise<SprintBurndow
       totalCount,
       startDate: sprint.startDate ? sprint.startDate.toISOString().slice(0, 10) : null,
       endDate: sprint.endDate ? sprint.endDate.toISOString().slice(0, 10) : null,
+      history,
     };
   } catch (e) {
     console.warn('getSprintBurndown: unavailable', e);
