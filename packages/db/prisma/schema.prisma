@@ -54,6 +54,9 @@ model User {
   pushSubscriptions PushSubscription[]
   agentDevices      AgentDevice[]
   ownedProjects     Project[]            @relation("ProjectOwner")
+  /// CRM ownership (org-level sales).
+  ownedContacts     Contact[]            @relation("ContactOwner")
+  ownedDeals        Deal[]               @relation("DealOwner")
   memberProjects    ProjectMember[]
   /// Bitrix-mirror project memberships. Used by visibility checks
   /// alongside task stakes (see ProjectBitrixMember).
@@ -524,6 +527,103 @@ model Sprint {
   tasks       Task[]
 
   @@index([projectId, status])
+}
+
+// ============================================================================
+// CRM (org-level sales): Contact, Pipeline, PipelineStage, Deal.
+// ADMIN/PM only. Additive + self-contained — no link to Project/Task in v1.
+// ============================================================================
+
+enum DealStatus {
+  OPEN
+  WON
+  LOST
+}
+
+/// Marks a pipeline stage as a terminal drop-zone. null = NORMAL.
+enum StageKind {
+  NORMAL
+  WON
+  LOST
+}
+
+/// A CRM contact (person/company). Owner FK SetNull — sales history outlives staff.
+model Contact {
+  id        String    @id @default(cuid())
+  name      String
+  email     String?
+  phone     String?
+  company   String?
+  notes     String?   @db.Text
+  ownerId   String?
+  owner     User?     @relation("ContactOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+  deals     Deal[]
+
+  @@index([ownerId])
+  @@index([email])
+}
+
+/// A named sales pipeline. "Selected" pipeline is URL state; first-by-order = default.
+model Pipeline {
+  id          String          @id @default(cuid())
+  name        String
+  description String?
+  order       Int             @default(0)
+  archivedAt  DateTime?
+  createdById String?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  stages      PipelineStage[]
+  deals       Deal[]
+
+  @@index([archivedAt, order])
+}
+
+/// An ordered stage (column) within a pipeline. kind WON/LOST = terminal.
+model PipelineStage {
+  id          String     @id @default(cuid())
+  pipelineId  String
+  pipeline    Pipeline   @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+  name        String
+  order       Int        @default(0)
+  kind        StageKind?
+  probability Int?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  deals       Deal[]
+
+  @@index([pipelineId, order])
+}
+
+/// A sales deal moving through a pipeline's stages.
+model Deal {
+  id                String        @id @default(cuid())
+  title             String
+  contactId         String?
+  contact           Contact?      @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  pipelineId        String
+  pipeline          Pipeline      @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+  stageId           String
+  stage             PipelineStage @relation(fields: [stageId], references: [id], onDelete: Cascade)
+  amount            Decimal?      @db.Decimal(14, 2)
+  currency          String        @default("RUB")
+  status            DealStatus    @default(OPEN)
+  ownerId           String?
+  owner             User?         @relation("DealOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  lostReason        String?       @db.Text
+  expectedCloseDate DateTime?
+  closedAt          DateTime?
+  createdById       String?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  deletedAt         DateTime?
+
+  @@index([pipelineId, stageId])
+  @@index([ownerId, status])
+  @@index([contactId])
 }
 
 /// A Telegram group or channel whose messages PM wants to turn into tasks.

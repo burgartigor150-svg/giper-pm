@@ -8,6 +8,7 @@ import {
   FolderKanban,
   Clock,
   BarChart3,
+  Handshake,
   Settings,
   Users,
   User,
@@ -36,6 +37,7 @@ export type NavKey =
   | 'telegram'
   | 'meetings'
   | 'reports'
+  | 'crm'
   | 'settings';
 
 export type NavItem = {
@@ -54,6 +56,7 @@ const ICONS: Record<NavKey, React.ComponentType<{ className?: string }>> = {
   telegram: Send,
   meetings: Video,
   reports: BarChart3,
+  crm: Handshake,
   settings: Settings,
 };
 
