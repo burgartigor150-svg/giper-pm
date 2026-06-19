@@ -338,9 +338,34 @@ export async function joinChannelAction(channelId: string): Promise<ActionResult
 
 export async function leaveChannelAction(channelId: string): Promise<ActionResult> {
   const me = await requireAuth();
-  await prisma.channelMember
-    .delete({ where: { channelId_userId: { channelId, userId: me.id } } })
-    .catch(() => null);
+  const channel = await prisma.channel.findUnique({
+    where: { id: channelId },
+    select: { id: true, kind: true },
+  });
+  if (!channel) {
+    return { ok: false, error: { code: 'NOT_FOUND', message: 'Канал не найден' } };
+  }
+  // DM/GROUP_DM are conversations between specific people — leaving one
+  // unilaterally makes no sense (mirrors deleteChannelAction's guard).
+  if (channel.kind === 'DM' || channel.kind === 'GROUP_DM') {
+    return {
+      ok: false,
+      error: { code: 'VALIDATION', message: 'Из личного чата нельзя выйти' },
+    };
+  }
+  const membership = await prisma.channelMember.findUnique({
+    where: { channelId_userId: { channelId, userId: me.id } },
+    select: { channelId: true },
+  });
+  if (!membership) {
+    return {
+      ok: false,
+      error: { code: 'NOT_FOUND', message: 'Вы не состоите в этом канале' },
+    };
+  }
+  await prisma.channelMember.delete({
+    where: { channelId_userId: { channelId, userId: me.id } },
+  });
   revalidatePath('/messages');
   return { ok: true };
 }
