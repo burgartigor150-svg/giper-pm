@@ -214,5 +214,10 @@ export function LogTaskHoursForm({
 }
 
 function isoDate(d: Date): string {
-  return d.toISOString().slice(0, 10);
+  // Local date parts — toISOString() would shift to the previous day for
+  // west-of-UTC users in the evening (it formats in UTC).
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
