@@ -208,6 +208,30 @@ export async function setCustomFieldValueAction(
   if (field.type === 'SELECT' && !opts.includes(trimmed)) {
     return { ok: false, error: { code: 'VALIDATION', message: 'Значение вне списка' } };
   }
+  // MULTI_SELECT is stored as a JSON array of option strings (see
+  // TaskCustomFieldsEditor); every member must be a known option.
+  if (field.type === 'MULTI_SELECT') {
+    let arr: unknown;
+    try {
+      arr = JSON.parse(trimmed);
+    } catch {
+      return { ok: false, error: { code: 'VALIDATION', message: 'Некорректный список значений' } };
+    }
+    if (!Array.isArray(arr) || arr.some((x) => typeof x !== 'string' || !opts.includes(x))) {
+      return { ok: false, error: { code: 'VALIDATION', message: 'Значение вне списка' } };
+    }
+  }
+  if (field.type === 'URL') {
+    try {
+      const u = new URL(trimmed);
+      if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error('proto');
+    } catch {
+      return { ok: false, error: { code: 'VALIDATION', message: 'Ожидается ссылка http(s)://' } };
+    }
+  }
+  if (field.type === 'DATE' && !/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    return { ok: false, error: { code: 'VALIDATION', message: 'Ожидается дата в формате ГГГГ-ММ-ДД' } };
+  }
 
   try {
     await prisma.customFieldValue.upsert({

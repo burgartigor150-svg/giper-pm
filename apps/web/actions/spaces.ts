@@ -40,10 +40,14 @@ export async function renameSpaceAction(spaceId: string, name: string, descripti
   if (name.trim().length < 2) {
     return { ok: false, error: { code: 'VALIDATION', message: 'Название ≥ 2 символов' } };
   }
-  await prisma.space.update({
-    where: { id: spaceId },
-    data: { name: name.trim().slice(0, 120), description: description.trim().slice(0, 1000) || null },
-  }).catch(() => {});
+  try {
+    await prisma.space.update({
+      where: { id: spaceId },
+      data: { name: name.trim().slice(0, 120), description: description.trim().slice(0, 1000) || null },
+    });
+  } catch {
+    return { ok: false, error: { code: 'NOT_FOUND', message: 'Пространство не найдено или не удалось сохранить' } };
+  }
   revalidatePath('/settings');
   revalidatePath('/projects');
   return { ok: true };
@@ -53,7 +57,11 @@ export async function renameSpaceAction(spaceId: string, name: string, descripti
 export async function deleteSpaceAction(spaceId: string): Promise<ActionResult> {
   const me = await requireAuth();
   if (!canSeeSettings({ id: me.id, role: me.role })) return DENY;
-  await prisma.space.delete({ where: { id: spaceId } }).catch(() => {});
+  try {
+    await prisma.space.delete({ where: { id: spaceId } });
+  } catch {
+    return { ok: false, error: { code: 'NOT_FOUND', message: 'Пространство не найдено или не удалось удалить' } };
+  }
   revalidatePath('/settings');
   revalidatePath('/projects');
   return { ok: true };
@@ -63,9 +71,13 @@ export async function deleteSpaceAction(spaceId: string): Promise<ActionResult> 
 export async function reorderSpacesAction(orderedIds: string[]): Promise<ActionResult> {
   const me = await requireAuth();
   if (!canSeeSettings({ id: me.id, role: me.role })) return DENY;
-  await prisma.$transaction(
-    orderedIds.map((id, i) => prisma.space.update({ where: { id }, data: { order: i } })),
-  ).catch(() => {});
+  try {
+    await prisma.$transaction(
+      orderedIds.map((id, i) => prisma.space.update({ where: { id }, data: { order: i } })),
+    );
+  } catch {
+    return { ok: false, error: { code: 'DB_ERROR', message: 'Не удалось изменить порядок' } };
+  }
   revalidatePath('/settings');
   revalidatePath('/projects');
   return { ok: true };

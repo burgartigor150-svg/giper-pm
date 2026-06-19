@@ -155,7 +155,11 @@ export async function deleteSprintAction(sprintId: string): Promise<ActionResult
   if (!canEditProject({ id: me.id, role: me.role }, s.project)) {
     return { ok: false, error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' } };
   }
-  await prisma.sprint.delete({ where: { id: sprintId } }).catch(() => {});
+  try {
+    await prisma.sprint.delete({ where: { id: sprintId } });
+  } catch {
+    return { ok: false, error: { code: 'DB_ERROR', message: 'Не удалось удалить спринт' } };
+  }
   revalidatePath(`/projects/${s.project.key}/sprints`);
   return { ok: true };
 }

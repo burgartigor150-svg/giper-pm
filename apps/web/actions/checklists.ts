@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
-import { canEditTask } from '@/lib/permissions';
+import { canEditTaskInternal } from '@/lib/permissions';
 
 /**
  * Checklist CRUD inside a task. Permission model: anyone with edit
@@ -41,7 +41,12 @@ async function loadTaskForEdit(taskId: string) {
       error: { code: 'NOT_FOUND', message: 'Не найдено' } as { code: string; message: string },
     };
   }
-  if (!canEditTask({ id: me.id, role: me.role }, task)) {
+  // Checklists are an internal-only track (they never round-trip to Bitrix),
+  // so editing them is allowed on Bitrix-mirror tasks too — use the internal
+  // gate, matching the UI's render guard (canEditTaskInternal) and the
+  // documented intent in permissions.ts. Using canEditTask here vetoed every
+  // mirror task, so the (visible, enabled) buttons silently no-op'd.
+  if (!canEditTaskInternal({ id: me.id, role: me.role }, task)) {
     return {
       task: null,
       me,

@@ -58,9 +58,11 @@ export async function unsubscribePushAction(
   endpoint: string,
 ): Promise<ActionResult> {
   const me = await requireAuth();
-  await prisma.pushSubscription
-    .deleteMany({ where: { endpoint, userId: me.id } })
-    .catch(() => null);
+  try {
+    await prisma.pushSubscription.deleteMany({ where: { endpoint, userId: me.id } });
+  } catch {
+    return { ok: false, error: { code: 'DB_ERROR', message: 'Не удалось отписаться от push' } };
+  }
   return { ok: true };
 }
 
