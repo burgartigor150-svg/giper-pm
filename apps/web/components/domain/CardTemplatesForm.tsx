@@ -185,6 +185,14 @@ export function CardTemplatesForm({ projectId, initial }: Props) {
                 placeholder="Название карточки по умолчанию (необязательно)"
                 className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
               />
+              <textarea
+                value={r.description}
+                onChange={(e) => patch(i, { description: e.target.value })}
+                disabled={pending}
+                maxLength={20_000}
+                placeholder="Описание карточки по умолчанию (необязательно)"
+                className="min-h-[60px] w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm"
+              />
             </li>
           ))}
         </ul>

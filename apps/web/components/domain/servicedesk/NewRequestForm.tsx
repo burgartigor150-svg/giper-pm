@@ -48,7 +48,7 @@ export function NewRequestForm() {
       <div className="flex flex-wrap gap-2">
         <input value={requesterName} onChange={(e) => setRequesterName(e.target.value)} disabled={pending} maxLength={200}
           placeholder="Имя заявителя" className="h-9 min-w-[10rem] flex-1 rounded-md border border-input bg-background px-2 text-sm" />
-        <input value={requesterEmail} onChange={(e) => setRequesterEmail(e.target.value)} disabled={pending} maxLength={200}
+        <input type="email" value={requesterEmail} onChange={(e) => setRequesterEmail(e.target.value)} disabled={pending} maxLength={200}
           placeholder="E-mail заявителя" className="h-9 min-w-[10rem] flex-1 rounded-md border border-input bg-background px-2 text-sm" />
         <select value={priority} onChange={(e) => setPriority(e.target.value)} disabled={pending} aria-label="Приоритет"
           className="h-9 rounded-md border border-input bg-background px-2 text-sm">

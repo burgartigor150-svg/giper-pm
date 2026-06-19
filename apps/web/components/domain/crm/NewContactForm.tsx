@@ -46,7 +46,7 @@ export function NewContactForm() {
         placeholder="Имя" className="h-9 min-w-[10rem] flex-1 rounded-md border border-input bg-background px-2 text-sm" />
       <input value={company} onChange={(e) => setCompany(e.target.value)} disabled={pending} maxLength={200}
         placeholder="Компания" className="h-9 min-w-[8rem] flex-1 rounded-md border border-input bg-background px-2 text-sm" />
-      <input value={email} onChange={(e) => setEmail(e.target.value)} disabled={pending} maxLength={200}
+      <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} disabled={pending} maxLength={200}
         placeholder="E-mail" className="h-9 min-w-[8rem] flex-1 rounded-md border border-input bg-background px-2 text-sm" />
       <input value={phone} onChange={(e) => setPhone(e.target.value)} disabled={pending} maxLength={60}
         placeholder="Телефон" className="h-9 w-36 rounded-md border border-input bg-background px-2 text-sm" />

@@ -108,18 +108,25 @@ export function TagPicker({ taskId, projectId, assigned, available, canEdit }: P
     if (!name) return;
     startTransition(async () => {
       const res = await createTagAction(projectId, name);
-      if (res.ok && res.data) {
-        const created = res.data;
-        if (!availableNow.some((t) => t.id === created.id)) {
-          setAvailableNow((prev) => [...prev, created]);
-        }
-        // assignTagToTaskAction handles the actual link.
-        await assignTagToTaskAction(taskId, created.id);
-        setAssignedNow((prev) =>
-          [...prev, created].sort((a, b) => a.name.localeCompare(b.name)),
-        );
-        setQuery('');
+      if (!res.ok || !res.data) {
+        // Was a silent no-op (e.g. non-member editor → FORBIDDEN). Surface it.
+        alert(res.ok ? 'Не удалось создать тег' : res.error.message);
+        return;
       }
+      const created = res.data;
+      if (!availableNow.some((t) => t.id === created.id)) {
+        setAvailableNow((prev) => [...prev, created]);
+      }
+      const assign = await assignTagToTaskAction(taskId, created.id);
+      if (!assign.ok) {
+        // Don't optimistically mark assigned if the link failed.
+        alert(assign.error.message);
+        return;
+      }
+      setAssignedNow((prev) =>
+        [...prev, created].sort((a, b) => a.name.localeCompare(b.name)),
+      );
+      setQuery('');
     });
   }
 

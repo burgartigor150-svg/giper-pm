@@ -36,6 +36,10 @@ export function StoryPointsField({
         setSaved(true);
         router.refresh();
         setTimeout(() => setSaved(false), 1500);
+      } else {
+        // Was a silent no-op on failure — surface it and revert the input.
+        alert(res.error.message);
+        setValue(initial != null ? String(initial) : '');
       }
     });
   }
