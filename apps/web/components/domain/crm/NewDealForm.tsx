@@ -12,10 +12,13 @@ export function NewDealForm({
   pipelineId,
   stages,
   contacts,
+  projects = [],
 }: {
   pipelineId: string;
   stages: Opt[];
   contacts: Opt[];
+  /** Pre-labeled as `KEY · name`. */
+  projects?: Opt[];
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -23,6 +26,7 @@ export function NewDealForm({
   const [amount, setAmount] = useState('');
   const [contactId, setContactId] = useState('');
   const [stageId, setStageId] = useState('');
+  const [projectId, setProjectId] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   function submit() {
@@ -38,12 +42,14 @@ export function NewDealForm({
         amount: amount || null,
         contactId: contactId || null,
         stageId: stageId || null,
+        projectId: projectId || null,
       });
       if (res.ok) {
         setTitle('');
         setAmount('');
         setContactId('');
         setStageId('');
+        setProjectId('');
         router.refresh();
       } else {
         setError(res.error.message);
@@ -93,6 +99,20 @@ export function NewDealForm({
           <option key={s.id} value={s.id}>{s.name}</option>
         ))}
       </select>
+      {projects.length > 0 ? (
+        <select
+          value={projectId}
+          onChange={(e) => setProjectId(e.target.value)}
+          disabled={pending}
+          aria-label="Проект"
+          className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+        >
+          <option value="">Без проекта</option>
+          {projects.map((p) => (
+            <option key={p.id} value={p.id}>{p.name}</option>
+          ))}
+        </select>
+      ) : null}
       <Button type="button" size="sm" onClick={submit} disabled={pending || title.trim() === ''}>
         <Plus className="mr-1 h-4 w-4" />
         {pending ? 'Создаю…' : 'Сделка'}

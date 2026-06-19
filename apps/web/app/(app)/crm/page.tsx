@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@giper/ui/components/C
 import { requireAuth } from '@/lib/auth';
 import { canSeeCrm, canEditCrm, canDeleteCrmPipeline } from '@/lib/permissions';
 import { listPipelines, listDealsForPipeline, getPipelineSummary, listContacts } from '@/lib/crm';
+import { listProjectsForUser } from '@/lib/projects';
 import { DealPipeline } from '@/components/domain/crm/DealPipeline';
 import { NewDealForm } from '@/components/domain/crm/NewDealForm';
 import { PipelineSummary } from '@/components/domain/crm/PipelineSummary';
@@ -43,11 +44,15 @@ export default async function CrmPage({ searchParams }: { searchParams: SP }) {
   const wanted = typeof sp.pipeline === 'string' ? sp.pipeline : undefined;
   const pipeline = pipelines.find((p) => p.id === wanted) ?? pipelines[0]!;
 
-  const [deals, summary, contacts] = await Promise.all([
+  const [deals, summary, contacts, allProjects] = await Promise.all([
     listDealsForPipeline(pipeline.id),
     getPipelineSummary(pipeline.id),
     listContacts(),
+    // CRM is ADMIN/PM org-level → list ALL active projects for the link
+    // selector (scope:'all' self-gates to privileged; falls back to 'mine').
+    listProjectsForUser({ id: me.id, role: me.role }, { scope: 'all', status: 'ACTIVE' }),
   ]);
+  const projectOptions = allProjects.map((p) => ({ id: p.id, key: p.key, name: p.name }));
 
   return (
     <div className="mx-auto max-w-[1400px] space-y-4">
@@ -85,6 +90,7 @@ export default async function CrmPage({ searchParams }: { searchParams: SP }) {
             pipelineId={pipeline.id}
             stages={pipeline.stages.map((s) => ({ id: s.id, name: s.name }))}
             contacts={contacts.map((c) => ({ id: c.id, name: c.name }))}
+            projects={projectOptions.map((p) => ({ id: p.id, name: `${p.key} · ${p.name}` }))}
           />
         </Card>
       ) : null}
@@ -94,6 +100,7 @@ export default async function CrmPage({ searchParams }: { searchParams: SP }) {
         deals={deals}
         canEdit={canEdit}
         contacts={contacts.map((c) => ({ id: c.id, name: c.name }))}
+        projects={projectOptions}
       />
     </div>
   );

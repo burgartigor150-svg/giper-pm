@@ -13,6 +13,7 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from '@dnd-kit/core';
+import Link from 'next/link';
 import { X, Check } from 'lucide-react';
 import { cn } from '@giper/ui/cn';
 import { Input } from '@giper/ui/components/Input';
@@ -20,6 +21,7 @@ import { moveDealStageAction, setDealStatusAction, updateDealAction } from '@/ac
 import type { BoardDeal, PipelineView } from '@/lib/crm';
 
 type ContactOption = { id: string; name: string };
+type ProjectOption = { id: string; key: string; name: string };
 type Stage = PipelineView['stages'][number];
 
 const STAGE_TINT: Record<'NORMAL' | 'WON' | 'LOST', string> = {
@@ -48,11 +50,13 @@ export function DealPipeline({
   deals: propDeals,
   canEdit,
   contacts = [],
+  projects = [],
 }: {
   pipeline: PipelineView;
   deals: BoardDeal[];
   canEdit: boolean;
   contacts?: ContactOption[];
+  projects?: ProjectOption[];
 }) {
   const router = useRouter();
   const [deals, setDeals] = useState<BoardDeal[]>(propDeals);
@@ -166,6 +170,7 @@ export function DealPipeline({
           deal={openDeal}
           stages={pipeline.stages}
           contacts={contacts}
+          projects={projects}
           canEdit={canEdit}
           onClose={() => setOpenId(null)}
           onSaved={() => router.refresh()}
@@ -278,6 +283,7 @@ function DealDrawer({
   deal,
   stages,
   contacts,
+  projects,
   canEdit,
   onClose,
   onSaved,
@@ -285,6 +291,7 @@ function DealDrawer({
   deal: BoardDeal;
   stages: Stage[];
   contacts: ContactOption[];
+  projects: ProjectOption[];
   canEdit: boolean;
   onClose: () => void;
   onSaved: () => void;
@@ -293,6 +300,7 @@ function DealDrawer({
   const [title, setTitle] = useState(deal.title);
   const [amount, setAmount] = useState(deal.amount != null ? String(deal.amount) : '');
   const [contactId, setContactId] = useState(deal.contactId ?? '');
+  const [projectId, setProjectId] = useState(deal.projectId ?? '');
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -316,6 +324,7 @@ function DealDrawer({
         title,
         amount: amount.trim() === '' ? null : amount,
         contactId: contactId || null,
+        projectId: projectId || null,
       });
       if (!res.ok) {
         setError(res.error.message);
@@ -376,6 +385,20 @@ function DealDrawer({
             <dd className="col-span-2 tabular-nums">{fmtMoney(deal.amount, deal.currency)}</dd>
             <dt className="text-muted-foreground">Контакт</dt>
             <dd className="col-span-2">{deal.contactName ?? '—'}</dd>
+            <dt className="text-muted-foreground">Проект</dt>
+            <dd className="col-span-2">
+              {deal.projectKey ? (
+                <Link
+                  href={`/projects/${deal.projectKey}`}
+                  className="text-blue-600 hover:underline dark:text-blue-400"
+                >
+                  <span className="font-mono text-xs">{deal.projectKey}</span>
+                  {deal.projectName ? ` · ${deal.projectName}` : ''}
+                </Link>
+              ) : (
+                '—'
+              )}
+            </dd>
             <dt className="text-muted-foreground">Ответственный</dt>
             <dd className="col-span-2">{deal.ownerName ?? '—'}</dd>
             {deal.status === 'LOST' && deal.lostReason ? (
@@ -408,6 +431,17 @@ function DealDrawer({
                 <option value="">— без контакта —</option>
                 {contacts.map((c) => (
                   <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+              <select
+                value={projectId}
+                onChange={(e) => setProjectId(e.target.value)}
+                aria-label="Проект"
+                className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+              >
+                <option value="">— без проекта —</option>
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>{p.key} · {p.name}</option>
                 ))}
               </select>
               {error ? <p className="text-xs text-destructive">{error}</p> : null}
