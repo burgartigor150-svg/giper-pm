@@ -32,6 +32,7 @@ import {
   fanoutToTaskAudience,
 } from '@/lib/notifications/createNotifications';
 import { autoUnblockDependents } from '@/lib/tasks/autoTransitions';
+import { linkTagsByName } from '@/lib/tags/linkTagsByName';
 import { extractValidMentions } from '@/lib/notifications/parseMentions';
 import { publishTaskEvent } from '@/lib/realtime/publishTask';
 import { canEditTaskInternal, canManageAssignments } from '@/lib/permissions';
@@ -84,12 +85,24 @@ export async function createTaskAction(
   let createdNumber: number;
   let createdId: string;
   try {
-    const created = await createTask(parsed.data as CreateTaskInput, {
-      id: me.id,
-      role: me.role,
-    });
+    // Don't write typed tags into the scalar Task.tags (a read-only Bitrix
+    // mirror) — link them to the relational Tag/TaskTag system below so they
+    // show on the board/list/detail.
+    const created = await createTask(
+      { ...parsed.data, tags: [] } as CreateTaskInput,
+      { id: me.id, role: me.role },
+    );
     createdNumber = created.number;
     createdId = created.id;
+    if (parsed.data.tags.length > 0) {
+      const proj = await prisma.project.findUnique({
+        where: { key: projectKey },
+        select: { id: true },
+      });
+      if (proj) {
+        await linkTagsByName(proj.id, createdId, parsed.data.tags, me.id);
+      }
+    }
   } catch (e) {
     return toErr(e);
   }

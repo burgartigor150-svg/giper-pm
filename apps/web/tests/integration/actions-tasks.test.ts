@@ -73,6 +73,29 @@ describe('createTaskAction', () => {
     expect(tasks[0]?.creatorId).toBe(u.id);
   });
 
+  it('typed tags become relational Tag/TaskTag rows (not the scalar mirror)', async () => {
+    const u = await makeUser({ role: 'ADMIN' });
+    mockMe.id = u.id;
+    const p = await makeProject({ ownerId: u.id, key: 'TST' });
+
+    const fd = new FormData();
+    fd.set('title', 'Tagged task');
+    fd.set('tags', 'Alpha, beta, Alpha'); // dup + mixed case
+
+    await expect(createTaskAction('TST', null, fd)).rejects.toThrow('NEXT_REDIRECT');
+
+    const task = await prisma.task.findFirstOrThrow({
+      where: { projectId: p.id },
+      include: { taskTags: { include: { tag: true } } },
+    });
+    // Scalar mirror stays empty; tags live in the relational system.
+    expect(task.tags).toEqual([]);
+    const names = task.taskTags.map((tt) => tt.tag.name).sort();
+    expect(names).toEqual(['Alpha', 'beta']); // deduped by slug
+    // Project-level Tag rows were created.
+    expect(await prisma.tag.count({ where: { projectId: p.id } })).toBe(2);
+  });
+
   it('returns VALIDATION when title is too short', async () => {
     const u = await makeUser({ role: 'ADMIN' });
     mockMe.id = u.id;
