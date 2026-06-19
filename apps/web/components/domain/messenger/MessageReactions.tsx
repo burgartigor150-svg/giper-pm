@@ -36,7 +36,11 @@ export function MessageReactions({ messageId, reactions, meId }: Props) {
   function toggle(emoji: string) {
     setOpen(false);
     startTransition(async () => {
-      await toggleReactionAction(messageId, emoji);
+      const res = await toggleReactionAction(messageId, emoji);
+      if (!res.ok) {
+        alert(res.error.message);
+        return;
+      }
       // Refresh the RSC tree explicitly; WS event will arrive too but
       // a local refresh guarantees the UI updates even if the socket
       // is briefly disconnected.

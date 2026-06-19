@@ -82,10 +82,16 @@ export function PmTeamRoster({ members, pmsById }: Props) {
 
   function toggleTeam(memberId: string, currently: boolean) {
     startTransition(async () => {
-      const res = currently
-        ? await removeFromPmTeamAction(memberId)
-        : await addToPmTeamAction(memberId);
-      if (res.ok) router.refresh();
+      try {
+        const res = currently
+          ? await removeFromPmTeamAction(memberId)
+          : await addToPmTeamAction(memberId);
+        if (res.ok) router.refresh();
+        else alert(res.error.message);
+      } catch {
+        // addToPmTeamAction rethrows non-duplicate DB errors.
+        alert('Не удалось обновить команду');
+      }
     });
   }
 

@@ -178,13 +178,14 @@ export function TaskSidebar(props: Props) {
           placeholder="— без ревьюера —"
           onPick={(user) => {
             startTransition(async () => {
-              await setReviewerAction(
+              const res = await setReviewerAction(
                 props.taskId,
                 props.projectKey,
                 props.taskNumber,
                 user?.id ?? null,
               );
-              flash('reviewer');
+              if (res.ok) flash('reviewer');
+              else alert(res.error.message);
             });
           }}
         />

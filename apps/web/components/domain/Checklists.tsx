@@ -97,7 +97,11 @@ function ChecklistBlock({
       return;
     }
     startTransition(async () => {
-      await renameChecklistAction(checklist.id, projectKey, taskNumber, next);
+      const res = await renameChecklistAction(checklist.id, projectKey, taskNumber, next);
+      if (!res.ok) {
+        alert(res.error.message);
+        return;
+      }
       setEditingTitle(false);
     });
   }
@@ -105,7 +109,11 @@ function ChecklistBlock({
   function deleteList() {
     if (!confirm(`Удалить чек-лист «${checklist.title}»?`)) return;
     startTransition(async () => {
-      await deleteChecklistAction(checklist.id, projectKey, taskNumber);
+      const res = await deleteChecklistAction(checklist.id, projectKey, taskNumber);
+      if (!res.ok) {
+        alert(res.error.message);
+        return;
+      }
       router.refresh();
     });
   }
@@ -218,7 +226,11 @@ function ChecklistItemRow({
 
   function del() {
     startTransition(async () => {
-      await deleteChecklistItemAction(item.id, projectKey, taskNumber);
+      const res = await deleteChecklistItemAction(item.id, projectKey, taskNumber);
+      if (!res.ok) {
+        alert(res.error.message);
+        return;
+      }
       router.refresh();
     });
   }
@@ -277,6 +289,7 @@ function NewItemInput({
     startTransition(async () => {
       const res = await addChecklistItemAction(checklistId, projectKey, taskNumber, t);
       if (res.ok) setBody('');
+      else alert(res.error.message);
     });
   }
 
@@ -322,7 +335,8 @@ function NewChecklistButton({
   const [pending, startTransition] = useTransition();
   function add() {
     startTransition(async () => {
-      await createChecklistAction(taskId, projectKey, taskNumber);
+      const res = await createChecklistAction(taskId, projectKey, taskNumber);
+      if (!res.ok) alert(res.error.message);
     });
   }
   return (

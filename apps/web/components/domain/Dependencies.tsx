@@ -138,7 +138,11 @@ function EdgeRow({
   const [pending, startTransition] = useTransition();
   function remove() {
     startTransition(async () => {
-      await removeDependencyAction(edge.id, projectKey, taskNumber);
+      const res = await removeDependencyAction(edge.id, projectKey, taskNumber);
+      if (!res.ok) {
+        alert(res.error.message);
+        return;
+      }
       router.refresh();
     });
   }

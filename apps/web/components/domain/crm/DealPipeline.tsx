@@ -42,6 +42,7 @@ export function DealPipeline({
     startTransition(async () => {
       const res = await moveDealStageAction(dealId, stageId);
       if (res.ok) router.refresh();
+      else alert(res.error.message);
     });
   }
 
