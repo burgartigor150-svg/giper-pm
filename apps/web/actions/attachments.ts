@@ -135,10 +135,15 @@ export async function deleteAttachmentAction(
       error: { code: 'VALIDATION', message: 'Внешние файлы удаляются в источнике' },
     };
   }
-  // Uploader, project owner, ADMIN, or LEAD can delete.
+  // Internal editors of the task can delete its local attachments — this
+  // matches the UI, which shows the trash icon to canEditTaskInternal
+  // (ADMIN / creator / assignee / owner / LEAD) plus the uploader. Without
+  // creator/assignee here, the assignee saw an enabled trash that errored.
   const canDelete =
     me.role === 'ADMIN' ||
     att.uploadedById === me.id ||
+    att.task.creatorId === me.id ||
+    att.task.assigneeId === me.id ||
     att.task.project.ownerId === me.id ||
     att.task.project.members.some((m) => m.userId === me.id && m.role === 'LEAD');
   if (!canDelete) {

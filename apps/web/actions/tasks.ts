@@ -615,6 +615,22 @@ export async function resolveBitrixConflictAction(
     // Push our current state — pushBitrixStatusBestEffort updates the
     // hash and clears syncConflict on success.
     await pushBitrixStatusBestEffort(taskId);
+    // That push is best-effort and swallows errors. If it failed (Bitrix
+    // down / not configured), syncConflict is still set — surface that
+    // instead of returning ok and silently re-showing the same banner.
+    const after = await prisma.task.findUnique({
+      where: { id: taskId },
+      select: { syncConflict: true },
+    });
+    if (after?.syncConflict) {
+      return {
+        ok: false,
+        error: {
+          code: 'SYNC_FAILED',
+          message: 'Не удалось отправить в Bitrix24. Попробуйте позже.',
+        },
+      };
+    }
   } else {
     // Accept remote — the inbound path already wrote the upstream value
     // to our row when it set the flag. Just clear the flag.
