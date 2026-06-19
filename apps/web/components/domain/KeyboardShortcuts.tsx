@@ -18,11 +18,21 @@ import { useRouter } from 'next/navigation';
  * That keeps inline-edit and forms safe — if the user is composing text,
  * `c` should land in the textarea, not open the quick-add dialog.
  */
-export function KeyboardShortcuts() {
+export function KeyboardShortcuts({
+  allowedPaths = [],
+}: {
+  /** Role-filtered nav hrefs. The g-prefix shortcuts to role-gated pages
+   *  (g c/r/s → team/reports/settings) only fire when the path is allowed,
+   *  so a MEMBER doesn't get bounced to a notFound() page. */
+  allowedPaths?: string[];
+} = {}) {
   const router = useRouter();
   const gMode = useRef<number | null>(null);
+  // Stable primitive dep so the effect doesn't re-subscribe every render.
+  const allowedKey = allowedPaths.join(',');
 
   useEffect(() => {
+    const allowed = new Set(allowedKey ? allowedKey.split(',') : []);
     function isTypingTarget(t: EventTarget | null): boolean {
       if (!(t instanceof HTMLElement)) return false;
       const tag = t.tagName;
@@ -54,10 +64,12 @@ export function KeyboardShortcuts() {
           m: '/me',
           p: '/projects',
           t: '/time',
-          c: '/team',
-          r: '/reports',
-          s: '/settings',
         };
+        // Role-gated destinations: only wire the shortcut if the user can
+        // actually reach the page (mirrors the sidebar's navItems gating).
+        if (allowed.has('/team')) map.c = '/team';
+        if (allowed.has('/reports')) map.r = '/reports';
+        if (allowed.has('/settings')) map.s = '/settings';
         clearG();
         if (map[key]) {
           e.preventDefault();
@@ -93,7 +105,7 @@ export function KeyboardShortcuts() {
       window.removeEventListener('keydown', onKey);
       clearG();
     };
-  }, [router]);
+  }, [router, allowedKey]);
 
   return null;
 }

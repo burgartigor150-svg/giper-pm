@@ -123,16 +123,20 @@ export function TaskSidebar(props: Props) {
 
   function changeStatus(s: string) {
     startTransition(async () => {
-      await setInternalStatusAction(props.taskId, props.projectKey, props.taskNumber, s);
-      flash('status');
+      const res = await setInternalStatusAction(props.taskId, props.projectKey, props.taskNumber, s);
+      // Don't flash a green "saved" check on failure (the select is
+      // controlled by server props, so it reverts on the next render).
+      if (res.ok) flash('status');
+      else alert(res.error.message);
     });
   }
   function changePriority(p: string) {
     startTransition(async () => {
-      await updateTaskAction(props.taskId, props.projectKey, props.taskNumber, {
+      const res = await updateTaskAction(props.taskId, props.projectKey, props.taskNumber, {
         priority: p as (typeof PRIORITIES)[number],
       });
-      flash('priority');
+      if (res.ok) flash('priority');
+      else alert(res.error.message);
     });
   }
   function saveScalar(

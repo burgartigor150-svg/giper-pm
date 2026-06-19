@@ -14,7 +14,10 @@ export function MeetingRetryButton({ meetingId }: { meetingId: string }) {
       disabled={pending}
       onClick={() => {
         startTransition(async () => {
-          await retranscribeMeetingAction({ meetingId });
+          const r = await retranscribeMeetingAction({ meetingId });
+          // Surface "Записи ещё нет" / "Нет прав" instead of silently
+          // flipping the label back with nothing happening.
+          if (!r.ok) alert(r.message);
         });
       }}
     >
