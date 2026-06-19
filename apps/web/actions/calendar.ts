@@ -131,16 +131,30 @@ export async function createCalendarEventAction(input: {
     return { ok: false, error: { code: 'VALIDATION', message: 'Конец должен быть позже начала' } };
   }
 
-  // Optional project must be one the user can see (member or owner).
-  // We don't strictly enforce "team" here — anyone who can read the
-  // project can pin events to it. Visibility of events is by attendee.
+  // Optional project must be one the user actually has a relationship with —
+  // owner, explicit member, or a task stake (covers Bitrix-mirror members who
+  // see a project through their tasks). Previously this only checked the
+  // project EXISTS, letting anyone attach an event to any project id.
   if (input.projectId) {
     const project = await prisma.project.findUnique({
       where: { id: input.projectId },
-      select: { id: true },
+      select: { ownerId: true, members: { select: { userId: true } } },
     });
     if (!project) {
       return { ok: false, error: { code: 'NOT_FOUND', message: 'Проект не найден' } };
+    }
+    const isOwnerOrMember =
+      project.ownerId === me.id || project.members.some((m) => m.userId === me.id);
+    const hasStake =
+      isOwnerOrMember ||
+      (await prisma.task.count({
+        where: {
+          projectId: input.projectId,
+          OR: [{ assigneeId: me.id }, { creatorId: me.id }, { reviewerId: me.id }],
+        },
+      })) > 0;
+    if (!isOwnerOrMember && !hasStake) {
+      return { ok: false, error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Нет доступа к проекту' } };
     }
   }
 

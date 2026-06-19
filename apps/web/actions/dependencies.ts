@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
-import { canEditTask } from '@/lib/permissions';
+import { canEditTaskInternal } from '@/lib/permissions';
 
 type ActionResult = { ok: true } | { ok: false; error: { code: string; message: string } };
 
@@ -45,7 +45,9 @@ export async function addDependencyAction(
     },
   });
   if (!from) return { ok: false, error: { code: 'NOT_FOUND', message: 'Задача не найдена' } };
-  if (!canEditTask({ id: me.id, role: me.role }, from)) {
+  // Dependencies are an internal-only track (never round-trip to Bitrix), so
+  // they're editable on mirror tasks too — internal gate, matching the UI.
+  if (!canEditTaskInternal({ id: me.id, role: me.role }, from)) {
     return {
       ok: false,
       error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' },
@@ -111,7 +113,7 @@ export async function removeDependencyAction(
     },
   });
   if (!dep) return { ok: false, error: { code: 'NOT_FOUND', message: 'Не найдено' } };
-  if (!canEditTask({ id: me.id, role: me.role }, dep.fromTask)) {
+  if (!canEditTaskInternal({ id: me.id, role: me.role }, dep.fromTask)) {
     return {
       ok: false,
       error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' },

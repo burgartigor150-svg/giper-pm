@@ -162,5 +162,8 @@ export async function rejectTaskAction(
     });
   }
   revalidatePath(link);
+  // REVIEW -> IN_PROGRESS moves the card to another board column; refresh
+  // the board too (approveTaskAction already does this).
+  revalidatePath(`/projects/${projectKey}/board`);
   return { ok: true };
 }

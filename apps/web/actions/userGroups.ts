@@ -68,7 +68,11 @@ export async function updateGroupAction(
 export async function deleteGroupAction(groupId: string): Promise<ActionResult> {
   const me = await requireAdmin();
   if (!me) return { ok: false, error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Только админ' } };
-  await prisma.userGroup.delete({ where: { id: groupId } }).catch(() => {});
+  try {
+    await prisma.userGroup.delete({ where: { id: groupId } });
+  } catch {
+    return { ok: false, error: { code: 'NOT_FOUND', message: 'Группа не найдена или не удалось удалить' } };
+  }
   revalidatePath('/settings/groups');
   return { ok: true };
 }
