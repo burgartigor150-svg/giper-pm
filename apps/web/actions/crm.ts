@@ -17,6 +17,20 @@ function parseAmount(v: string | number | null | undefined): number | null {
   return Number.isFinite(n) && n >= 0 ? n : null;
 }
 
+/**
+ * A deal may link to any ACTIVE (non-archived) project — CRM is ADMIN/PM
+ * org-level, so this is existence-only, not a per-stake visibility check.
+ * null/empty (unlink) is always allowed.
+ */
+async function isLinkableProject(projectId: string | null | undefined): Promise<boolean> {
+  if (!projectId) return true;
+  const p = await prisma.project.findFirst({
+    where: { id: projectId, status: { not: 'ARCHIVED' } },
+    select: { id: true },
+  });
+  return !!p;
+}
+
 /** Seed a default "Продажи" pipeline with standard stages (idempotent-ish). */
 export async function createDefaultPipelineAction(): Promise<ActionResult<{ id: string }>> {
   const me = await requireAuth();
@@ -52,11 +66,15 @@ export async function createDealAction(input: {
   amount?: string | number | null;
   contactId?: string | null;
   stageId?: string | null;
+  projectId?: string | null;
 }): Promise<ActionResult<{ id: string }>> {
   const me = await requireAuth();
   if (!canEditCrm({ id: me.id, role: me.role })) return DENY;
   if (input.title.trim().length < 2) {
     return { ok: false, error: { code: 'VALIDATION', message: 'Название сделки ≥ 2 символов' } };
+  }
+  if (!(await isLinkableProject(input.projectId))) {
+    return { ok: false, error: { code: 'VALIDATION', message: 'Проект не найден' } };
   }
   const stages = await prisma.pipelineStage.findMany({
     where: { pipelineId: input.pipelineId },
@@ -79,6 +97,7 @@ export async function createDealAction(input: {
       title: input.title.trim().slice(0, 200),
       amount: parseAmount(input.amount),
       contactId: input.contactId || null,
+      projectId: input.projectId || null,
       ownerId: me.id,
       createdById: me.id,
       status: terminal,
@@ -93,12 +112,20 @@ export async function createDealAction(input: {
 /** Edit a deal's title / amount / contact. CRM editors (ADMIN/PM) only. */
 export async function updateDealAction(
   dealId: string,
-  input: { title: string; amount?: string | number | null; contactId?: string | null },
+  input: {
+    title: string;
+    amount?: string | number | null;
+    contactId?: string | null;
+    projectId?: string | null;
+  },
 ): Promise<ActionResult> {
   const me = await requireAuth();
   if (!canEditCrm({ id: me.id, role: me.role })) return DENY;
   if (input.title.trim().length < 2) {
     return { ok: false, error: { code: 'VALIDATION', message: 'Название сделки ≥ 2 символов' } };
+  }
+  if (!(await isLinkableProject(input.projectId))) {
+    return { ok: false, error: { code: 'VALIDATION', message: 'Проект не найден' } };
   }
   try {
     await prisma.deal.update({
@@ -107,6 +134,7 @@ export async function updateDealAction(
         title: input.title.trim().slice(0, 200),
         amount: parseAmount(input.amount),
         contactId: input.contactId || null,
+        projectId: input.projectId || null,
       },
     });
   } catch {

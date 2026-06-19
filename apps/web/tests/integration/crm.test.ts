@@ -38,8 +38,8 @@ import {
   deleteContactAction,
   archivePipelineAction,
 } from '@/actions/crm';
-import { listPipelines, getPipelineSummary, listContacts } from '@/lib/crm';
-import { makeUser } from './helpers/factories';
+import { listPipelines, getPipelineSummary, listContacts, listDealsForPipeline } from '@/lib/crm';
+import { makeUser, makeProject } from './helpers/factories';
 
 beforeEach(() => {
   mockMe.role = 'ADMIN';
@@ -112,6 +112,46 @@ describe('CRM — pipeline & deals', () => {
     expect(d.title).toBe('Финал');
     expect(d.amount?.toString()).toBe('5000');
     expect(d.contactId).toBe(contactId);
+  });
+
+  it('links a deal to a project (create + listDealsForPipeline exposes key)', async () => {
+    const { pipelineId } = await setup();
+    const project = await makeProject({ ownerId: mockMe.id, key: 'DLP', name: 'Доставка' });
+    const created = await createDealAction({
+      pipelineId,
+      title: 'Со связью',
+      projectId: project.id,
+    });
+    expect(created.ok).toBe(true);
+    const d = await prisma.deal.findUniqueOrThrow({ where: { id: created.ok ? created.data!.id : '' } });
+    expect(d.projectId).toBe(project.id);
+    const board = await listDealsForPipeline(pipelineId);
+    const row = board.find((b) => b.id === d.id);
+    expect(row?.projectKey).toBe('DLP');
+    expect(row?.projectName).toBe('Доставка');
+  });
+
+  it('updates and clears a deal project link', async () => {
+    const { pipelineId } = await setup();
+    const project = await makeProject({ ownerId: mockMe.id, key: 'LNK' });
+    const created = await createDealAction({ pipelineId, title: 'Сделка' });
+    const dealId = created.ok ? created.data!.id : '';
+    expect((await updateDealAction(dealId, { title: 'Сделка', projectId: project.id })).ok).toBe(true);
+    expect((await prisma.deal.findUniqueOrThrow({ where: { id: dealId } })).projectId).toBe(project.id);
+    // Clear it.
+    expect((await updateDealAction(dealId, { title: 'Сделка', projectId: null })).ok).toBe(true);
+    expect((await prisma.deal.findUniqueOrThrow({ where: { id: dealId } })).projectId).toBeNull();
+  });
+
+  it('rejects a deal linked to a non-existent project (VALIDATION)', async () => {
+    const { pipelineId } = await setup();
+    const res = await createDealAction({
+      pipelineId,
+      title: 'Плохая связь',
+      projectId: '00000000-0000-0000-0000-000000000000',
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error.code).toBe('VALIDATION');
   });
 
   it('forbids a MEMBER from editing a deal', async () => {

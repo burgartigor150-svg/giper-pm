@@ -24,6 +24,10 @@ export type BoardDeal = {
   contactName: string | null;
   ownerName: string | null;
   lostReason: string | null;
+  projectId: string | null;
+  /** Project KEY (not id) — the drawer link is /projects/<key>. */
+  projectKey: string | null;
+  projectName: string | null;
 };
 
 export type PipelineSummary = {
@@ -78,8 +82,10 @@ export async function listDealsForPipeline(pipelineId: string): Promise<BoardDea
         status: true,
         contactId: true,
         lostReason: true,
+        projectId: true,
         contact: { select: { name: true } },
         owner: { select: { name: true } },
+        project: { select: { key: true, name: true } },
       },
     });
     return rows.map((d) => ({
@@ -93,6 +99,9 @@ export async function listDealsForPipeline(pipelineId: string): Promise<BoardDea
       contactName: d.contact?.name ?? null,
       ownerName: d.owner?.name ?? null,
       lostReason: d.lostReason ?? null,
+      projectId: d.projectId ?? null,
+      projectKey: d.project?.key ?? null,
+      projectName: d.project?.name ?? null,
     }));
   } catch (e) {
     console.warn('listDealsForPipeline: unavailable', e);

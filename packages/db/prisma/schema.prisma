@@ -421,6 +421,8 @@ model Project {
   webhooks        Webhook[]
   /// Scrum sprints (time-boxed iterations) for this project.
   sprints         Sprint[]
+  /// CRM deals linked to this project (org-level sales → delivery handoff).
+  deals           Deal[]          @relation("DealProject")
   /// Space (folder) this project belongs to. Nullable = ungrouped.
   spaceId         String?
   space           Space?          @relation(fields: [spaceId], references: [id], onDelete: SetNull)
@@ -698,6 +700,10 @@ model Deal {
   status            DealStatus    @default(OPEN)
   ownerId           String?
   owner             User?         @relation("DealOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  /// Optional link to a delivery Project (org-level sales → delivery handoff).
+  /// SetNull: archiving/deleting a project must not destroy sales history.
+  projectId         String?
+  project           Project?      @relation("DealProject", fields: [projectId], references: [id], onDelete: SetNull)
   lostReason        String?       @db.Text
   expectedCloseDate DateTime?
   closedAt          DateTime?
@@ -709,6 +715,7 @@ model Deal {
   @@index([pipelineId, stageId])
   @@index([ownerId, status])
   @@index([contactId])
+  @@index([projectId])
 }
 
 /// A Telegram group or channel whose messages PM wants to turn into tasks.
