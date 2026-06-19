@@ -100,7 +100,7 @@ export function RecurringTasksForm({ projectId, initial }: Props) {
   return (
     <div className="flex flex-col gap-3">
       <p className="text-sm text-muted-foreground">
-        Повторяющиеся карточки (как в Кайтене): новая карточка создаётся каждые
+        Повторяющиеся карточки: новая карточка создаётся каждые
         N дней начиная с указанной даты. Создаёт планировщик.
       </p>
       {rows.length > 0 ? (

@@ -210,9 +210,9 @@ export async function setInternalStatusAction(
   if (rawStatus === 'DONE' || rawStatus === 'CANCELED') {
     await autoUnblockDependents(taskId, me.id);
   }
-  // Kaiten automations: run CARD_ENTERS_COLUMN rules best-effort (never throws).
+  // Automations: run CARD_ENTERS_COLUMN rules best-effort (never throws).
   await runColumnEnterAutomations(taskId, rawStatus);
-  // Kaiten outgoing webhooks: fire 'card.moved' best-effort.
+  // Outgoing webhooks: fire 'card.moved' best-effort.
   await dispatchWebhooks(task.projectId, 'card.moved', {
     project: { id: task.projectId, key: task.project.key },
     task: { id: taskId, number: task.number, title: task.title, toStatus: rawStatus },
@@ -222,7 +222,7 @@ export async function setInternalStatusAction(
   return { ok: true };
 }
 
-/** Set or clear a task's Kaiten story points (0–999, null clears). */
+/** Set or clear a task's story points (0–999, null clears). */
 export async function setStoryPointsAction(
   taskId: string,
   projectKey: string,

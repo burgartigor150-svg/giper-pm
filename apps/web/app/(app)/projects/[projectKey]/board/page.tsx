@@ -69,7 +69,7 @@ export default async function ProjectBoardPage({
   // Available tags for the multi-select filter.
   const availableTags = await listTagsForProject(project.id);
 
-  // Kaiten card templates: only offer the picker to users who can create
+  // Card templates: only offer the picker to users who can create
   // tasks here, and only when the project actually has templates.
   const canCreate = canCreateTask(
     { id: me.id, role: me.role },

@@ -30,7 +30,7 @@ function weekKey(d: Date): string {
 }
 
 /**
- * Kaiten-style flow metrics for a project, computed from the time-tracking
+ * Flow metrics for a project, computed from the time-tracking
  * lifecycle fields (`startedAt` / `completedAt`) — robust and cheap, no history
  * reconstruction. Lead/cycle medians + weekly throughput + current WIP.
  *

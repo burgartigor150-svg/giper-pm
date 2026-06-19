@@ -166,7 +166,7 @@ export function KanbanBoard({
     const newSwimlaneId = to.laneKey === NO_LANE ? null : to.laneKey;
     const newSubColumnId = to.subColumnId ?? null;
 
-    // Hard WIP enforcement (Kaiten). Column WIP is board-wide (per status); a
+    // Hard WIP enforcement. Column WIP is board-wide (per status); a
     // lane move also checks the destination lane's own WIP. Refuse → card stays.
     if (!sameStatus) {
       const targetCol = columns.find((c) => c.status === newStatus);

@@ -12,7 +12,7 @@ type Props = {
   canEdit: boolean;
 };
 
-/** Compact Kaiten story-points (size) setter for the task sidebar. */
+/** Compact story-points (size) setter for the task sidebar. */
 export function StoryPointsField({
   taskId,
   projectKey,

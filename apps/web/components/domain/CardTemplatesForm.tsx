@@ -102,7 +102,7 @@ export function CardTemplatesForm({ projectId, initial }: Props) {
   return (
     <div className="flex flex-col gap-3">
       <p className="text-sm text-muted-foreground">
-        Шаблоны карточек (как в Кайтене): заготовка названия, типа и приоритета.
+        Шаблоны карточек: заготовка названия, типа и приоритета.
         Создать задачу из шаблона можно с доски проекта.
       </p>
       {rows.length > 0 ? (

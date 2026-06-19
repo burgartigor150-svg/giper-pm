@@ -92,7 +92,7 @@ export function CustomFieldsForm({ projectId, initial }: Props) {
   return (
     <div className="flex flex-col gap-3">
       <p className="text-sm text-muted-foreground">
-        Произвольные поля задач проекта (как в Кайтене). Для списков укажите
+        Произвольные поля задач проекта. Для списков укажите
         варианты через запятую. Значения заполняются в карточке задачи.
       </p>
       {rows.length > 0 ? (

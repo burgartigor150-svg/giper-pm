@@ -1,5 +1,5 @@
 /**
- * Kaiten-style card-cover preset palette. Shared by the server action
+ * Card-cover preset palette. Shared by the server action
  * (input validation) and the client CoverField (swatch rendering) so the
  * allowed set has a single source of truth.
  */
