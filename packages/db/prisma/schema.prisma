@@ -531,8 +531,31 @@ model Sprint {
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
   tasks       Task[]
+  snapshots   SprintSnapshot[]
 
   @@index([projectId, status])
+}
+
+/// Daily point-in-time snapshot of a sprint's remaining work, written by
+/// /api/cron/sprint-snapshot. Powers a true historical burndown line (board
+/// drags log no per-day history, so the live chart was a current-state
+/// projection only). One row per sprint per calendar day (idempotent upsert).
+model SprintSnapshot {
+  id              String   @id @default(cuid())
+  sprintId        String
+  sprint          Sprint   @relation(fields: [sprintId], references: [id], onDelete: Cascade)
+  /// Calendar day (UTC) this snapshot represents.
+  date            DateTime @db.Date
+  /// Remaining (not DONE/CANCELED) at snapshot time.
+  remainingPoints Int      @default(0)
+  remainingTasks  Int      @default(0)
+  /// Totals at snapshot time (committed baseline / ideal line).
+  totalPoints     Int      @default(0)
+  totalTasks      Int      @default(0)
+  takenAt         DateTime @default(now())
+
+  @@unique([sprintId, date])
+  @@index([sprintId])
 }
 
 // ============================================================================
