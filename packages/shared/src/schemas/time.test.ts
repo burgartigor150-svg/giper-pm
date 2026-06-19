@@ -28,13 +28,14 @@ describe('timeSourceSchema', () => {
 });
 
 describe('timeFlagSchema', () => {
-  it('exposes 5 flags', () => {
+  it('exposes all 6 TimeFlag values (mirrors the Prisma enum)', () => {
     expect(timeFlagSchema.options).toEqual([
       'REVIEW_NEEDED',
       'GAP_DETECTED',
       'OVERLAPPING',
       'EXCESSIVE',
       'IDLE_LOGGED',
+      'AUTO_STOPPED',
     ]);
   });
 });
