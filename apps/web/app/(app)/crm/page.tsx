@@ -26,7 +26,11 @@ export default async function CrmPage({ searchParams }: { searchParams: SP }) {
   if (pipelines.length === 0) {
     return (
       <div className="mx-auto max-w-3xl space-y-4">
-        <h1 className="text-xl font-semibold">CRM — воронки продаж</h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-xl font-semibold">CRM — воронки продаж</h1>
+          <Link href="/crm/leads" className="ml-auto text-sm text-muted-foreground hover:underline">Лиды</Link>
+          <Link href="/crm/contacts" className="text-sm text-muted-foreground hover:underline">Контакты</Link>
+        </div>
         <Card>
           <CardContent className="flex flex-col items-start gap-3 py-6">
             <p className="text-sm text-muted-foreground">
@@ -70,6 +74,9 @@ export default async function CrmPage({ searchParams }: { searchParams: SP }) {
               {p.name}
             </Link>
           ))}
+          <Link href="/crm/leads" className="rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-muted/60">
+            Лиды
+          </Link>
           <Link href="/crm/contacts" className="rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-muted/60">
             Контакты
           </Link>

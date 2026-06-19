@@ -147,6 +147,61 @@ export async function listContacts(): Promise<ContactRow[]> {
   }
 }
 
+export type LeadRow = {
+  id: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  company: string | null;
+  source: string | null;
+  status: 'NEW' | 'CONVERTED' | 'DISQUALIFIED';
+  ownerName: string | null;
+  convertedContactId: string | null;
+  convertedDealId: string | null;
+  createdAt: Date;
+};
+
+/** Leads (non-deleted), newest-first, with owner name. Fault-tolerant. */
+export async function listLeads(): Promise<LeadRow[]> {
+  try {
+    const rows = await prisma.lead.findMany({
+      where: { deletedAt: null },
+      // id is a deterministic tiebreaker for leads created in the same ms
+      // (cuid increments monotonically within a process → newest id sorts last).
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        phone: true,
+        company: true,
+        source: true,
+        status: true,
+        convertedContactId: true,
+        convertedDealId: true,
+        createdAt: true,
+        owner: { select: { name: true } },
+      },
+    });
+    return rows.map((l) => ({
+      id: l.id,
+      name: l.name,
+      email: l.email,
+      phone: l.phone,
+      company: l.company,
+      source: l.source,
+      status: l.status,
+      ownerName: l.owner?.name ?? null,
+      convertedContactId: l.convertedContactId ?? null,
+      convertedDealId: l.convertedDealId ?? null,
+      createdAt: l.createdAt,
+    }));
+  } catch (e) {
+    console.warn('listLeads: unavailable', e);
+    return [];
+  }
+}
+
 /** Aggregate pipeline stats for the summary strip. Fault-tolerant → zeros. */
 export async function getPipelineSummary(pipelineId: string): Promise<PipelineSummary> {
   const empty: PipelineSummary = {

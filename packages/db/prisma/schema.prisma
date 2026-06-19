@@ -57,6 +57,8 @@ model User {
   /// CRM ownership (org-level sales).
   ownedContacts     Contact[]            @relation("ContactOwner")
   ownedDeals        Deal[]               @relation("DealOwner")
+  /// CRM leads owned (top-of-funnel, pre-qualification).
+  ownedLeads        Lead[]               @relation("LeadOwner")
   /// Service-desk tickets assigned to this agent.
   assignedTickets   Ticket[]             @relation("TicketAssignee")
   memberProjects    ProjectMember[]
@@ -592,6 +594,8 @@ model Contact {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
   deals     Deal[]
+  /// Leads that converted into this contact (usually 0–1).
+  convertedFromLeads Lead[] @relation("LeadConvertedContact")
 
   @@index([ownerId])
   @@index([email])
@@ -711,11 +715,52 @@ model Deal {
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt
   deletedAt         DateTime?
+  /// Leads that converted into this deal (usually 0–1).
+  convertedFromLeads Lead[]       @relation("LeadConvertedDeal")
 
   @@index([pipelineId, stageId])
   @@index([ownerId, status])
   @@index([contactId])
   @@index([projectId])
+}
+
+/// Lead lifecycle: NEW (top-of-funnel) → CONVERTED (became a Contact[+Deal])
+/// or DISQUALIFIED (dead). Convert is one-way and idempotent (see convertLeadAction).
+enum LeadStatus {
+  NEW
+  CONVERTED
+  DISQUALIFIED
+}
+
+/// A CRM lead: an unqualified inbound before it becomes a Contact/Deal.
+/// Soft-deleted (deletedAt). Owner FK SetNull — pipeline history outlives staff.
+/// Convert stamps convertedContactId/convertedDealId for an audit trail.
+model Lead {
+  id        String     @id @default(cuid())
+  name      String
+  email     String?
+  phone     String?
+  company   String?
+  source    String?
+  notes     String?    @db.Text
+  status    LeadStatus @default(NEW)
+  ownerId   String?
+  owner     User?      @relation("LeadOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  /// Audit trail of a one-way convert. SetNull so deleting the resulting
+  /// contact/deal never destroys the lead's converted marker.
+  convertedContactId String?
+  convertedContact   Contact? @relation("LeadConvertedContact", fields: [convertedContactId], references: [id], onDelete: SetNull)
+  convertedDealId    String?
+  convertedDeal      Deal?    @relation("LeadConvertedDeal", fields: [convertedDealId], references: [id], onDelete: SetNull)
+  convertedAt        DateTime?
+  createdById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  @@index([status, createdAt])
+  @@index([ownerId])
+  @@index([email])
 }
 
 /// A Telegram group or channel whose messages PM wants to turn into tasks.

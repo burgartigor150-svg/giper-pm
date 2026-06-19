@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
+import { DomainError } from '@/lib/errors';
 import { canDeleteCrmPipeline, canEditCrm } from '@/lib/permissions';
 
 type ActionResult<T = unknown> =
@@ -269,4 +270,208 @@ export async function archivePipelineAction(pipelineId: string): Promise<ActionR
   await prisma.pipeline.update({ where: { id: pipelineId }, data: { archivedAt: new Date() } }).catch(() => {});
   revalidatePath('/crm');
   return { ok: true };
+}
+
+// ─────────────────────────────── Leads ───────────────────────────────
+
+/** A lead is only useful if there's a way to reach it: require name + (email OR phone). */
+function leadHasContact(email?: string | null, phone?: string | null): boolean {
+  return !!(email?.trim() || phone?.trim());
+}
+
+/** Create a top-of-funnel lead (status NEW). CRM editors (ADMIN/PM) only. */
+export async function createLeadAction(input: {
+  name: string;
+  email?: string;
+  phone?: string;
+  company?: string;
+  source?: string;
+  notes?: string;
+}): Promise<ActionResult<{ id: string }>> {
+  const me = await requireAuth();
+  if (!canEditCrm({ id: me.id, role: me.role })) return DENY;
+  if (input.name.trim().length < 2) {
+    return { ok: false, error: { code: 'VALIDATION', message: 'Имя ≥ 2 символов' } };
+  }
+  if (!leadHasContact(input.email, input.phone)) {
+    return { ok: false, error: { code: 'VALIDATION', message: 'Укажите email или телефон' } };
+  }
+  const lead = await prisma.lead.create({
+    data: {
+      name: input.name.trim().slice(0, 200),
+      email: input.email?.trim().slice(0, 200) || null,
+      phone: input.phone?.trim().slice(0, 60) || null,
+      company: input.company?.trim().slice(0, 200) || null,
+      source: input.source?.trim().slice(0, 120) || null,
+      notes: input.notes?.trim().slice(0, 2000) || null,
+      status: 'NEW',
+      ownerId: me.id,
+      createdById: me.id,
+    },
+    select: { id: true },
+  });
+  revalidatePath('/crm/leads');
+  return { ok: true, data: { id: lead.id } };
+}
+
+/**
+ * Edit a lead's fields, and optionally flip NEW↔DISQUALIFIED.
+ * CONVERTED leads are immutable history (use the convert audit trail instead).
+ * Status is never set to CONVERTED here — that's convertLeadAction's job.
+ */
+export async function updateLeadAction(
+  leadId: string,
+  input: {
+    name: string;
+    email?: string;
+    phone?: string;
+    company?: string;
+    source?: string;
+    notes?: string;
+    status?: 'NEW' | 'DISQUALIFIED';
+  },
+): Promise<ActionResult> {
+  const me = await requireAuth();
+  if (!canEditCrm({ id: me.id, role: me.role })) return DENY;
+  if (input.name.trim().length < 2) {
+    return { ok: false, error: { code: 'VALIDATION', message: 'Имя ≥ 2 символов' } };
+  }
+  if (!leadHasContact(input.email, input.phone)) {
+    return { ok: false, error: { code: 'VALIDATION', message: 'Укажите email или телефон' } };
+  }
+  const lead = await prisma.lead.findUnique({
+    where: { id: leadId },
+    select: { status: true, deletedAt: true },
+  });
+  if (!lead || lead.deletedAt) {
+    return { ok: false, error: { code: 'NOT_FOUND', message: 'Лид не найден' } };
+  }
+  if (lead.status === 'CONVERTED') {
+    return { ok: false, error: { code: 'CONFLICT', message: 'Лид уже сконвертирован' } };
+  }
+  await prisma.lead.update({
+    where: { id: leadId },
+    data: {
+      name: input.name.trim().slice(0, 200),
+      email: input.email?.trim().slice(0, 200) || null,
+      phone: input.phone?.trim().slice(0, 60) || null,
+      company: input.company?.trim().slice(0, 200) || null,
+      source: input.source?.trim().slice(0, 120) || null,
+      notes: input.notes?.trim().slice(0, 2000) || null,
+      ...(input.status ? { status: input.status } : {}),
+    },
+  });
+  revalidatePath('/crm/leads');
+  return { ok: true };
+}
+
+/** Soft-delete a lead (sets deletedAt). CRM editors only. */
+export async function deleteLeadAction(leadId: string): Promise<ActionResult> {
+  const me = await requireAuth();
+  if (!canEditCrm({ id: me.id, role: me.role })) return DENY;
+  try {
+    await prisma.lead.update({
+      where: { id: leadId },
+      data: { deletedAt: new Date() },
+    });
+  } catch {
+    return { ok: false, error: { code: 'NOT_FOUND', message: 'Лид не найден' } };
+  }
+  revalidatePath('/crm/leads');
+  return { ok: true };
+}
+
+/**
+ * Convert a NEW lead into a Contact (and optionally a Deal in the default
+ * pipeline's first stage). One-way and idempotent: a conditional
+ * `updateMany(where status NEW)` is the atomic lock, so two racing converts
+ * produce exactly one Contact/Deal — the loser's whole transaction rolls back.
+ */
+export async function convertLeadAction(
+  leadId: string,
+  opts: { createDeal?: boolean; dealTitle?: string; amount?: string | number | null } = {},
+): Promise<ActionResult<{ contactId: string; dealId: string | null }>> {
+  const me = await requireAuth();
+  if (!canEditCrm({ id: me.id, role: me.role })) return DENY;
+
+  // Resolve the target stage OUTSIDE the tx, only when a deal is requested.
+  // Contact-only convert must work for brand-new orgs that have no pipeline yet.
+  let pipelineId: string | null = null;
+  let stageId: string | null = null;
+  if (opts.createDeal) {
+    const pipeline = await prisma.pipeline.findFirst({
+      where: { archivedAt: null },
+      orderBy: { order: 'asc' },
+      select: { id: true, stages: { orderBy: { order: 'asc' }, take: 1, select: { id: true } } },
+    });
+    if (!pipeline || pipeline.stages.length === 0) {
+      return { ok: false, error: { code: 'NO_PIPELINE', message: 'Сначала создайте воронку продаж' } };
+    }
+    pipelineId = pipeline.id;
+    stageId = pipeline.stages[0]!.id;
+  }
+
+  try {
+    const result = await prisma.$transaction(async (tx) => {
+      const lead = await tx.lead.findUnique({
+        where: { id: leadId },
+        select: { id: true, status: true, name: true, email: true, phone: true, company: true, deletedAt: true },
+      });
+      if (!lead || lead.deletedAt) throw new DomainError('NOT_FOUND', 404, 'Лид не найден');
+      if (lead.status !== 'NEW') throw new DomainError('CONFLICT', 409, 'Лид уже сконвертирован');
+      if (lead.name.trim().length < 2) throw new DomainError('VALIDATION', 400, 'Имя лида ≥ 2 символов');
+
+      const contact = await tx.contact.create({
+        data: {
+          name: lead.name.trim().slice(0, 200),
+          company: lead.company?.trim().slice(0, 200) || null,
+          email: lead.email?.trim().slice(0, 200) || null,
+          phone: lead.phone?.trim().slice(0, 60) || null,
+          ownerId: me.id,
+        },
+        select: { id: true },
+      });
+
+      let dealId: string | null = null;
+      if (pipelineId && stageId) {
+        const deal = await tx.deal.create({
+          data: {
+            pipelineId,
+            stageId,
+            title: (opts.dealTitle?.trim() || lead.name.trim() || 'Сделка').slice(0, 200),
+            amount: parseAmount(opts.amount),
+            contactId: contact.id,
+            ownerId: me.id,
+            createdById: me.id,
+            status: 'OPEN',
+            closedAt: null,
+          },
+          select: { id: true },
+        });
+        dealId = deal.id;
+      }
+
+      // Atomic idempotency lock: only the convert that flips NEW→CONVERTED wins.
+      const upd = await tx.lead.updateMany({
+        where: { id: leadId, status: 'NEW' },
+        data: {
+          status: 'CONVERTED',
+          convertedContactId: contact.id,
+          convertedDealId: dealId,
+          convertedAt: new Date(),
+        },
+      });
+      if (upd.count !== 1) throw new DomainError('CONFLICT', 409, 'Лид уже сконвертирован');
+
+      return { contactId: contact.id, dealId };
+    });
+
+    revalidatePath('/crm');
+    revalidatePath('/crm/contacts');
+    revalidatePath('/crm/leads');
+    return { ok: true, data: result };
+  } catch (e) {
+    if (e instanceof DomainError) return { ok: false, error: { code: e.code, message: e.message } };
+    throw e;
+  }
 }
