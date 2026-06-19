@@ -54,6 +54,7 @@ export function WebhooksForm({ projectId, initial }: Props) {
     startTransition(async () => {
       const res = await updateWebhookAction(h.id, h.url, h.events, !h.active);
       if (res.ok) router.refresh();
+      else setError(res.error.message);
     });
   }
 
@@ -61,6 +62,7 @@ export function WebhooksForm({ projectId, initial }: Props) {
     startTransition(async () => {
       const res = await deleteWebhookAction(id);
       if (res.ok) router.refresh();
+      else setError(res.error.message);
     });
   }
 

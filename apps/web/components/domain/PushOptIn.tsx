@@ -126,7 +126,11 @@ export function PushToggle() {
         const reg = await navigator.serviceWorker.getRegistration('/');
         const sub = await reg?.pushManager.getSubscription();
         if (sub) {
-          await unsubscribePushAction(sub.endpoint);
+          const res = await unsubscribePushAction(sub.endpoint);
+          if (!res.ok) {
+            setError(res.error.message);
+            return;
+          }
           await sub.unsubscribe().catch(() => undefined);
         }
         setState('off');

@@ -95,7 +95,11 @@ export async function deleteWebhookAction(webhookId: string): Promise<ActionResu
   const project = await canEditProjectId(me.id, me.role, hook.projectId);
   if (!project) return { ok: false, error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' } };
 
-  await prisma.webhook.delete({ where: { id: webhookId } }).catch(() => {});
+  try {
+    await prisma.webhook.delete({ where: { id: webhookId } });
+  } catch {
+    return { ok: false, error: { code: 'DB_ERROR', message: 'Не удалось удалить вебхук' } };
+  }
   revalidatePath(`/projects/${hook.project.key}/settings`);
   return { ok: true };
 }

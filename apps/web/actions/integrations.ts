@@ -86,7 +86,13 @@ export async function syncTeamFromBitrixAction(opts: {
       error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Только PM/ADMIN' },
     };
   }
-  const res = await runBitrix24TeamSyncNow(me.id, { force: !!opts.force });
+  let res: Awaited<ReturnType<typeof runBitrix24TeamSyncNow>>;
+  try {
+    res = await runBitrix24TeamSyncNow(me.id, { force: !!opts.force });
+  } catch (e) {
+    console.error('syncTeamFromBitrixAction', e);
+    return { ok: false, error: { code: 'SYNC_FAILED', message: 'Синхронизация не удалась' } };
+  }
   if (!res.ok) {
     return {
       ok: false,

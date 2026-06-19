@@ -35,6 +35,7 @@ export function TicketQueueTable({ tickets, canEdit }: { tickets: TicketRow[]; c
     startTransition(async () => {
       const res = await setTicketStatusAction(id, status);
       if (res.ok) router.refresh();
+      else alert(res.error.message);
     });
   }
 
