@@ -19,6 +19,8 @@ import {
   Trash2,
   Megaphone,
   ChevronLeft,
+  Pin,
+  LogOut,
 } from 'lucide-react';
 import { Avatar } from '@giper/ui/components/Avatar';
 import {
@@ -31,6 +33,8 @@ import {
   listChannelInvitesAction,
   revokeChannelInviteAction,
   deleteChannelAction,
+  leaveChannelAction,
+  listPinnedMessagesAction,
 } from '@/actions/messenger';
 import { startCallInChannelAction } from '@/actions/meetings';
 
@@ -65,17 +69,23 @@ export function ChannelHeader({
   channel,
   isMuted = false,
   canDelete = false,
+  isMember = false,
 }: {
   channel: ChannelLite;
   isMuted?: boolean;
   /** True when the viewer is the channel's creator. Surfaces the
    *  delete button — the server action also re-checks. */
   canDelete?: boolean;
+  /** True when the viewer is a member of this channel. Surfaces the
+   *  "Leave" button (non-DM only) — the server action also re-checks. */
+  isMember?: boolean;
 }) {
   const [panelOpen, setPanelOpen] = useState(false);
+  const [pinnedOpen, setPinnedOpen] = useState(false);
   const [callPending, startCall] = useTransition();
   const [mutePending, startMute] = useTransition();
   const [deletePending, startDelete] = useTransition();
+  const [leavePending, startLeave] = useTransition();
   const router = useRouter();
   // DM/GROUP_DM no longer hide the header — we want the call button
   // there too. We keep the title visible for context (the sidebar
@@ -135,6 +145,22 @@ export function ChannelHeader({
     });
   }
 
+  function leave() {
+    // eslint-disable-next-line no-alert
+    const sure = window.confirm(`Выйти из канала «${channel.name}»?`);
+    if (!sure) return;
+    startLeave(async () => {
+      const r = await leaveChannelAction(channel.id);
+      if (!r.ok) {
+        // eslint-disable-next-line no-alert
+        alert(r.error.message);
+        return;
+      }
+      router.push('/messages');
+      router.refresh();
+    });
+  }
+
   return (
     <>
       <header className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border bg-background px-3 md:px-4">
@@ -179,6 +205,15 @@ export function ChannelHeader({
               <Bell className="size-3.5" aria-hidden="true" />
             )}
           </button>
+          <button
+            type="button"
+            onClick={() => setPinnedOpen(true)}
+            className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors duration-150 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            aria-label="Закреплённые сообщения"
+            title="Закреплённые"
+          >
+            <Pin className="size-3.5" aria-hidden="true" />
+          </button>
           {!isDm ? (
             <button
               type="button"
@@ -189,6 +224,18 @@ export function ChannelHeader({
             >
               <Users className="size-3.5" aria-hidden="true" />
               <span className="hidden sm:inline">Участники</span>
+            </button>
+          ) : null}
+          {isMember && !isDm ? (
+            <button
+              type="button"
+              onClick={leave}
+              disabled={leavePending}
+              className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors duration-150 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+              aria-label="Выйти из канала"
+              title="Выйти из канала"
+            >
+              <LogOut className="size-3.5" aria-hidden="true" />
             </button>
           ) : null}
           {canDelete && !isDm ? (
@@ -212,6 +259,130 @@ export function ChannelHeader({
           onClose={() => setPanelOpen(false)}
         />
       ) : null}
+      {pinnedOpen ? (
+        <PinnedPanel
+          channelId={channel.id}
+          onClose={() => setPinnedOpen(false)}
+        />
+      ) : null}
+    </>
+  );
+}
+
+type PinnedRows = NonNullable<
+  Awaited<ReturnType<typeof listPinnedMessagesAction>>
+>;
+type PinnedRow = PinnedRows[number];
+
+/**
+ * Right-side overlay listing a channel's pinned messages. Pinning was
+ * write-only until now (setPinnedAction with no reader) — this surfaces
+ * the pins. Read-only: any channel reader can open it.
+ */
+function PinnedPanel({
+  channelId,
+  onClose,
+}: {
+  channelId: string;
+  onClose: () => void;
+}) {
+  const [rows, setRows] = useState<PinnedRow[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  useEffect(() => {
+    startTransition(async () => {
+      const r = await listPinnedMessagesAction(channelId);
+      if (r === null) {
+        setError('Нет доступа к каналу');
+        setRows([]);
+      } else {
+        setRows(r);
+        setError(null);
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [channelId]);
+
+  // Close on Esc.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <>
+      <div
+        className="fixed inset-0 z-40 bg-foreground/20"
+        onClick={onClose}
+        role="presentation"
+      />
+      <aside
+        className="fixed right-0 top-0 z-50 flex h-full w-full max-w-sm flex-col border-l border-border bg-background shadow-lg"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Закреплённые сообщения"
+      >
+        <header className="flex h-12 shrink-0 items-center justify-between border-b border-border px-4">
+          <h3 className="flex items-center gap-1.5 text-sm font-semibold">
+            <Pin className="size-3.5" aria-hidden="true" />
+            Закреплённые
+          </h3>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            aria-label="Закрыть"
+          >
+            <X className="size-4" />
+          </button>
+        </header>
+        <div className="flex-1 overflow-y-auto p-3">
+          {error ? <p className="text-xs text-destructive">{error}</p> : null}
+          {pending && rows === null ? (
+            <p className="text-xs text-muted-foreground">Загрузка…</p>
+          ) : rows && rows.length === 0 && !error ? (
+            <p className="text-xs text-muted-foreground">
+              Нет закреплённых сообщений
+            </p>
+          ) : (
+            <ul className="flex flex-col gap-2">
+              {(rows ?? []).map((m) => (
+                <li
+                  key={m.id}
+                  className="rounded-md border border-border bg-background/50 p-2"
+                >
+                  <div className="mb-1 flex items-center gap-2">
+                    <Avatar
+                      src={m.author?.image ?? null}
+                      alt={m.author?.name ?? '—'}
+                      className="size-5"
+                    />
+                    <span className="truncate text-xs font-medium">
+                      {m.author?.name ?? '—'}
+                    </span>
+                    <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">
+                      {m.pinnedAt
+                        ? new Date(m.pinnedAt).toLocaleDateString('ru-RU')
+                        : ''}
+                    </span>
+                  </div>
+                  <p className="whitespace-pre-wrap break-words text-sm text-foreground/90">
+                    {m.body?.trim()
+                      ? m.body
+                      : m.attachments.length > 0
+                        ? '[вложение]'
+                        : '[сообщение]'}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </aside>
     </>
   );
 }

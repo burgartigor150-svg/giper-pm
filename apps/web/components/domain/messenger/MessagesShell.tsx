@@ -259,6 +259,7 @@ export function MessagesShell({
                     channel={active}
                     isMuted={isMuted}
                     canDelete={canDeleteChannel}
+                    isMember={myChannelRole !== null}
                   />
                 ) : null}
             <div className="flex-1 overflow-y-auto px-4 py-4" ref={scrollRef}>

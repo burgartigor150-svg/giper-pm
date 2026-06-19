@@ -38,6 +38,9 @@ import {
   listChannelMembersAction,
   postMessageAction,
   deleteChannelAction,
+  leaveChannelAction,
+  listPinnedMessagesAction,
+  setPinnedAction,
 } from '@/actions/messenger';
 import { makeUser } from './helpers/factories';
 
@@ -486,5 +489,114 @@ describe('deleteChannelAction', () => {
     const r = await deleteChannelAction('no-such-channel');
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error.code).toBe('NOT_FOUND');
+  });
+});
+
+describe('leaveChannelAction', () => {
+  it('member can leave a PUBLIC channel; membership removed', async () => {
+    const owner = await makeUser();
+    const member = await makeUser();
+    mockMe.id = owner.id;
+    const res = await createChannelAction({
+      name: `leave-${Date.now()}`,
+      kind: 'PUBLIC',
+      memberUserIds: [member.id],
+    });
+    if (!res.ok || !res.data) throw new Error('setup');
+    mockMe.id = member.id;
+    const r = await leaveChannelAction(res.data.id);
+    expect(r.ok).toBe(true);
+    const row = await prisma.channelMember.findUnique({
+      where: { channelId_userId: { channelId: res.data.id, userId: member.id } },
+    });
+    expect(row).toBeNull();
+  });
+
+  it('DM channels cannot be left → VALIDATION', async () => {
+    const a = await makeUser();
+    const b = await makeUser();
+    const dm = await prisma.channel.create({
+      data: {
+        kind: 'DM',
+        name: 'dm',
+        slug: `dm-${Date.now()}-${Math.random()}`,
+        createdById: a.id,
+        members: {
+          create: [
+            { userId: a.id, role: 'MEMBER' },
+            { userId: b.id, role: 'MEMBER' },
+          ],
+        },
+      },
+    });
+    mockMe.id = a.id;
+    const r = await leaveChannelAction(dm.id);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error.code).toBe('VALIDATION');
+    // Membership is untouched.
+    const row = await prisma.channelMember.findUnique({
+      where: { channelId_userId: { channelId: dm.id, userId: a.id } },
+    });
+    expect(row).not.toBeNull();
+  });
+
+  it('non-member → NOT_FOUND (no false success)', async () => {
+    const owner = await makeUser();
+    const stranger = await makeUser();
+    mockMe.id = owner.id;
+    const res = await createChannelAction({
+      name: `leave-${Date.now()}-${Math.random()}`,
+      kind: 'PUBLIC',
+    });
+    if (!res.ok || !res.data) throw new Error('setup');
+    mockMe.id = stranger.id;
+    const r = await leaveChannelAction(res.data.id);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error.code).toBe('NOT_FOUND');
+  });
+
+  it('unknown channel → NOT_FOUND', async () => {
+    const u = await makeUser();
+    mockMe.id = u.id;
+    const r = await leaveChannelAction('no-such-channel');
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error.code).toBe('NOT_FOUND');
+  });
+});
+
+describe('listPinnedMessagesAction', () => {
+  it('returns pinned messages for a channel reader', async () => {
+    const owner = await makeUser();
+    mockMe.id = owner.id;
+    const res = await createChannelAction({
+      name: `pin-${Date.now()}-${Math.random()}`,
+      kind: 'PUBLIC',
+    });
+    if (!res.ok || !res.data) throw new Error('setup');
+    const channelId = res.data.id;
+    const posted = await postMessageAction({ channelId, body: 'pin me' });
+    if (!posted.ok || !posted.data) throw new Error('post failed');
+    // Creator is channel ADMIN → can pin.
+    const pin = await setPinnedAction(posted.data.id, true);
+    expect(pin.ok).toBe(true);
+    const rows = await listPinnedMessagesAction(channelId);
+    expect(rows).not.toBeNull();
+    expect(rows).toHaveLength(1);
+    expect(rows?.[0]?.body).toBe('pin me');
+  });
+
+  it('non-member gets null (no read access)', async () => {
+    const owner = await makeUser();
+    const stranger = await makeUser();
+    mockMe.id = owner.id;
+    const res = await createChannelAction({
+      name: `pin-${Date.now()}-${Math.random()}`,
+      kind: 'PRIVATE',
+      memberUserIds: [(await makeUser()).id],
+    });
+    if (!res.ok || !res.data) throw new Error('setup');
+    mockMe.id = stranger.id;
+    const rows = await listPinnedMessagesAction(res.data.id);
+    expect(rows).toBeNull();
   });
 });
