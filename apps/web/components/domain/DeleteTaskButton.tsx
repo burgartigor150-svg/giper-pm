@@ -17,8 +17,11 @@ export function DeleteTaskButton({ taskId, projectKey }: Props) {
 
   function handle() {
     if (!confirm(t('deleteConfirm'))) return;
-    startTransition(() => {
-      deleteTaskAction(taskId, projectKey);
+    startTransition(async () => {
+      // On success the action redirect()s to the list (handled by Next);
+      // only a failure (e.g. no permission) returns a result here.
+      const res = await deleteTaskAction(taskId, projectKey);
+      if (res && !res.ok) alert(res.error.message);
     });
   }
 

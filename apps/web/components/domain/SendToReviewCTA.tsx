@@ -57,12 +57,13 @@ export function SendToReviewCTA({
         disabled={pending}
         onClick={() => {
           startTransition(async () => {
-            await setInternalStatusAction(
+            const res = await setInternalStatusAction(
               taskId,
               projectKey,
               taskNumber,
               'REVIEW',
             );
+            if (!res.ok) alert(res.error.message);
           });
         }}
       >

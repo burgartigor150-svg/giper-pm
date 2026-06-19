@@ -34,8 +34,16 @@ import { searchAll, type SearchResult } from '@/actions/search';
  * Why cmdk: handles keyboard navigation, ARIA, and virtualization for free,
  * and is the de-facto standard for this UI (Linear / Vercel / Raycast).
  */
-export function CommandPalette() {
+export function CommandPalette({
+  allowedPaths = [],
+}: {
+  /** Role-filtered nav hrefs (from the sidebar's navItems). Role-gated
+   *  "Перейти" rows render only when their href is in this set, so a
+   *  MEMBER doesn't get palette entries that lead to a notFound() page. */
+  allowedPaths?: string[];
+} = {}) {
   const router = useRouter();
+  const allowed = new Set(allowedPaths);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [result, setResult] = useState<SearchResult | null>(null);
@@ -213,27 +221,33 @@ export function CommandPalette() {
                     shortcut="G T"
                     onSelect={navigate}
                   />
-                  <NavRow
-                    icon={<Users className="h-4 w-4" />}
-                    label="Команда"
-                    href="/team"
-                    shortcut="G C"
-                    onSelect={navigate}
-                  />
-                  <NavRow
-                    icon={<BarChart3 className="h-4 w-4" />}
-                    label="Отчёты"
-                    href="/reports"
-                    shortcut="G R"
-                    onSelect={navigate}
-                  />
-                  <NavRow
-                    icon={<Settings className="h-4 w-4" />}
-                    label="Настройки"
-                    href="/settings"
-                    shortcut="G S"
-                    onSelect={navigate}
-                  />
+                  {allowed.has('/team') ? (
+                    <NavRow
+                      icon={<Users className="h-4 w-4" />}
+                      label="Команда"
+                      href="/team"
+                      shortcut="G C"
+                      onSelect={navigate}
+                    />
+                  ) : null}
+                  {allowed.has('/reports') ? (
+                    <NavRow
+                      icon={<BarChart3 className="h-4 w-4" />}
+                      label="Отчёты"
+                      href="/reports"
+                      shortcut="G R"
+                      onSelect={navigate}
+                    />
+                  ) : null}
+                  {allowed.has('/settings') ? (
+                    <NavRow
+                      icon={<Settings className="h-4 w-4" />}
+                      label="Настройки"
+                      href="/settings"
+                      shortcut="G S"
+                      onSelect={navigate}
+                    />
+                  ) : null}
                 </Command.Group>
               </>
             ) : null}
