@@ -541,6 +541,27 @@ describe('listTasksForBoard', () => {
     expect(out.tasks).toHaveLength(1);
     expect(out.tasks[0]?.title).toBe('urgent fix');
   });
+
+  it('search keeps per-stake scope (does NOT leak non-stake matching tasks)', async () => {
+    // Regression: `q` used to reassign where.OR, dropping the per-stake
+    // access-control clause → search leaked every matching task in the
+    // project. `me` is a member but only a stakeholder on one task.
+    const owner = await makeUser();
+    const me = await makeUser();
+    const project = await makeProject({ ownerId: owner.id });
+    await addMember(project.id, me.id, 'CONTRIBUTOR');
+    await makeTask({
+      projectId: project.id,
+      creatorId: owner.id,
+      assigneeId: me.id,
+      title: 'alpha mine',
+    });
+    // owner-only matching task — `me` has no stake on it.
+    await makeTask({ projectId: project.id, creatorId: owner.id, title: 'alpha other' });
+    const out = await listTasksForBoard(project.key, { q: 'alpha' }, sessionUser(me));
+    expect(out.tasks).toHaveLength(1);
+    expect(out.tasks[0]?.title).toBe('alpha mine');
+  });
 });
 
 // ============================================================================

@@ -145,19 +145,28 @@ export async function listTasksForBoard(
   if (filter.sprintId !== undefined) where.sprintId = filter.sprintId;
 
   if (filter.priority) where.priority = filter.priority;
+  // `q` and tags go into AND so they NEVER clobber the per-stake `where.OR`
+  // access-control clause set above. Previously `q` REASSIGNED `where.OR`,
+  // dropping the stake scope entirely → with search on and "only mine" off,
+  // the board leaked every matching task in the project, including
+  // Bitrix-mirror tasks the viewer isn't a stakeholder on (which the
+  // per-stake clause exists specifically to hide).
+  const and: Prisma.TaskWhereInput[] = [];
   if (filter.q) {
-    where.OR = [
-      { title: { contains: filter.q, mode: 'insensitive' } },
-      { description: { contains: filter.q, mode: 'insensitive' } },
-    ];
+    and.push({
+      OR: [
+        { title: { contains: filter.q, mode: 'insensitive' } },
+        { description: { contains: filter.q, mode: 'insensitive' } },
+      ],
+    });
   }
   if (filter.tagIds && filter.tagIds.length > 0) {
-    // AND-semantics: task must carry every selected tag. Done with one
-    // AND-array of relation filters so Prisma stays in a single query.
-    where.AND = filter.tagIds.map((tagId) => ({
-      taskTags: { some: { tagId } },
-    }));
+    // AND-semantics: task must carry every selected tag.
+    for (const tagId of filter.tagIds) {
+      and.push({ taskTags: { some: { tagId } } });
+    }
   }
+  if (and.length > 0) where.AND = and;
 
   const rawTasks = await prisma.task.findMany({
     where,
