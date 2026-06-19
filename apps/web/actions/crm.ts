@@ -165,6 +165,49 @@ export async function createContactAction(input: {
   return { ok: true, data: { id: c.id } };
 }
 
+/** Edit an existing contact. CRM editors (ADMIN/PM) only. */
+export async function updateContactAction(
+  contactId: string,
+  input: { name: string; company?: string; email?: string; phone?: string },
+): Promise<ActionResult> {
+  const me = await requireAuth();
+  if (!canEditCrm({ id: me.id, role: me.role })) return DENY;
+  if (input.name.trim().length < 2) {
+    return { ok: false, error: { code: 'VALIDATION', message: 'Имя ≥ 2 символов' } };
+  }
+  try {
+    await prisma.contact.update({
+      where: { id: contactId },
+      data: {
+        name: input.name.trim().slice(0, 200),
+        company: input.company?.trim().slice(0, 200) || null,
+        email: input.email?.trim().slice(0, 200) || null,
+        phone: input.phone?.trim().slice(0, 60) || null,
+      },
+    });
+  } catch {
+    return { ok: false, error: { code: 'NOT_FOUND', message: 'Контакт не найден' } };
+  }
+  revalidatePath('/crm/contacts');
+  return { ok: true };
+}
+
+/** Soft-delete a contact (sets deletedAt; deals are kept). CRM editors only. */
+export async function deleteContactAction(contactId: string): Promise<ActionResult> {
+  const me = await requireAuth();
+  if (!canEditCrm({ id: me.id, role: me.role })) return DENY;
+  try {
+    await prisma.contact.update({
+      where: { id: contactId },
+      data: { deletedAt: new Date() },
+    });
+  } catch {
+    return { ok: false, error: { code: 'NOT_FOUND', message: 'Контакт не найден' } };
+  }
+  revalidatePath('/crm/contacts');
+  return { ok: true };
+}
+
 /** Archive (soft-delete) a pipeline. ADMIN only. */
 export async function archivePipelineAction(pipelineId: string): Promise<ActionResult> {
   const me = await requireAuth();

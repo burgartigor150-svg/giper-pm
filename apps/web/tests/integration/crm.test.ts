@@ -33,9 +33,11 @@ import {
   moveDealStageAction,
   setDealStatusAction,
   createContactAction,
+  updateContactAction,
+  deleteContactAction,
   archivePipelineAction,
 } from '@/actions/crm';
-import { listPipelines, getPipelineSummary } from '@/lib/crm';
+import { listPipelines, getPipelineSummary, listContacts } from '@/lib/crm';
 import { makeUser } from './helpers/factories';
 
 beforeEach(() => {
@@ -150,6 +152,44 @@ describe('CRM — contacts & rbac', () => {
     mockMe.id = admin.id;
     const res = await createContactAction({ name: 'Иван Петров', company: 'ООО Ромашка' });
     expect(res.ok).toBe(true);
+  });
+
+  it('edits a contact', async () => {
+    const admin = await makeUser({ role: 'ADMIN' });
+    mockMe.id = admin.id;
+    const created = await createContactAction({ name: 'Старое Имя', company: 'A' });
+    const id = created.ok ? created.data!.id : '';
+    const res = await updateContactAction(id, { name: 'Новое Имя', company: 'B', email: 'x@y.z' });
+    expect(res.ok).toBe(true);
+    const c = await prisma.contact.findUniqueOrThrow({ where: { id } });
+    expect(c.name).toBe('Новое Имя');
+    expect(c.company).toBe('B');
+    expect(c.email).toBe('x@y.z');
+  });
+
+  it('soft-deletes a contact (drops from listContacts)', async () => {
+    const admin = await makeUser({ role: 'ADMIN' });
+    mockMe.id = admin.id;
+    const created = await createContactAction({ name: 'Удалить Меня' });
+    const id = created.ok ? created.data!.id : '';
+    const res = await deleteContactAction(id);
+    expect(res.ok).toBe(true);
+    const c = await prisma.contact.findUniqueOrThrow({ where: { id } });
+    expect(c.deletedAt).not.toBeNull();
+    const list = await listContacts();
+    expect(list.find((x) => x.id === id)).toBeUndefined();
+  });
+
+  it('forbids a MEMBER from editing/deleting a contact', async () => {
+    const admin = await makeUser({ role: 'ADMIN' });
+    mockMe.id = admin.id;
+    const created = await createContactAction({ name: 'Защищённый' });
+    const id = created.ok ? created.data!.id : '';
+    const member = await makeUser({ role: 'MEMBER' });
+    mockMe.id = member.id;
+    mockMe.role = 'MEMBER';
+    expect((await updateContactAction(id, { name: 'Взлом' })).ok).toBe(false);
+    expect((await deleteContactAction(id)).ok).toBe(false);
   });
 
   it('forbids a MEMBER from CRM writes', async () => {
