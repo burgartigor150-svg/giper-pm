@@ -18,6 +18,7 @@ import {
   CalendarRange,
   Filter,
   X,
+  Trash2,
 } from 'lucide-react';
 import {
   DndContext,
@@ -36,7 +37,7 @@ import {
   useDraggable,
   useDroppable,
 } from '@dnd-kit/core';
-import { changeTaskDueDateAction } from '@/actions/calendar';
+import { changeTaskDueDateAction, deleteCalendarEventAction } from '@/actions/calendar';
 import { PriorityBadge } from '@/components/domain/PriorityBadge';
 import { TaskStatusBadge } from '@/components/domain/TaskStatusBadge';
 
@@ -642,6 +643,7 @@ export function Calendar({
                 selectedDayKey={selectedDayKey}
                 buckets={buckets}
                 eventBuckets={eventBuckets}
+                currentUserId={currentUserId}
                 onDayClick={(date) => setPopover({ key: dayKey(date), date })}
               />
             ) : view === 'week' ? (
@@ -651,6 +653,7 @@ export function Calendar({
                 selectedDayKey={selectedDayKey}
                 buckets={buckets}
                 eventBuckets={eventBuckets}
+                currentUserId={currentUserId}
                 onDayClick={(date) => setPopover({ key: dayKey(date), date })}
               />
             ) : (
@@ -658,6 +661,7 @@ export function Calendar({
                 anchor={anchor}
                 buckets={buckets}
                 events={eventBuckets.get(anchor) ?? []}
+                currentUserId={currentUserId}
               />
             )}
           </div>
@@ -732,6 +736,7 @@ function MonthGrid({
   selectedDayKey,
   buckets,
   eventBuckets,
+  currentUserId,
   onDayClick,
 }: {
   anchor: string;
@@ -739,6 +744,7 @@ function MonthGrid({
   selectedDayKey: string | null;
   buckets: Map<string, DeadlineItem[]>;
   eventBuckets: Map<string, CalendarEventItem[]>;
+  currentUserId: string;
   onDayClick: (d: Date) => void;
 }) {
   const [y, m] = anchor.split('-').map(Number);
@@ -774,6 +780,7 @@ function MonthGrid({
             inMonth={day.getMonth() === monthIdx}
             items={buckets.get(dayKey(day)) ?? []}
             events={eventBuckets.get(dayKey(day)) ?? []}
+            currentUserId={currentUserId}
             onClick={onDayClick}
           />
         )),
@@ -788,6 +795,7 @@ function WeekGrid({
   selectedDayKey,
   buckets,
   eventBuckets,
+  currentUserId,
   onDayClick,
 }: {
   anchor: string;
@@ -795,6 +803,7 @@ function WeekGrid({
   selectedDayKey: string | null;
   buckets: Map<string, DeadlineItem[]>;
   eventBuckets: Map<string, CalendarEventItem[]>;
+  currentUserId: string;
   onDayClick: (d: Date) => void;
 }) {
   const start = new Date(anchor);
@@ -824,6 +833,7 @@ function WeekGrid({
           inMonth={true}
           items={buckets.get(dayKey(d)) ?? []}
           events={eventBuckets.get(dayKey(d)) ?? []}
+          currentUserId={currentUserId}
           onClick={onDayClick}
           tall
         />
@@ -836,10 +846,12 @@ function DayList({
   anchor,
   buckets,
   events = [],
+  currentUserId,
 }: {
   anchor: string;
   buckets: Map<string, DeadlineItem[]>;
   events?: CalendarEventItem[];
+  currentUserId: string;
 }) {
   const d = new Date(anchor);
   const list = buckets.get(dayKey(d)) ?? [];
@@ -869,7 +881,7 @@ function DayList({
               <ul className="mt-2 flex flex-col gap-1 border-t border-border pt-2">
                 {events.map((ev) => (
                   <li key={ev.id}>
-                    <EventChip ev={ev} />
+                    <EventChip ev={ev} currentUserId={currentUserId} />
                   </li>
                 ))}
               </ul>
@@ -888,6 +900,7 @@ function DayCell({
   inMonth,
   items,
   events = [],
+  currentUserId,
   onClick,
   tall,
 }: {
@@ -897,6 +910,7 @@ function DayCell({
   inMonth: boolean;
   items: DeadlineItem[];
   events?: CalendarEventItem[];
+  currentUserId: string;
   onClick: (d: Date) => void;
   tall?: boolean;
 }) {
@@ -983,7 +997,7 @@ function DayCell({
         {events.length > 0 ? (
           <ul className="mt-0.5 flex flex-col gap-0.5">
             {events.slice(0, 3).map((ev) => (
-              <EventChip key={ev.id} ev={ev} />
+              <EventChip key={ev.id} ev={ev} currentUserId={currentUserId} />
             ))}
             {events.length > 3 ? (
               <li className="px-1 text-[10px] text-muted-foreground">
@@ -997,7 +1011,14 @@ function DayCell({
   );
 }
 
-function EventChip({ ev }: { ev: CalendarEventItem }) {
+function EventChip({
+  ev,
+  currentUserId,
+}: {
+  ev: CalendarEventItem;
+  currentUserId: string;
+}) {
+  const [open, setOpen] = useState(false);
   const isCall = !!ev.location && ev.location.startsWith('meeting:');
   const time = ev.isAllDay
     ? null
@@ -1006,17 +1027,142 @@ function EventChip({ ev }: { ev: CalendarEventItem }) {
         minute: '2-digit',
       });
   return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className={[
+          'flex w-full items-center gap-1 truncate rounded px-1.5 py-0.5 text-left text-[10px] transition-colors',
+          isCall
+            ? 'bg-blue-500/15 text-blue-700 hover:bg-blue-500/25 dark:text-blue-300'
+            : 'bg-emerald-500/15 text-emerald-700 hover:bg-emerald-500/25 dark:text-emerald-300',
+        ].join(' ')}
+        title={ev.title}
+      >
+        {time ? <span className="font-mono tabular-nums">{time}</span> : null}
+        <span className="truncate">{ev.title}</span>
+      </button>
+      {open ? (
+        <EventDetailDialog
+          ev={ev}
+          currentUserId={currentUserId}
+          onClose={() => setOpen(false)}
+        />
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * Click-through detail for a calendar event. Shows time + location (or a
+ * link to the call) and — for the event's creator only — a delete button
+ * wired to deleteCalendarEventAction (server re-checks creator).
+ */
+function EventDetailDialog({
+  ev,
+  currentUserId,
+  onClose,
+}: {
+  ev: CalendarEventItem;
+  currentUserId: string;
+  onClose: () => void;
+}) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const isCall = !!ev.location && ev.location.startsWith('meeting:');
+  const meetingId = isCall ? ev.location!.slice('meeting:'.length) : null;
+  const isCreator = ev.createdById === currentUserId;
+
+  const when = ev.isAllDay
+    ? `${new Date(ev.startAt).toLocaleDateString('ru-RU', { day: '2-digit', month: 'long' })} · весь день`
+    : `${new Date(ev.startAt).toLocaleString('ru-RU', {
+        day: '2-digit',
+        month: 'long',
+        hour: '2-digit',
+        minute: '2-digit',
+      })} — ${new Date(ev.endAt).toLocaleTimeString('ru-RU', {
+        hour: '2-digit',
+        minute: '2-digit',
+      })}`;
+
+  function del() {
+    // eslint-disable-next-line no-alert
+    if (!window.confirm(`Удалить событие «${ev.title}»?`)) return;
+    startTransition(async () => {
+      const res = await deleteCalendarEventAction(ev.id);
+      if (!res.ok) {
+        // eslint-disable-next-line no-alert
+        alert(res.error.message);
+        return;
+      }
+      onClose();
+      router.refresh();
+    });
+  }
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
     <div
-      className={[
-        'flex items-center gap-1 truncate rounded px-1.5 py-0.5 text-[10px]',
-        isCall
-          ? 'bg-blue-500/15 text-blue-700 dark:text-blue-300'
-          : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300',
-      ].join(' ')}
-      title={ev.title}
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Событие"
     >
-      {time ? <span className="font-mono tabular-nums">{time}</span> : null}
-      <span className="truncate">{ev.title}</span>
+      <div
+        className="absolute inset-0 bg-foreground/30"
+        onClick={onClose}
+        role="presentation"
+      />
+      <div className="relative z-10 w-full max-w-sm rounded-lg border border-border bg-background p-4 shadow-lg">
+        <div className="mb-3 flex items-start justify-between gap-2">
+          <h3 className="text-base font-semibold">{ev.title}</h3>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Закрыть"
+            className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+        <div className="space-y-1 text-sm text-muted-foreground">
+          <div>{when}</div>
+          {isCall ? (
+            <Link
+              href={`/meetings/${meetingId}`}
+              className="inline-block text-blue-600 hover:underline dark:text-blue-400"
+            >
+              Перейти к звонку
+            </Link>
+          ) : ev.location ? (
+            <div>{ev.location}</div>
+          ) : null}
+        </div>
+        <div className="mt-4 flex justify-end">
+          {isCreator ? (
+            <button
+              type="button"
+              onClick={del}
+              disabled={pending}
+              className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-50"
+            >
+              <Trash2 className="size-3.5" aria-hidden="true" />
+              {pending ? 'Удаляю…' : 'Удалить'}
+            </button>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              Удалить может только создатель
+            </p>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
