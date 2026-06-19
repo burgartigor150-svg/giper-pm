@@ -48,7 +48,11 @@ export async function getBoardMetrics(
     }),
     prisma.task.groupBy({
       by: ['internalStatus'],
-      where: { projectId, internalStatus: { not: 'CANCELED' } },
+      // WIP = work currently in flight. Exclude DONE as well as CANCELED —
+      // otherwise finished tasks accumulate forever and inflate the
+      // "Открытых задач в работе" chart + its screen-reader summary.
+      // (Completions are counted separately via throughput/completedAt.)
+      where: { projectId, internalStatus: { notIn: ['CANCELED', 'DONE'] } },
       _count: { _all: true },
     }),
   ]);

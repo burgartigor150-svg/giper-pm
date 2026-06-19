@@ -111,10 +111,11 @@ export function NewTaskForm({ projectKey, members, projectMirrored = false }: Pr
         </div>
       </div>
 
-      <div className="flex flex-col gap-1">
-        <label className="text-sm font-medium" htmlFor="tags">{tForm('tags')}</label>
-        <Input id="tags" name="tags" placeholder={tForm('tagsPlaceholder')} />
-      </div>
+      {/* Tags are managed with the relational TagPicker on the task page
+          (it powers the board chips, list filter, and detail view). The old
+          free-text field here wrote the scalar Task.tags — a read-only
+          Bitrix24 mirror — so its tags were invisible to that system.
+          Creation redirects straight to the task, where TagPicker is ready. */}
 
       {projectMirrored ? (
         <label className="flex cursor-pointer items-start gap-2 rounded-md border border-input bg-muted/30 p-3 text-sm">

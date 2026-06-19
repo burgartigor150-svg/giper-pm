@@ -410,7 +410,8 @@
       "REVIEW_NEEDED": "Проверить",
       "GAP_DETECTED": "Пробел",
       "EXCESSIVE": "Слишком много",
-      "IDLE_LOGGED": "Idle"
+      "IDLE_LOGGED": "Idle",
+      "AUTO_STOPPED": "Авто-стоп"
     },
     "form": {
       "title": "Запись времени",
