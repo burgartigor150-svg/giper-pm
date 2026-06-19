@@ -414,6 +414,8 @@ model Project {
   recurringTasks  RecurringTask[]
   /// Outgoing webhooks fired on card/board events in this project.
   webhooks        Webhook[]
+  /// Kaiten-style Scrum sprints (time-boxed iterations) for this project.
+  sprints         Sprint[]
 
   @@unique([externalSource, externalId])
   @@index([status])
@@ -495,6 +497,33 @@ model RecurringTask {
 
   @@index([active, nextRunAt])
   @@index([projectId])
+}
+
+enum SprintStatus {
+  PLANNED   // defined, not started
+  ACTIVE    // current sprint — burndown reads from this one
+  CLOSED    // completed; incomplete cards carried out
+}
+
+/// Kaiten-style Scrum sprint: a time-boxed iteration scoped to a project.
+/// At most ONE ACTIVE per project — enforced in the action layer
+/// (startSprintAction), NOT a DB partial index, because CI uses `prisma db push`.
+model Sprint {
+  id          String       @id @default(cuid())
+  projectId   String
+  project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name        String
+  goal        String?      @db.Text
+  startDate   DateTime?
+  endDate     DateTime?
+  status      SprintStatus @default(PLANNED)
+  closedAt    DateTime?
+  createdById String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  tasks       Task[]
+
+  @@index([projectId, status])
 }
 
 /// A Telegram group or channel whose messages PM wants to turn into tasks.
@@ -843,6 +872,11 @@ model Task {
   subColumnId   String?
   subColumn     BoardSubColumn? @relation(fields: [subColumnId], references: [id], onDelete: SetNull)
 
+  /// Kaiten sprint the card is committed to. Nullable = backlog.
+  /// SetNull on sprint delete → card returns to backlog, never deleted.
+  sprintId      String?
+  sprint        Sprint?        @relation(fields: [sprintId], references: [id], onDelete: SetNull)
+
   /// Kaiten-style card cover. Either an uploaded image (S3 object key,
   /// served via /api/covers/[taskId]) or a solid colour (hex). At most one
   /// is set; both null = no cover (card renders as before).
@@ -872,6 +906,7 @@ model Task {
   @@index([assigneeId, status])
   @@index([projectId, status])
   @@index([projectId, internalStatus])
+  @@index([sprintId, internalStatus])
   @@index([dueDate])
   @@index([columnId, swimlaneId])
 }

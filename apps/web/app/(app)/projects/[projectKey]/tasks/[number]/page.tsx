@@ -19,6 +19,8 @@ import { TaskSidebar } from '@/components/domain/TaskSidebar';
 import { TaskCustomFields } from '@/components/domain/TaskCustomFields';
 import { StoryPointsField } from '@/components/domain/StoryPointsField';
 import { CoverField } from '@/components/domain/CoverField';
+import { SprintPicker } from '@/components/domain/SprintPicker';
+import { getSprints } from '@/lib/sprints/getSprints';
 import { TaskTimeline } from '@/components/domain/TaskTimeline';
 import { LogTaskHoursForm } from '@/components/domain/LogTaskHoursForm';
 import { listTaskTimeEntries } from '@/actions/time';
@@ -81,6 +83,7 @@ export default async function TaskDetailPage({ params }: { params: Params }) {
     taskTimeEntries,
     availableTags,
     graph,
+    projectSprints,
   ] = await Promise.all([
     getActiveTimer(me.id),
     getTaskSpentMinutes(task.id),
@@ -88,6 +91,7 @@ export default async function TaskDetailPage({ params }: { params: Params }) {
     listTaskTimeEntries(task.id, 10),
     listTagsForProject(task.project.id),
     getTaskGraph(task.id),
+    getSprints(task.project.id),
   ]);
   // Assignee/creator are always notified — the explicit watch toggle is
   // disabled with a tooltip in that case.
@@ -585,6 +589,18 @@ export default async function TaskDetailPage({ params }: { params: Params }) {
               />
             </CardContent>
           </Card>
+          {projectSprints.length > 0 || task.sprintId ? (
+            <Card>
+              <CardContent className="py-3">
+                <SprintPicker
+                  taskId={task.id}
+                  currentSprintId={task.sprintId}
+                  sprints={projectSprints.map((s) => ({ id: s.id, name: s.name, status: s.status }))}
+                  canEdit={canEdit}
+                />
+              </CardContent>
+            </Card>
+          ) : null}
           <Card>
             <CardContent className="py-3">
               <CoverField
