@@ -770,6 +770,14 @@ export async function editMessageAction(
   if (!msg || msg.deletedAt) {
     return { ok: false, error: { code: 'NOT_FOUND', message: 'Сообщение не найдено' } };
   }
+  // The actor must have read access to the channel. Without this, an
+  // org-level ADMIN who is NOT a member could edit messages in a PRIVATE
+  // channel / DM they can't even see (the role check below is org-global,
+  // not channel-scoped). Authors always have access (they're members).
+  const access = await resolveChannelAccess(msg.channelId, me.id);
+  if (!access || !access.canRead) {
+    return { ok: false, error: { code: 'NOT_FOUND', message: 'Сообщение не найдено' } };
+  }
   if (msg.authorId !== me.id && me.role !== 'ADMIN') {
     return { ok: false, error: { code: 'FORBIDDEN', message: 'Нельзя редактировать чужое сообщение' } };
   }
@@ -793,6 +801,12 @@ export async function deleteMessageAction(messageId: string): Promise<ActionResu
     select: { authorId: true, channelId: true, parentId: true, deletedAt: true },
   });
   if (!msg || msg.deletedAt) {
+    return { ok: false, error: { code: 'NOT_FOUND', message: 'Сообщение не найдено' } };
+  }
+  // Same channel-access guard as editMessageAction: an org-level ADMIN must
+  // still be a member to act in a PRIVATE channel / DM.
+  const access = await resolveChannelAccess(msg.channelId, me.id);
+  if (!access || !access.canRead) {
     return { ok: false, error: { code: 'NOT_FOUND', message: 'Сообщение не найдено' } };
   }
   if (msg.authorId !== me.id && me.role !== 'ADMIN') {
@@ -1093,6 +1107,14 @@ export async function toggleReactionAction(
     select: { channelId: true },
   });
   if (!msg) return { ok: false, error: { code: 'NOT_FOUND', message: 'Сообщение не найдено' } };
+  // You may only react to messages in a channel you can read. Without this,
+  // any authed user with a messageId could react inside a PRIVATE channel /
+  // DM they aren't in, and the reaction.changed event would surface their
+  // presence to the real members.
+  const access = await resolveChannelAccess(msg.channelId, me.id);
+  if (!access || !access.canRead) {
+    return { ok: false, error: { code: 'NOT_FOUND', message: 'Сообщение не найдено' } };
+  }
 
   if (existing) {
     await prisma.messageReaction.delete({
