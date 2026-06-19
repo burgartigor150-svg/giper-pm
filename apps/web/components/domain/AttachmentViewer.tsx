@@ -1,8 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useTransition } from 'react';
 import { createPortal } from 'react-dom';
-import { Download, X, Paperclip } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Download, X, Paperclip, Trash2 } from 'lucide-react';
+import { deleteAttachmentAction } from '@/actions/attachments';
 
 export type AttachmentLite = {
   id: string;
@@ -13,6 +15,8 @@ export type AttachmentLite = {
   proxyUrl: string;
   /** Direct upstream link — used only as a download fallback. */
   downloadUrl: string | null;
+  /** Whether the current user may delete this file (local, with rights). */
+  deletable: boolean;
 };
 
 /**
@@ -27,8 +31,31 @@ export type AttachmentLite = {
  * The modal is portaled to <body> so it can escape any parent overflow:
  * hidden / transform stacking context.
  */
-export function AttachmentViewer({ attachments }: { attachments: AttachmentLite[] }) {
+export function AttachmentViewer({
+  attachments,
+  projectKey,
+  taskNumber,
+}: {
+  attachments: AttachmentLite[];
+  projectKey?: string;
+  taskNumber?: number;
+}) {
+  const router = useRouter();
   const [open, setOpen] = useState<AttachmentLite | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  function handleDelete(a: AttachmentLite) {
+    if (!projectKey || taskNumber === undefined) return;
+    if (!confirm(`Удалить файл «${a.filename}»?`)) return;
+    startTransition(async () => {
+      const res = await deleteAttachmentAction(a.id, projectKey, taskNumber);
+      if (!res.ok) {
+        alert(res.error.message);
+        return;
+      }
+      router.refresh();
+    });
+  }
 
   return (
     <>
@@ -56,6 +83,18 @@ export function AttachmentViewer({ attachments }: { attachments: AttachmentLite[
               <Download className="h-3 w-3" />
               Скачать
             </a>
+            {a.deletable && projectKey && taskNumber !== undefined ? (
+              <button
+                type="button"
+                onClick={() => handleDelete(a)}
+                disabled={pending}
+                className="inline-flex items-center justify-center rounded-md border border-input p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+                aria-label="Удалить файл"
+                title="Удалить файл"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            ) : null}
           </li>
         ))}
       </ul>

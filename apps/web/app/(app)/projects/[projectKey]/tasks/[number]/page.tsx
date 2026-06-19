@@ -496,7 +496,12 @@ export default async function TaskDetailPage({ params }: { params: Params }) {
               </CardHeader>
               <CardContent className="flex flex-col gap-4">
                 {task.attachments.length > 0 ? (
-                  <TaskAttachments attachments={task.attachments} />
+                  <TaskAttachments
+                    attachments={task.attachments}
+                    projectKey={projectKey}
+                    taskNumber={task.number}
+                    canDelete={canEdit}
+                  />
                 ) : null}
                 {canEdit ? (
                   <AttachmentUpload

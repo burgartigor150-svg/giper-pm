@@ -12,7 +12,18 @@ type Attachment = {
   externalId: string | null;
 };
 
-export async function TaskAttachments({ attachments }: { attachments: Attachment[] }) {
+export async function TaskAttachments({
+  attachments,
+  projectKey,
+  taskNumber,
+  canDelete = false,
+}: {
+  attachments: Attachment[];
+  projectKey?: string;
+  taskNumber?: number;
+  /** Whether the user may delete attachments (local files only). */
+  canDelete?: boolean;
+}) {
   const t = await getT('tasks.detail');
   if (attachments.length === 0) {
     return <p className="text-sm text-muted-foreground">{t('noAttachments')}</p>;
@@ -28,6 +39,9 @@ export async function TaskAttachments({ attachments }: { attachments: Attachment
       a.externalSource === 'bitrix24' && a.externalId && webhook
         ? bitrix24DownloadUrl(webhook, a.externalId)
         : null,
+    // Only locally-uploaded files are deletable here (Bitrix mirrors
+    // round-trip via the source). The server re-checks permission.
+    deletable: canDelete && a.externalSource === null,
   }));
-  return <AttachmentViewer attachments={items} />;
+  return <AttachmentViewer attachments={items} projectKey={projectKey} taskNumber={taskNumber} />;
 }
