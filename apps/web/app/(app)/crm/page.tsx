@@ -89,7 +89,12 @@ export default async function CrmPage({ searchParams }: { searchParams: SP }) {
         </Card>
       ) : null}
 
-      <DealPipeline pipeline={pipeline} deals={deals} canEdit={canEdit} />
+      <DealPipeline
+        pipeline={pipeline}
+        deals={deals}
+        canEdit={canEdit}
+        contacts={contacts.map((c) => ({ id: c.id, name: c.name }))}
+      />
     </div>
   );
 }
