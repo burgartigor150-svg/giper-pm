@@ -15,6 +15,9 @@ type ReasonKey = 'notAllowed' | 'disabled' | 'default';
 const REASON_BY_QUERY: Record<string, ReasonKey> = {
   not_allowed: 'notAllowed',
   disabled: 'disabled',
+  // Auth.js sends ?error=AccessDenied when the SSO signIn callback rejects
+  // (a Google account whose email isn't a provisioned active user).
+  AccessDenied: 'notAllowed',
 };
 
 export default async function LoginErrorPage({

@@ -7,6 +7,7 @@ import {
   CardTitle,
 } from '@giper/ui/components/Card';
 import { getT } from '@/lib/i18n';
+import { isSsoEnabled } from '@/actions/auth';
 
 export default async function LoginPage({
   searchParams,
@@ -16,6 +17,7 @@ export default async function LoginPage({
   const { callbackUrl, changed } = await searchParams;
   const t = await getT('auth.login');
   const tSec = await getT('security');
+  const ssoEnabled = await isSsoEnabled();
 
   return (
     <Card>
@@ -29,7 +31,7 @@ export default async function LoginPage({
             {tSec('changed')}
           </div>
         ) : null}
-        <LoginForm callbackUrl={callbackUrl ?? '/dashboard'} />
+        <LoginForm callbackUrl={callbackUrl ?? '/dashboard'} ssoEnabled={ssoEnabled} />
       </CardContent>
     </Card>
   );

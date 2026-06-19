@@ -3,16 +3,23 @@
 import { useActionState } from 'react';
 import { Button } from '@giper/ui/components/Button';
 import { Input } from '@giper/ui/components/Input';
-import { signInWithCredentials, type SignInResult } from '@/actions/auth';
+import { signInWithCredentials, signInWithGoogle, type SignInResult } from '@/actions/auth';
 import { useT } from '@/lib/useT';
 
 const initial: SignInResult = { ok: true };
 
-export function LoginForm({ callbackUrl }: { callbackUrl: string }) {
+export function LoginForm({
+  callbackUrl,
+  ssoEnabled = false,
+}: {
+  callbackUrl: string;
+  ssoEnabled?: boolean;
+}) {
   const t = useT('auth.login');
   const [state, action, pending] = useActionState(signInWithCredentials, initial);
 
   return (
+    <div className="flex flex-col gap-3">
     <form action={action} className="flex flex-col gap-3">
       <input type="hidden" name="callbackUrl" value={callbackUrl} />
       <div className="flex flex-col gap-1">
@@ -42,5 +49,21 @@ export function LoginForm({ callbackUrl }: { callbackUrl: string }) {
         {t('signInButton')}
       </Button>
     </form>
+
+    {ssoEnabled ? (
+      <>
+        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+          <span className="h-px flex-1 bg-border" />
+          или
+          <span className="h-px flex-1 bg-border" />
+        </div>
+        <form action={signInWithGoogle.bind(null, callbackUrl)}>
+          <Button type="submit" variant="outline" className="w-full">
+            Войти через Google
+          </Button>
+        </form>
+      </>
+    ) : null}
+    </div>
   );
 }

@@ -1,8 +1,10 @@
 import NextAuth, { type DefaultSession, type NextAuthConfig } from 'next-auth';
 import Credentials from 'next-auth/providers/credentials';
+import Google from 'next-auth/providers/google';
 import bcrypt from 'bcryptjs';
 import { prisma, type UserRole } from '@giper/db';
 import { DomainError } from './errors';
+import { resolveSsoUser } from './authProvisioning';
 
 declare module 'next-auth' {
   interface Session {
@@ -69,8 +71,36 @@ export const authConfig: NextAuthConfig = {
         };
       },
     }),
+    // SSO (Google) — registered ONLY when its env vars are present. With them
+    // unset the providers array is byte-identical to before, so shipping this
+    // with no creds configured is a no-op. Setting an empty AUTH_GOOGLE_ID on
+    // the server is also the instant rollback. NO non-null assertions (a `!`
+    // on an absent var would throw at module load and 500 ALL auth).
+    ...(process.env.AUTH_GOOGLE_ID && process.env.AUTH_GOOGLE_SECRET
+      ? [
+          Google({
+            clientId: process.env.AUTH_GOOGLE_ID,
+            clientSecret: process.env.AUTH_GOOGLE_SECRET,
+          }),
+        ]
+      : []),
   ],
   callbacks: {
+    // Allowlist gate for OAuth: a Google login is accepted ONLY if its
+    // verified email matches an existing active user. We never auto-create
+    // users, and the role always comes from our DB — Google can't elevate.
+    async signIn({ user, account, profile }) {
+      if (account?.provider !== 'google') return true; // credentials: vetted in authorize()
+      const verified = (profile as { email_verified?: boolean } | undefined)?.email_verified === true;
+      const resolved = await resolveSsoUser({ email: profile?.email ?? user?.email, emailVerified: verified });
+      if (!resolved) return false;
+      // Hydrate the user object from the DB so the jwt callback persists OUR
+      // id/role, not Google's `sub`/profile.
+      user.id = resolved.id;
+      (user as { role?: UserRole }).role = resolved.role;
+      (user as { mustChangePassword?: boolean }).mustChangePassword = false;
+      return true;
+    },
     async jwt({ token, user, trigger }) {
       // First sign-in: persist domain claims into the token.
       if (user) {
