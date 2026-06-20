@@ -1,4 +1,6 @@
 import { prisma } from '@giper/db';
+import { type SessionUser, type CrmAccess } from './permissions';
+import { getEffectiveCaps } from './capabilities';
 
 export type StageView = {
   id: string;
@@ -62,6 +64,24 @@ export async function getMyCrmAccess(userId: string): Promise<boolean> {
  * list and the summary so the board and its stats can never desync.
  */
 const ownerFilter = (ownerId: string | null) => (ownerId ? { ownerId } : {});
+
+/**
+ * Resolve a user's CRM access from BOTH sources, read per request from the DB:
+ *   - the legacy opt-in crmAccess flag (→ own-scope rep), and
+ *   - the custom-role overlay capabilities (crm.view / crm.scope.own|all).
+ * ADMIN/PM stay org-wide. An explicit crm.scope.all cap (only grantable from an
+ * ADMIN/PM-based role, per the floor clamp) yields org-wide; otherwise any CRM
+ * grant resolves to own-scope, keeping the owner clamp on. This is the single
+ * gate every CRM page + action goes through.
+ */
+export async function resolveMyCrmAccess(user: SessionUser): Promise<CrmAccess> {
+  if (user.role === 'ADMIN' || user.role === 'PM') return { canSee: true, scope: 'all' };
+  const [flag, caps] = await Promise.all([getMyCrmAccess(user.id), getEffectiveCaps(user)]);
+  if (caps.has('crm.scope.all')) return { canSee: true, scope: 'all' };
+  const canSee =
+    caps.has('crm.view') || caps.has('crm.scope.own') || (flag && user.role !== 'VIEWER');
+  return canSee ? { canSee: true, scope: 'own' } : { canSee: false, scope: 'none' };
+}
 
 /** Active (non-archived) pipelines with their ordered stages. Fault-tolerant. */
 export async function listPipelines(): Promise<PipelineView[]> {

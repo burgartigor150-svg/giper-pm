@@ -30,6 +30,7 @@ import {
 import { listCustomRoles, getCustomRole, getUserAssignment, listAssignableRoles } from '@/lib/customRoles';
 import { loadCustomCaps, resolveEffectiveCaps } from '@/lib/capabilities';
 import { canSeeReports, canSeeSettings, canSeeServiceDesk } from '@/lib/permissions';
+import { resolveMyCrmAccess } from '@/lib/crm';
 import { makeUser } from './helpers/factories';
 
 async function asAdmin() {
@@ -171,6 +172,28 @@ describe('custom-role admin — assignment', () => {
     const res = await assignCustomRoleAction(user.id, 'does-not-exist');
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.error.code).toBe('NOT_FOUND');
+  });
+
+  it('CRM access resolves from custom-role caps (own via crm.view, all via scope.all)', async () => {
+    const admin = await asAdmin();
+    // MEMBER baseline → no CRM.
+    const m = await makeUser({ role: 'MEMBER' });
+    expect((await resolveMyCrmAccess({ id: m.id, role: 'MEMBER' })).canSee).toBe(false);
+
+    // crm.view (MEMBER base) → own scope.
+    const viewer = await createCustomRoleAction({ name: 'CRM смотрящий', baseRole: 'MEMBER', capabilities: ['crm.view'] });
+    mockMe.id = admin.id; mockMe.role = 'ADMIN';
+    await assignCustomRoleAction(m.id, viewer.ok ? viewer.data!.id : '');
+    expect(await resolveMyCrmAccess({ id: m.id, role: 'MEMBER' })).toEqual({ canSee: true, scope: 'own' });
+
+    // crm.scope.all from a PM-based role → org-wide for a MEMBER user.
+    const orgRole = await createCustomRoleAction({ name: 'CRM полный', baseRole: 'PM', capabilities: ['crm.view', 'crm.scope.all'] });
+    const m2 = await makeUser({ role: 'MEMBER' });
+    await assignCustomRoleAction(m2.id, orgRole.ok ? orgRole.data!.id : '');
+    expect(await resolveMyCrmAccess({ id: m2.id, role: 'MEMBER' })).toEqual({ canSee: true, scope: 'all' });
+
+    // ADMIN always org-wide regardless.
+    expect(await resolveMyCrmAccess({ id: admin.id, role: 'ADMIN' })).toEqual({ canSee: true, scope: 'all' });
   });
 
   it('listAssignableRoles returns only active roles', async () => {

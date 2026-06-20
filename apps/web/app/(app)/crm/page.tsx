@@ -2,8 +2,8 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@giper/ui/components/Card';
 import { requireAuth } from '@/lib/auth';
-import { canEditCrm, canDeleteCrmPipeline, resolveCrmAccess } from '@/lib/permissions';
-import { listPipelines, listDealsForPipeline, getPipelineSummary, listContacts, getMyCrmAccess } from '@/lib/crm';
+import { canEditCrm, canDeleteCrmPipeline } from '@/lib/permissions';
+import { listPipelines, listDealsForPipeline, getPipelineSummary, listContacts, resolveMyCrmAccess } from '@/lib/crm';
 import { listProjectsForUser } from '@/lib/projects';
 import { DealPipeline } from '@/components/domain/crm/DealPipeline';
 import { NewDealForm } from '@/components/domain/crm/NewDealForm';
@@ -17,7 +17,7 @@ type SP = Promise<Record<string, string | string[] | undefined>>;
 
 export default async function CrmPage({ searchParams }: { searchParams: SP }) {
   const me = await requireAuth();
-  const access = resolveCrmAccess({ id: me.id, role: me.role }, await getMyCrmAccess(me.id));
+  const access = await resolveMyCrmAccess({ id: me.id, role: me.role });
   if (!access.canSee) notFound();
 
   // Scoped reps (scope 'own') only ever receive their own rows, so every

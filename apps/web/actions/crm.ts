@@ -7,10 +7,9 @@ import { DomainError } from '@/lib/errors';
 import {
   canDeleteCrmPipeline,
   canEditCrm,
-  resolveCrmAccess,
   type CrmAccess,
 } from '@/lib/permissions';
-import { getMyCrmAccess } from '@/lib/crm';
+import { resolveMyCrmAccess } from '@/lib/crm';
 import { listProjectsForUser } from '@/lib/projects';
 
 type ActionResult<T = unknown> =
@@ -26,7 +25,7 @@ const DENY = { ok: false, error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Ð
  * (scope 'all') get an empty filter = unchanged org-wide behavior.
  */
 async function crmAccessFor(me: { id: string; role: UserRole }): Promise<CrmAccess> {
-  return resolveCrmAccess({ id: me.id, role: me.role }, await getMyCrmAccess(me.id));
+  return resolveMyCrmAccess({ id: me.id, role: me.role });
 }
 
 /** Owner filter for a scoped rep's WHERE clause. scope 'all'/'none' â†’ {} (the
