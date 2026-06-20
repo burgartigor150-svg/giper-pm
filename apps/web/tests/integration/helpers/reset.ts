@@ -12,6 +12,10 @@ import type { PrismaClient } from '@giper/db';
  * Sequence resetting isn't needed — every model uses cuid().
  */
 const TABLES_IN_DELETE_ORDER = [
+  // Custom roles (join tables before CustomRole; all before User/Project).
+  'UserCustomRole',
+  'ProjectMemberCustomRole',
+  'CustomRole',
   // CRM (Lead → Contact/Deal SetNull; Deal → Pipeline/Stage/Contact) + Sprint + Space.
   'Lead',
   'Deal',

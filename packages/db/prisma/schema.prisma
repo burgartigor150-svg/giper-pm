@@ -65,6 +65,12 @@ model User {
   ownedDeals        Deal[]               @relation("DealOwner")
   /// CRM leads owned (top-of-funnel, pre-qualification).
   ownedLeads        Lead[]               @relation("LeadOwner")
+  /// Custom-role: the user's org-level assignment (≤1), plus authored/assigned
+  /// trails. Additive — a null assignment ⇒ the UserRole baseline (inert).
+  customRole          UserCustomRole?           @relation("UserCustomRoleAssignee")
+  createdCustomRoles  CustomRole[]              @relation("CustomRoleCreator")
+  assignedCustomRoles UserCustomRole[]          @relation("UserCustomRoleAssigner")
+  projectCustomRoles  ProjectMemberCustomRole[] @relation("ProjectMemberCustomRoleUser")
   /// Service-desk tickets assigned to this agent.
   assignedTickets   Ticket[]             @relation("TicketAssignee")
   memberProjects    ProjectMember[]
@@ -431,6 +437,8 @@ model Project {
   sprints         Sprint[]
   /// CRM deals linked to this project (org-level sales → delivery handoff).
   deals           Deal[]          @relation("DealProject")
+  /// Per-project custom-role assignments. Reserved for v2 — no writer in v1.
+  memberCustomRoles ProjectMemberCustomRole[]
   /// Space (folder) this project belongs to. Nullable = ungrouped.
   spaceId         String?
   space           Space?          @relation(fields: [spaceId], references: [id], onDelete: SetNull)
@@ -767,6 +775,71 @@ model Lead {
   @@index([status, createdAt])
   @@index([ownerId])
   @@index([email])
+}
+
+// ─────────────────────────── Custom roles (RBAC overlay) ───────────────────────────
+// Additive + inert: a CustomRole carries an EXPLICIT capability set; when assigned
+// (UserCustomRole) it REPLACES the user's UserRole-derived org capabilities, so it can
+// both grant (more than MEMBER) and restrict (less than a base role). Users with no
+// assignment keep their UserRole baseline verbatim ⇒ deploy changes nothing. Effective
+// caps are resolved from the DB per request (lib/capabilities), never carried on the JWT.
+
+enum CustomRoleScope {
+  ORG     // v1 writes only this
+  PROJECT // reserved for v2; the resolver early-returns null on this value
+}
+
+/// An admin-defined role with an explicit capability set (subset of the catalog
+/// in apps/web/lib/capabilities/catalog.ts, validated in the action layer).
+model CustomRole {
+  id           String          @id @default(cuid())
+  name         String
+  description  String?
+  scope        CustomRoleScope @default(ORG)
+  /// Complete capability set (text[] of CapabilityKey). Empty = max restrict.
+  capabilities String[]        @default([])
+  /// The UserRole this role was templated from — drives prefill + the VIEWER
+  /// floor clamp. NOT a resolve-time fallback; the cap set is explicit.
+  baseRole     UserRole        @default(MEMBER)
+  isActive     Boolean         @default(true)
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  deletedAt    DateTime?
+  createdById  String?
+  createdBy    User?           @relation("CustomRoleCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  assignments        UserCustomRole[]
+  projectAssignments ProjectMemberCustomRole[]
+
+  @@index([scope, isActive])
+}
+
+/// Org-level assignment (one per user → REPLACE is unambiguous). Live in v1.
+model UserCustomRole {
+  id           String     @id @default(cuid())
+  userId       String     @unique
+  user         User       @relation("UserCustomRoleAssignee", fields: [userId], references: [id], onDelete: Cascade)
+  customRoleId String
+  customRole   CustomRole @relation(fields: [customRoleId], references: [id], onDelete: Cascade)
+  assignedAt   DateTime   @default(now())
+  assignedById String?
+  assignedBy   User?      @relation("UserCustomRoleAssigner", fields: [assignedById], references: [id], onDelete: SetNull)
+
+  @@index([customRoleId])
+}
+
+/// Per-project assignment. RESERVED for v2 — migrated but never written/read in v1.
+model ProjectMemberCustomRole {
+  id           String     @id @default(cuid())
+  projectId    String
+  userId       String
+  customRoleId String
+  project      Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user         User       @relation("ProjectMemberCustomRoleUser", fields: [userId], references: [id], onDelete: Cascade)
+  customRole   CustomRole @relation(fields: [customRoleId], references: [id], onDelete: Cascade)
+  assignedAt   DateTime   @default(now())
+
+  @@unique([projectId, userId])
+  @@index([customRoleId])
 }
 
 /// A Telegram group or channel whose messages PM wants to turn into tasks.
