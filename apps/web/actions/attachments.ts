@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
 import { canEditTaskInternal } from '@/lib/permissions';
+import { getEffectiveCaps } from '@/lib/capabilities';
 import { buildAttachmentKey, deleteObject, putObject } from '@/lib/storage/s3';
 
 const MAX_BYTES = 25 * 1024 * 1024; // 25 MB per file — sane default for screenshots / PDFs.
@@ -66,7 +67,7 @@ export async function uploadAttachmentAction(
   // ADMIN / owner / LEAD / creator / assignee). Previously this used the
   // per-stake canViewTask with an incomplete select, so project owners,
   // LEADs and ADMINs who saw the dropzone got "Нет доступа".
-  if (!canEditTaskInternal({ id: me.id, role: me.role }, task)) {
+  if (!canEditTaskInternal({ id: me.id, role: me.role }, task, await getEffectiveCaps({ id: me.id, role: me.role }))) {
     return {
       ok: false,
       error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Нет доступа' },
@@ -140,7 +141,7 @@ export async function deleteAttachmentAction(
   // (ADMIN / creator / assignee / owner / LEAD) plus the uploader. Without
   // creator/assignee here, the assignee saw an enabled trash that errored.
   const canDelete =
-    me.role === 'ADMIN' ||
+    (await getEffectiveCaps({ id: me.id, role: me.role })).has('task.attachments.manageAny') ||
     att.uploadedById === me.id ||
     att.task.creatorId === me.id ||
     att.task.assigneeId === me.id ||

@@ -11,6 +11,7 @@ import { autoUnblockDependents } from '@/lib/tasks/autoTransitions';
 import { runColumnEnterAutomations } from '@/lib/automations/runColumnEnterAutomations';
 import { dispatchWebhooks } from '@/lib/webhooks/dispatchWebhooks';
 import { canManageAssignments } from '@/lib/permissions';
+import { getEffectiveCaps } from '@/lib/capabilities';
 
 type ActionResult<T = unknown> =
   | { ok: true; data?: T }
@@ -64,7 +65,7 @@ export async function addTaskAssignmentAction(
   if (!task) return { ok: false, error: { code: 'NOT_FOUND', message: 'Не найдено' } };
   // Resource management is a PM concern. Regular contributors (incl.
   // creator/assignee) cannot put other people on a task.
-  if (!canManageAssignments({ id: me.id, role: me.role }, task.project)) {
+  if (!canManageAssignments({ id: me.id, role: me.role }, task.project, await getEffectiveCaps({ id: me.id, role: me.role }))) {
     return {
       ok: false,
       error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Только PM/лид может назначать соисполнителей' },
@@ -138,7 +139,7 @@ export async function removeTaskAssignmentAction(
     },
   });
   if (!a) return { ok: false, error: { code: 'NOT_FOUND', message: 'Не найдено' } };
-  if (!canManageAssignments({ id: me.id, role: me.role }, a.task.project)) {
+  if (!canManageAssignments({ id: me.id, role: me.role }, a.task.project, await getEffectiveCaps({ id: me.id, role: me.role }))) {
     return {
       ok: false,
       error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Только PM/лид может снимать соисполнителей' },

@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
 import { canEditTaskInternal } from '@/lib/permissions';
+import { getEffectiveCaps } from '@/lib/capabilities';
 
 /**
  * Checklist CRUD inside a task. Permission model: anyone with edit
@@ -46,7 +47,7 @@ async function loadTaskForEdit(taskId: string) {
   // gate, matching the UI's render guard (canEditTaskInternal) and the
   // documented intent in permissions.ts. Using canEditTask here vetoed every
   // mirror task, so the (visible, enabled) buttons silently no-op'd.
-  if (!canEditTaskInternal({ id: me.id, role: me.role }, task)) {
+  if (!canEditTaskInternal({ id: me.id, role: me.role }, task, await getEffectiveCaps({ id: me.id, role: me.role }))) {
     return {
       task: null,
       me,
@@ -197,8 +198,7 @@ export async function toggleChecklistItemAction(
   // Toggling doesn't require canEdit — any viewer can tick.
   const task = item.checklist.task;
   const isMember =
-    me.role === 'ADMIN' ||
-    me.role === 'PM' ||
+    (await getEffectiveCaps({ id: me.id, role: me.role })).has('task.checklist.toggle') ||
     task.creatorId === me.id ||
     task.assigneeId === me.id ||
     task.project.ownerId === me.id ||
