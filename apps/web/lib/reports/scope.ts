@@ -33,9 +33,11 @@ export type ScopedQuery = {
  */
 export async function getVisibleUserIds(
   viewer: SessionUser,
+  canTeamScope?: boolean,
 ): Promise<Set<string>> {
   const ids = new Set<string>([viewer.id]);
-  if (viewer.role === 'PM' || viewer.role === 'ADMIN') {
+  // canTeamScope (the reports.teamScope capability) overrides the role check.
+  if (canTeamScope ?? (viewer.role === 'PM' || viewer.role === 'ADMIN')) {
     const team = await prisma.pmTeamMember.findMany({
       where: { pmId: viewer.id },
       select: { memberId: true },
@@ -48,6 +50,7 @@ export async function getVisibleUserIds(
 export async function resolveScope(
   viewer: SessionUser,
   filter: { projectKey?: string; userId?: string },
+  canTeamScope?: boolean,
 ): Promise<ScopedQuery> {
   // Per-stake project visibility — same rule as listProjectsForUser.
   const projects = await prisma.project.findMany({
@@ -79,7 +82,7 @@ export async function resolveScope(
     projectId = p?.id ?? null;
   }
 
-  const visibleUserIds = await getVisibleUserIds(viewer);
+  const visibleUserIds = await getVisibleUserIds(viewer, canTeamScope);
 
   // If filter.userId is provided AND inside the visible team, narrow to
   // just that user. Otherwise leave userId=null and aggregate across the

@@ -41,7 +41,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: SP }
   }
   const filter = reportsFilterSchema.parse(raw);
   const range = resolveRange(filter);
-  const scope = await resolveScope({ id: me.id, role: me.role }, filter);
+  const scope = await resolveScope({ id: me.id, role: me.role }, filter, caps.has('reports.teamScope'));
 
   // Filter dropdowns: visible projects + (for PM/ADMIN) team members.
   // "My team" = scope.visibleUserIds (own PmTeam members + self). For
@@ -53,7 +53,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: SP }
       orderBy: { name: 'asc' },
       select: { key: true, name: true },
     }),
-    (me.role === 'ADMIN' || me.role === 'PM') && scope.visibleUserIds.size > 1
+    caps.has('reports.teamScope') && scope.visibleUserIds.size > 1
       ? prisma.user.findMany({
           where: { id: { in: [...scope.visibleUserIds] }, isActive: true },
           orderBy: { name: 'asc' },
