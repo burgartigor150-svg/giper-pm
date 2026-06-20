@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation';
 import { requireAuth } from '@/lib/auth';
 import { getProject } from '@/lib/projects';
 import { canEditProject } from '@/lib/permissions';
+import { getEffectiveCaps } from '@/lib/capabilities';
 import { DomainError } from '@/lib/errors';
 import { getDocument } from '@/lib/documents/getDocuments';
 import { DocumentEditor } from '@/components/domain/DocumentEditor';
@@ -33,6 +34,7 @@ export default async function ProjectDocPage({
   const canEdit = canEditProject(
     { id: user.id, role: user.role },
     { ownerId: project.ownerId, members: project.members },
+    await getEffectiveCaps({ id: user.id, role: user.role }),
   );
 
   return (

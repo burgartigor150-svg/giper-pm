@@ -22,6 +22,7 @@ import {
   updateProject,
 } from '@/lib/projects';
 import { canEditProject } from '@/lib/permissions';
+import { getEffectiveCaps } from '@/lib/capabilities';
 import { DomainError } from '@/lib/errors';
 import { publishProjectToBitrix } from '@/lib/integrations/bitrix24Outbound';
 import { createNotification } from '@/lib/notifications/createNotifications';
@@ -170,7 +171,7 @@ export async function publishProjectAction(
   if (!project) {
     return { ok: false, error: { code: 'NOT_FOUND', message: 'Проект не найден' } };
   }
-  if (!canEditProject({ id: user.id, role: user.role }, project)) {
+  if (!canEditProject({ id: user.id, role: user.role }, project, await getEffectiveCaps({ id: user.id, role: user.role }))) {
     return {
       ok: false,
       error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' },

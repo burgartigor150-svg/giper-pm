@@ -31,9 +31,10 @@ import { listCustomRoles, getCustomRole, getUserAssignment, listAssignableRoles 
 import { loadCustomCaps, resolveEffectiveCaps } from '@/lib/capabilities';
 import { canSeeReports, canSeeSettings, canSeeServiceDesk } from '@/lib/permissions';
 import { resolveMyCrmAccess } from '@/lib/crm';
+import { listProjectsForUser } from '@/lib/projects';
 import { createUser, updateUser } from '@/lib/users';
 import type { CapabilityKey, EffectiveCaps } from '@/lib/capabilities';
-import { makeUser } from './helpers/factories';
+import { makeUser, makeProject } from './helpers/factories';
 
 const capsWith = (keys: CapabilityKey[]): EffectiveCaps => {
   const s = new Set(keys);
@@ -220,6 +221,30 @@ describe('custom-role admin — assignment', () => {
     await expect(
       updateUser(created.user.id, { name: 'Nope' }, actor, capsWith([])),
     ).rejects.toThrow();
+  });
+
+  it('project.viewAll cap flips org-wide project browsing without widening the per-stake floor', async () => {
+    const admin = await asAdmin();
+    // Two projects owned by the admin — the member has NO stake in either.
+    await makeProject({ ownerId: admin.id, key: 'VA1', name: 'ViewAll 1' });
+    await makeProject({ ownerId: admin.id, key: 'VA2', name: 'ViewAll 2' });
+    const member = await makeUser({ role: 'MEMBER' });
+
+    // Baseline MEMBER: scope:'all' falls back to per-stake → sees none of them.
+    const baseline = await listProjectsForUser({ id: member.id, role: 'MEMBER' }, { scope: 'all' });
+    expect(baseline.some((p) => p.key === 'VA1' || p.key === 'VA2')).toBe(false);
+
+    // Grant project.viewAll → scope:'all' now returns the org-wide list.
+    const role = await createCustomRoleAction({ name: 'Наблюдатель проектов', baseRole: 'PM', capabilities: ['project.viewAll'] });
+    mockMe.id = admin.id; mockMe.role = 'ADMIN';
+    await assignCustomRoleAction(member.id, role.ok ? role.data!.id : '');
+    const withCap = await listProjectsForUser({ id: member.id, role: 'MEMBER' }, { scope: 'all' });
+    expect(withCap.some((p) => p.key === 'VA1')).toBe(true);
+    expect(withCap.some((p) => p.key === 'VA2')).toBe(true);
+
+    // The per-stake floor (scope:'mine') is NEVER widened by the cap.
+    const mine = await listProjectsForUser({ id: member.id, role: 'MEMBER' }, { scope: 'mine' });
+    expect(mine.some((p) => p.key === 'VA1' || p.key === 'VA2')).toBe(false);
   });
 
   it('listAssignableRoles returns only active roles', async () => {
