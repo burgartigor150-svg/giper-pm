@@ -33,6 +33,13 @@ import {
   canWorkTickets,
   canCreateProject,
   canViewUserTime,
+  canEditProject,
+  canDeleteTask,
+  canManageAssignments,
+  canEditTask,
+  canEditTaskInternal,
+  canEditTimeEntry,
+  canViewUserScreenshots,
 } from '@/lib/permissions';
 import {
   CAPABILITY_KEYS,
@@ -41,6 +48,7 @@ import {
   resolveEffectiveCaps,
   loadCustomCaps,
   type CapabilityKey,
+  type EffectiveCaps,
 } from '@/lib/capabilities';
 import { makeUser } from './helpers/factories';
 
@@ -198,6 +206,83 @@ describe('capabilities — floor clamp can only remove', () => {
       const kept = clampToFloors(new Set<CapabilityKey>(['crm.scope.all']), base);
       expect(kept.has('crm.scope.all')).toBe(true);
       expect(kept.has('crm.scope.own')).toBe(false);
+    }
+  });
+});
+
+describe('capabilities — helper overloads (caps replaces the org leg)', () => {
+  const capsWith = (keys: CapabilityKey[]): EffectiveCaps => {
+    const set = new Set(keys);
+    return { has: (k) => set.has(k), source: 'custom' };
+  };
+
+  it('caps omitted → byte-identical legacy behavior (inert)', () => {
+    expect(canSeeReports(u('VIEWER'))).toBe(false);
+    expect(canSeeReports(u('ADMIN'))).toBe(true);
+    expect(canSeeSettings(u('PM'))).toBe(true);
+    expect(canSeeSettings(u('MEMBER'))).toBe(false);
+  });
+
+  it('GRANT: caps with the key flips an otherwise-denied role to allowed', () => {
+    expect(canSeeReports(u('VIEWER'), capsWith(['reports.view']))).toBe(true);
+    expect(canSeeSettings(u('MEMBER'), capsWith(['settings.view']))).toBe(true);
+  });
+
+  it('RESTRICT: caps without the key denies an otherwise-allowed role', () => {
+    expect(canSeeReports(u('ADMIN'), capsWith([]))).toBe(false);
+    expect(canSeeSettings(u('ADMIN'), capsWith([]))).toBe(false);
+  });
+
+  it('per-stake/owner legs survive the caps replacement', () => {
+    const owned = { ownerId: 'me', members: [] };
+    const foreign = { ownerId: 'someone', members: [] };
+    // ADMIN with empty caps loses the ORG leg…
+    expect(canEditProject({ id: 'me', role: 'ADMIN' }, foreign, capsWith([]))).toBe(false);
+    // …but the owner leg still grants edit regardless of caps.
+    expect(canEditProject({ id: 'me', role: 'MEMBER' }, owned, capsWith([]))).toBe(true);
+  });
+
+  it('externalSource veto still wins over a granted task.delete cap', () => {
+    const mirrored = {
+      creatorId: 'me',
+      assigneeId: null,
+      externalSource: 'bitrix24',
+      project: { ownerId: 'me', members: [] },
+    };
+    expect(canDeleteTask({ id: 'me', role: 'ADMIN' }, mirrored, capsWith(['task.delete']))).toBe(false);
+  });
+
+  // Pin every overloaded helper to its capability KEY: with a neutral subject
+  // (no per-stake leg fires), caps.has(key) must be the sole decider. Catches a
+  // wrong key↔helper mapping that the spot-checks above would miss.
+  it('every overloaded helper honors exactly its capability key', () => {
+    const me = { id: 'x', role: 'MEMBER' as const };
+    const foreignProject = { ownerId: 'other', members: [] };
+    const foreignTask = { creatorId: 'other', assigneeId: 'other', project: foreignProject };
+    const otherUser = { id: 'other' };
+
+    const PROBES: { name: string; key: CapabilityKey; run: (caps: EffectiveCaps) => boolean }[] = [
+      { name: 'canCreateProject', key: 'project.create', run: (c) => canCreateProject(me, c) },
+      { name: 'canSeeReports', key: 'reports.view', run: (c) => canSeeReports(me, c) },
+      { name: 'canSeeSettings', key: 'settings.view', run: (c) => canSeeSettings(me, c) },
+      { name: 'canSeeCrm', key: 'crm.view', run: (c) => canSeeCrm(me, c) },
+      { name: 'canEditCrm', key: 'crm.edit', run: (c) => canEditCrm(me, c) },
+      { name: 'canDeleteCrmPipeline', key: 'crm.pipeline.destroy', run: (c) => canDeleteCrmPipeline(me, c) },
+      { name: 'canSeeServiceDesk', key: 'servicedesk.viewQueue', run: (c) => canSeeServiceDesk(me, c) },
+      { name: 'canWorkTickets', key: 'servicedesk.workTickets', run: (c) => canWorkTickets(me, c) },
+      { name: 'canEditProject', key: 'project.edit', run: (c) => canEditProject(me, foreignProject, c) },
+      { name: 'canManageAssignments', key: 'task.staff', run: (c) => canManageAssignments(me, foreignProject, c) },
+      { name: 'canEditTask', key: 'task.editAny', run: (c) => canEditTask(me, foreignTask, c) },
+      { name: 'canEditTaskInternal', key: 'task.editAny', run: (c) => canEditTaskInternal(me, foreignTask, c) },
+      { name: 'canDeleteTask', key: 'task.delete', run: (c) => canDeleteTask(me, foreignTask, c) },
+      { name: 'canViewUserTime', key: 'reports.viewTeamTime', run: (c) => canViewUserTime(me, otherUser, c) },
+      { name: 'canEditTimeEntry', key: 'reports.viewTeamTime', run: (c) => canEditTimeEntry(me, { userId: 'other' }, c) },
+      { name: 'canViewUserScreenshots', key: 'reports.viewScreenshots', run: (c) => canViewUserScreenshots(me, { id: 'other', pmId: null }, true, c) },
+    ];
+
+    for (const p of PROBES) {
+      expect(p.run(capsWith([p.key])), `${p.name} should allow when caps has ${p.key}`).toBe(true);
+      expect(p.run(capsWith([])), `${p.name} should deny when caps lacks ${p.key}`).toBe(false);
     }
   });
 });
