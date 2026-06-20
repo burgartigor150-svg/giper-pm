@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@giper/ui/components/C
 import { requireAuth } from '@/lib/auth';
 import { getProject } from '@/lib/projects';
 import { canEditProject } from '@/lib/permissions';
+import { getEffectiveCaps } from '@/lib/capabilities';
 import { DomainError } from '@/lib/errors';
 import { getT } from '@/lib/i18n';
 import { EditProjectForm } from '@/components/domain/EditProjectForm';
@@ -52,6 +53,7 @@ export default async function ProjectSettingsPage({
     !canEditProject(
       { id: user.id, role: user.role },
       { ownerId: project.ownerId, members: project.members },
+      await getEffectiveCaps({ id: user.id, role: user.role }),
     )
   ) {
     notFound();

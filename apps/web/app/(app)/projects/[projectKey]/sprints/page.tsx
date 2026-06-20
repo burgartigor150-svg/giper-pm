@@ -5,6 +5,7 @@ import { requireAuth } from '@/lib/auth';
 import { getProject } from '@/lib/projects';
 import { listTasksForBoard } from '@/lib/tasks';
 import { canEditProject } from '@/lib/permissions';
+import { getEffectiveCaps } from '@/lib/capabilities';
 import { DomainError } from '@/lib/errors';
 import { getSprints } from '@/lib/sprints/getSprints';
 import { getActiveSprint } from '@/lib/sprints/getActiveSprint';
@@ -36,6 +37,7 @@ export default async function ProjectSprintsPage({
   const canManage = canEditProject(
     { id: me.id, role: me.role },
     { ownerId: project.ownerId, members: project.members },
+    await getEffectiveCaps({ id: me.id, role: me.role }),
   );
 
   const [sprints, active] = await Promise.all([

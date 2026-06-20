@@ -5,6 +5,7 @@ import { Button } from '@giper/ui/components/Button';
 import { requireAuth } from '@/lib/auth';
 import { getProject } from '@/lib/projects';
 import { canEditProject } from '@/lib/permissions';
+import { getEffectiveCaps } from '@/lib/capabilities';
 import { DomainError } from '@/lib/errors';
 import { getDocuments, type DocumentListItem } from '@/lib/documents/getDocuments';
 import { createDocumentAction } from '@/actions/documents';
@@ -33,7 +34,7 @@ export default async function ProjectDocsPage({
   // Document create/edit/delete is gated by canEditProject in the action;
   // only show the create control to users who can actually use it (otherwise
   // the button silently no-ops for plain viewers).
-  const canEdit = canEditProject({ id: user.id, role: user.role }, project);
+  const canEdit = canEditProject({ id: user.id, role: user.role }, project, await getEffectiveCaps({ id: user.id, role: user.role }));
 
   const docs = await getDocuments(project.id);
   const byParent = new Map<string | null, DocumentListItem[]>();

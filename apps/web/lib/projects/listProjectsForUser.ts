@@ -1,6 +1,7 @@
 import { prisma, type Prisma } from '@giper/db';
 import type { ProjectStatusInput } from '@giper/shared';
 import type { SessionUser } from '../permissions';
+import { getEffectiveCaps } from '../capabilities';
 
 export type ListFilter = {
   /**
@@ -24,8 +25,13 @@ export type ListFilter = {
 
 export async function listProjectsForUser(user: SessionUser, filter: ListFilter = {}) {
   const where: Prisma.ProjectWhereInput = {};
-  const isPrivileged = user.role === 'ADMIN' || user.role === 'PM';
-  const wantAll = filter.scope === 'all' && isPrivileged;
+  // Org-wide browse is gated by the project.viewAll capability (baseline:
+  // ADMIN/PM → identical to before for unassigned users). Resolved here so EVERY
+  // caller — pages, actions, and the public REST route — honors it in lockstep.
+  // Only flips the `wantAll` opt-in; the per-stake `where.OR` below is untouched,
+  // so no capability can ever widen the strict visibility floor.
+  const caps = await getEffectiveCaps(user);
+  const wantAll = filter.scope === 'all' && caps.has('project.viewAll');
 
   if (wantAll) {
     // No visibility filter — admin/PM browsing the whole org.

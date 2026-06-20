@@ -3,6 +3,7 @@ import type { AddMemberInput } from '@giper/shared';
 import { DomainError } from '../errors';
 import { isUniqueConstraintError } from '../prisma-errors';
 import { canEditProject, type SessionUser } from '../permissions';
+import { getEffectiveCaps } from '../capabilities';
 
 export async function addProjectMember(
   projectId: string,
@@ -17,7 +18,7 @@ export async function addProjectMember(
     },
   });
   if (!project) throw new DomainError('NOT_FOUND', 404);
-  if (!canEditProject(user, project)) {
+  if (!canEditProject(user, project, await getEffectiveCaps(user))) {
     throw new DomainError('INSUFFICIENT_PERMISSIONS', 403);
   }
 
@@ -59,7 +60,7 @@ export async function removeProjectMember(
     },
   });
   if (!project) throw new DomainError('NOT_FOUND', 404);
-  if (!canEditProject(user, project)) {
+  if (!canEditProject(user, project, await getEffectiveCaps(user))) {
     throw new DomainError('INSUFFICIENT_PERMISSIONS', 403);
   }
   if (project.ownerId === userIdToRemove) {
@@ -84,7 +85,7 @@ export async function updateProjectMemberRole(
     },
   });
   if (!project) throw new DomainError('NOT_FOUND', 404);
-  if (!canEditProject(user, project)) {
+  if (!canEditProject(user, project, await getEffectiveCaps(user))) {
     throw new DomainError('INSUFFICIENT_PERMISSIONS', 403);
   }
   const res = await prisma.projectMember.updateMany({

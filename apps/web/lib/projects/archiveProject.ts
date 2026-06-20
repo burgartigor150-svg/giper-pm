@@ -1,6 +1,7 @@
 import { prisma } from '@giper/db';
 import { DomainError } from '../errors';
 import { canEditProject, type SessionUser } from '../permissions';
+import { getEffectiveCaps } from '../capabilities';
 
 export async function archiveProject(projectId: string, user: SessionUser) {
   const project = await prisma.project.findUnique({
@@ -11,7 +12,7 @@ export async function archiveProject(projectId: string, user: SessionUser) {
     },
   });
   if (!project) throw new DomainError('NOT_FOUND', 404);
-  if (!canEditProject(user, project)) {
+  if (!canEditProject(user, project, await getEffectiveCaps(user))) {
     throw new DomainError('INSUFFICIENT_PERMISSIONS', 403);
   }
 

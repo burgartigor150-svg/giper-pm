@@ -3,6 +3,7 @@ import { Button } from '@giper/ui/components/Button';
 import { Card } from '@giper/ui/components/Card';
 import { requireAuth } from '@/lib/auth';
 import { canCreateProject } from '@/lib/permissions';
+import { getEffectiveCaps } from '@/lib/capabilities';
 import { listProjectsForUser, type ListFilter } from '@/lib/projects';
 import { getT } from '@/lib/i18n';
 import { ProjectFilters } from '@/components/domain/ProjectFilters';
@@ -30,7 +31,7 @@ export default async function ProjectsPage({
   };
 
   const projects = await listProjectsForUser({ id: user.id, role: user.role }, filter);
-  const canCreate = canCreateProject({ id: user.id, role: user.role });
+  const canCreate = canCreateProject({ id: user.id, role: user.role }, await getEffectiveCaps({ id: user.id, role: user.role }));
 
   // Group the ALREADY-visibility-filtered projects by space (purely a display
   // grouping — never a separate query, so it can't widen what the user sees).

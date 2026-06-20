@@ -3,9 +3,10 @@ import type { CreateProjectInput } from '@giper/shared';
 import { DomainError } from '../errors';
 import { isUniqueConstraintError } from '../prisma-errors';
 import { canCreateProject, type SessionUser } from '../permissions';
+import { getEffectiveCaps } from '../capabilities';
 
 export async function createProject(input: CreateProjectInput, user: SessionUser) {
-  if (!canCreateProject(user)) {
+  if (!canCreateProject(user, await getEffectiveCaps(user))) {
     throw new DomainError('INSUFFICIENT_PERMISSIONS', 403, 'Only ADMIN/PM can create projects');
   }
 
