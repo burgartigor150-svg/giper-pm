@@ -31,7 +31,7 @@ import { listCustomRoles, getCustomRole, getUserAssignment, listAssignableRoles 
 import { loadCustomCaps, resolveEffectiveCaps } from '@/lib/capabilities';
 import { canSeeReports, canSeeSettings, canSeeServiceDesk } from '@/lib/permissions';
 import { resolveMyCrmAccess } from '@/lib/crm';
-import { listProjectsForUser } from '@/lib/projects';
+import { listProjectsForUser, createProject, updateProject } from '@/lib/projects';
 import { createUser, updateUser } from '@/lib/users';
 import type { CapabilityKey, EffectiveCaps } from '@/lib/capabilities';
 import { makeUser, makeProject } from './helpers/factories';
@@ -245,6 +245,32 @@ describe('custom-role admin — assignment', () => {
     // The per-stake floor (scope:'mine') is NEVER widened by the cap.
     const mine = await listProjectsForUser({ id: member.id, role: 'MEMBER' }, { scope: 'mine' });
     expect(mine.some((p) => p.key === 'VA1' || p.key === 'VA2')).toBe(false);
+  });
+
+  it('project create/edit ENFORCEMENT honors caps (grant works; restrict-bypass closed)', async () => {
+    const admin = await asAdmin();
+
+    // GRANT: a MEMBER with project.create can actually create (enforcement, not just UI).
+    const creatorRole = await createCustomRoleAction({ name: 'Создатель проектов', baseRole: 'PM', capabilities: ['project.create'] });
+    const member = await makeUser({ role: 'MEMBER' });
+    mockMe.id = admin.id; mockMe.role = 'ADMIN';
+    await assignCustomRoleAction(member.id, creatorRole.ok ? creatorRole.data!.id : '');
+    await expect(
+      createProject({ name: 'Caps Project', key: 'CAPX' }, { id: member.id, role: 'MEMBER' }),
+    ).resolves.toBeTruthy();
+
+    // RESTRICT-BYPASS CLOSED: an ADMIN assigned a role WITHOUT project.create/edit
+    // can no longer create/update via the enforcement layer (REPLACE semantics).
+    const lockedRole = await createCustomRoleAction({ name: 'Без проектов', baseRole: 'MEMBER', capabilities: ['reports.view'] });
+    const lockedAdmin = await makeUser({ role: 'ADMIN' });
+    await assignCustomRoleAction(lockedAdmin.id, lockedRole.ok ? lockedRole.data!.id : '');
+    await expect(
+      createProject({ name: 'Blocked', key: 'BLK' }, { id: lockedAdmin.id, role: 'ADMIN' }),
+    ).rejects.toThrow();
+    const proj = await makeProject({ ownerId: admin.id, key: 'UPD', name: 'To edit' });
+    await expect(
+      updateProject(proj.id, { name: 'Hacked' }, { id: lockedAdmin.id, role: 'ADMIN' }),
+    ).rejects.toThrow();
   });
 
   it('listAssignableRoles returns only active roles', async () => {
