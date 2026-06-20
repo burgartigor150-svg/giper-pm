@@ -51,6 +51,16 @@ export default async function SettingsPage() {
           </Card>
           <Card>
             <CardHeader>
+              <CardTitle>Роли</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Link href="/settings/roles" className="text-sm underline">
+                Кастомные роли →
+              </Link>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
               <CardTitle>Интеграции</CardTitle>
             </CardHeader>
             <CardContent className="flex flex-col gap-2">
