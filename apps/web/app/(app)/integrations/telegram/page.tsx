@@ -1,7 +1,8 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { requireAuth } from '@/lib/auth';
-import { canManageAssignments, canSeeSettings } from '@/lib/permissions';
+import { canManageAssignments } from '@/lib/permissions';
+import { getEffectiveCaps } from '@/lib/capabilities';
 import { prisma } from '@giper/db';
 import {
   TelegramIntegrationWizard,
@@ -14,7 +15,8 @@ export const dynamic = 'force-dynamic';
 
 export default async function TelegramIntegrationPage() {
   const me = await requireAuth();
-  if (!canSeeSettings({ id: me.id, role: me.role })) notFound();
+  const caps = await getEffectiveCaps({ id: me.id, role: me.role });
+  if (!caps.has('integrations.telegram.view')) notFound();
 
   const [botRow, projectRows, linkRows] = await Promise.all([
     prisma.userTelegramBot.findFirst({

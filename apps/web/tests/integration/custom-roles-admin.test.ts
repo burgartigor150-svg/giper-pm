@@ -28,7 +28,8 @@ import {
   assignCustomRoleAction,
 } from '@/actions/customRoles';
 import { listCustomRoles, getCustomRole, getUserAssignment, listAssignableRoles } from '@/lib/customRoles';
-import { loadCustomCaps } from '@/lib/capabilities';
+import { loadCustomCaps, resolveEffectiveCaps } from '@/lib/capabilities';
+import { canSeeReports, canSeeSettings, canSeeServiceDesk } from '@/lib/permissions';
 import { makeUser } from './helpers/factories';
 
 async function asAdmin() {
@@ -137,6 +138,31 @@ describe('custom-role admin — assignment', () => {
     // Clear.
     expect((await assignCustomRoleAction(user.id, null)).ok).toBe(true);
     expect(await getUserAssignment(user.id)).toBeNull();
+  });
+
+  it('end-to-end: assignment changes section visibility (grant + restrict)', async () => {
+    const admin = await asAdmin();
+    // GRANT: a VIEWER who normally sees no section gets Reports via a custom role.
+    const auditor = await createCustomRoleAction({ name: 'Аудитор', baseRole: 'VIEWER', capabilities: ['reports.view'] });
+    const viewer = await makeUser({ role: 'VIEWER' });
+    mockMe.id = admin.id; mockMe.role = 'ADMIN';
+    await assignCustomRoleAction(viewer.id, auditor.ok ? auditor.data!.id : '');
+    const vCaps = resolveEffectiveCaps({ id: viewer.id, role: 'VIEWER' }, await loadCustomCaps(viewer.id));
+    expect(canSeeReports({ id: viewer.id, role: 'VIEWER' }, vCaps)).toBe(true);   // granted
+    expect(canSeeSettings({ id: viewer.id, role: 'VIEWER' }, vCaps)).toBe(false); // not granted
+
+    // RESTRICT: a PM with a role that omits settings.view loses Settings.
+    const limited = await createCustomRoleAction({
+      name: 'ПМ без настроек',
+      baseRole: 'PM',
+      capabilities: ['reports.view', 'servicedesk.viewQueue'], // note: NO settings.view
+    });
+    const pm = await makeUser({ role: 'PM' });
+    await assignCustomRoleAction(pm.id, limited.ok ? limited.data!.id : '');
+    const pCaps = resolveEffectiveCaps({ id: pm.id, role: 'PM' }, await loadCustomCaps(pm.id));
+    expect(canSeeSettings({ id: pm.id, role: 'PM' }, pCaps)).toBe(false);      // restricted away
+    expect(canSeeServiceDesk({ id: pm.id, role: 'PM' }, pCaps)).toBe(true);    // still granted
+    expect(canSeeReports({ id: pm.id, role: 'PM' }, pCaps)).toBe(true);
   });
 
   it('rejects assigning a non-existent role (NOT_FOUND)', async () => {
