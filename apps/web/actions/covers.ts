@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
 import { canEditTaskInternal } from '@/lib/permissions';
+import { getEffectiveCaps } from '@/lib/capabilities';
 import { deleteObject, putObject } from '@/lib/storage/s3';
 import { COVER_PALETTE_SET } from '@/lib/covers/palette';
 
@@ -64,7 +65,7 @@ export async function setCoverImageAction(formData: FormData): Promise<ActionRes
 
   const task = await loadEditableTask(taskId);
   if (!task) return { ok: false, error: { code: 'NOT_FOUND', message: 'Задача не найдена' } };
-  if (!canEditTaskInternal({ id: me.id, role: me.role }, task)) {
+  if (!canEditTaskInternal({ id: me.id, role: me.role }, task, await getEffectiveCaps({ id: me.id, role: me.role }))) {
     return { ok: false, error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' } };
   }
 
@@ -104,7 +105,7 @@ export async function setCoverColorAction(
   }
   const task = await loadEditableTask(taskId);
   if (!task) return { ok: false, error: { code: 'NOT_FOUND', message: 'Задача не найдена' } };
-  if (!canEditTaskInternal({ id: me.id, role: me.role }, task)) {
+  if (!canEditTaskInternal({ id: me.id, role: me.role }, task, await getEffectiveCaps({ id: me.id, role: me.role }))) {
     return { ok: false, error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' } };
   }
 
@@ -133,7 +134,7 @@ export async function clearCoverAction(
   const me = await requireAuth();
   const task = await loadEditableTask(taskId);
   if (!task) return { ok: false, error: { code: 'NOT_FOUND', message: 'Задача не найдена' } };
-  if (!canEditTaskInternal({ id: me.id, role: me.role }, task)) {
+  if (!canEditTaskInternal({ id: me.id, role: me.role }, task, await getEffectiveCaps({ id: me.id, role: me.role }))) {
     return { ok: false, error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' } };
   }
   const oldKey = task.coverImageKey;
