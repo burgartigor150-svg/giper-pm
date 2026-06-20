@@ -57,7 +57,7 @@ import {
   listLeads,
 } from '@/lib/crm';
 import { updateUser } from '@/lib/users';
-import { makeUser } from './helpers/factories';
+import { makeUser, makeProject, makeTask } from './helpers/factories';
 
 function be(user: { id: string; role: 'ADMIN' | 'PM' | 'MEMBER' | 'VIEWER' }) {
   mockMe.id = user.id;
@@ -196,14 +196,14 @@ describe('CRM per-owner — contacts & leads isolation', () => {
   });
 
   it('contact deal-count is owner-filtered for a scoped rep', async () => {
-    const { pipelineId } = await seedPipeline();
+    const { pipelineId, admin } = await seedPipeline();
     const a = await makeUser({ role: 'MEMBER', crmAccess: true });
-    const b = await makeUser({ role: 'MEMBER', crmAccess: true });
-    // A owns a contact; both A and B attach a deal to it.
+    // A owns a contact + a deal on it. ADMIN (scope 'all', unrestricted) adds a
+    // second deal on the SAME contact → the contact carries deals from 2 owners.
     be(a); const ca = await createContactAction({ name: 'Общий Контакт' });
     const contactId = ca.ok ? ca.data!.id : '';
     be(a); await createDealAction({ pipelineId, title: 'A deal', contactId });
-    be(b); await createDealAction({ pipelineId, title: 'B deal', contactId });
+    be(admin); await createDealAction({ pipelineId, title: 'Admin deal', contactId });
 
     be(a);
     const aRow = (await listContacts(a.id)).find((c) => c.id === contactId);
@@ -269,5 +269,66 @@ describe('CRM per-owner — pipeline structure & flag source-of-truth', () => {
     ).rejects.toThrow();
     // Still true — the forbidden call didn't persist.
     expect((await prisma.user.findUniqueOrThrow({ where: { id: rep.id } })).crmAccess).toBe(true);
+  });
+});
+
+describe('CRM per-owner — scope all & cross-owner link hardening', () => {
+  // Pins the scope 'all' → empty-filter invariant: a broken ownWhere('all') that
+  // wrongly returned {ownerId: meId} would lock admins out of foreign records and
+  // every other test would still pass green.
+  it('ADMIN can mutate records owned by a different user (scope all)', async () => {
+    const { pipelineId } = await seedPipeline();
+    const rep = await makeUser({ role: 'MEMBER', crmAccess: true });
+    be(rep);
+    const da = await createDealAction({ pipelineId, title: 'Rep deal', amount: '10' });
+    const ca = await createContactAction({ name: 'Rep contact' });
+    const la = await createLeadAction({ name: 'Rep lead', email: 'rep@x.ru' });
+    const dealId = da.ok ? da.data!.id : '';
+    const contactId = ca.ok ? ca.data!.id : '';
+    const leadId = la.ok ? la.data!.id : '';
+
+    const admin = await makeUser({ role: 'ADMIN' });
+    be(admin);
+    expect((await updateDealAction(dealId, { title: 'Admin touched' })).ok).toBe(true);
+    expect((await updateContactAction(contactId, { name: 'Admin touched' })).ok).toBe(true);
+    expect((await updateLeadAction(leadId, { name: 'Admin touched', email: 'rep@x.ru' })).ok).toBe(true);
+
+    expect((await prisma.deal.findUniqueOrThrow({ where: { id: dealId } })).title).toBe('Admin touched');
+    expect((await prisma.contact.findUniqueOrThrow({ where: { id: contactId } })).name).toBe('Admin touched');
+    expect((await prisma.lead.findUniqueOrThrow({ where: { id: leadId } })).name).toBe('Admin touched');
+  });
+
+  it('a scoped rep cannot link a foreign contact to their own deal', async () => {
+    const { pipelineId } = await seedPipeline();
+    const a = await makeUser({ role: 'MEMBER', crmAccess: true });
+    const b = await makeUser({ role: 'MEMBER', crmAccess: true });
+    be(b); const cb = await createContactAction({ name: 'B contact' });
+    const foreignContactId = cb.ok ? cb.data!.id : '';
+
+    be(a);
+    const created = await createDealAction({ pipelineId, title: 'Чужой контакт', contactId: foreignContactId });
+    expect(created.ok).toBe(false);
+    if (!created.ok) expect(created.error.code).toBe('VALIDATION');
+    // Own contact links fine.
+    const own = await createContactAction({ name: 'A contact' });
+    const okDeal = await createDealAction({ pipelineId, title: 'Свой контакт', contactId: own.ok ? own.data!.id : '' });
+    expect(okDeal.ok).toBe(true);
+  });
+
+  it('a scoped rep cannot link a project they have no stake in; a member project links fine', async () => {
+    const { pipelineId, admin } = await seedPipeline();
+    const a = await makeUser({ role: 'MEMBER', crmAccess: true });
+    // Project owned by admin — rep A has no stake → invisible → not linkable.
+    const foreign = await makeProject({ ownerId: admin.id, key: 'FOR', name: 'Foreign' });
+    be(a);
+    const bad = await createDealAction({ pipelineId, title: 'Чужой проект', projectId: foreign.id });
+    expect(bad.ok).toBe(false);
+    if (!bad.ok) expect(bad.error.code).toBe('VALIDATION');
+    // Give A a real task stake (creator) → project becomes visible → linkable.
+    // (listProjectsForUser counts task-stake/Bitrix membership, not ProjectMember.)
+    await makeTask({ projectId: foreign.id, creatorId: a.id });
+    be(a);
+    const good = await createDealAction({ pipelineId, title: 'Свой проект', projectId: foreign.id });
+    expect(good.ok).toBe(true);
   });
 });

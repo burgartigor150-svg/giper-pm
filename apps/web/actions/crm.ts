@@ -11,6 +11,7 @@ import {
   type CrmAccess,
 } from '@/lib/permissions';
 import { getMyCrmAccess } from '@/lib/crm';
+import { listProjectsForUser } from '@/lib/projects';
 
 type ActionResult<T = unknown> =
   | { ok: true; data?: T }
@@ -40,17 +41,45 @@ function parseAmount(v: string | number | null | undefined): number | null {
 }
 
 /**
- * A deal may link to any ACTIVE (non-archived) project — CRM is ADMIN/PM
- * org-level, so this is existence-only, not a per-stake visibility check.
+ * Whether a deal may link to `projectId`. For privileged callers (scope 'all')
+ * this is existence-only (any ACTIVE project) — CRM is org-level. For a scoped
+ * rep (scope 'own') it must be a project they can actually SEE (per-stake), else
+ * linking + reading the deal back would disclose a foreign project's key/name.
  * null/empty (unlink) is always allowed.
  */
-async function isLinkableProject(projectId: string | null | undefined): Promise<boolean> {
+async function isLinkableProject(
+  projectId: string | null | undefined,
+  viewer: { access: CrmAccess; id: string; role: UserRole },
+): Promise<boolean> {
   if (!projectId) return true;
+  if (viewer.access.scope === 'own') {
+    const visible = await listProjectsForUser({ id: viewer.id, role: viewer.role }, { scope: 'mine' });
+    return visible.some((p) => p.id === projectId);
+  }
   const p = await prisma.project.findFirst({
     where: { id: projectId, status: { not: 'ARCHIVED' } },
     select: { id: true },
   });
   return !!p;
+}
+
+/**
+ * Whether a deal may link to `contactId`. Privileged callers are unrestricted
+ * (the FK enforces existence). A scoped rep (scope 'own') may only attach a
+ * contact they OWN — otherwise linking + reading back would disclose a foreign
+ * contact's name. null/empty (no contact) is always allowed.
+ */
+async function isLinkableContact(
+  contactId: string | null | undefined,
+  access: CrmAccess,
+  meId: string,
+): Promise<boolean> {
+  if (!contactId || access.scope !== 'own') return true;
+  const c = await prisma.contact.findFirst({
+    where: { id: contactId, deletedAt: null, ownerId: meId },
+    select: { id: true },
+  });
+  return !!c;
 }
 
 /** Seed a default "Продажи" pipeline with standard stages (idempotent-ish). */
@@ -96,8 +125,11 @@ export async function createDealAction(input: {
   if (input.title.trim().length < 2) {
     return { ok: false, error: { code: 'VALIDATION', message: 'Название сделки ≥ 2 символов' } };
   }
-  if (!(await isLinkableProject(input.projectId))) {
+  if (!(await isLinkableProject(input.projectId, { access, id: me.id, role: me.role }))) {
     return { ok: false, error: { code: 'VALIDATION', message: 'Проект не найден' } };
+  }
+  if (!(await isLinkableContact(input.contactId, access, me.id))) {
+    return { ok: false, error: { code: 'VALIDATION', message: 'Контакт не найден' } };
   }
   const stages = await prisma.pipelineStage.findMany({
     where: { pipelineId: input.pipelineId },
@@ -148,8 +180,11 @@ export async function updateDealAction(
   if (input.title.trim().length < 2) {
     return { ok: false, error: { code: 'VALIDATION', message: 'Название сделки ≥ 2 символов' } };
   }
-  if (!(await isLinkableProject(input.projectId))) {
+  if (!(await isLinkableProject(input.projectId, { access, id: me.id, role: me.role }))) {
     return { ok: false, error: { code: 'VALIDATION', message: 'Проект не найден' } };
+  }
+  if (!(await isLinkableContact(input.contactId, access, me.id))) {
+    return { ok: false, error: { code: 'VALIDATION', message: 'Контакт не найден' } };
   }
   const upd = await prisma.deal.updateMany({
     where: { id: dealId, deletedAt: null, ...ownWhere(access, me.id) },
