@@ -1,8 +1,19 @@
 import type { UserRole, MemberRole } from '@giper/db';
+// Type-only (erased at runtime → no import cycle with capabilities/resolve.ts).
+import type { EffectiveCaps } from './capabilities';
 
 /**
  * Permission helpers — all synchronous, take already-loaded entities.
  * Source of truth for role matrix: PRIVACY.md "Кто что видит" table.
+ *
+ * Custom-roles overlay (additive, inert until wired): org-level helpers accept
+ * an optional `caps?: EffectiveCaps`. When provided (a call site that resolved
+ * the user's effective capabilities), the ORG-LEVEL leg is decided by
+ * `caps.has(<key>)` (REPLACE semantics — supports grant AND restrict); per-stake
+ * / owner / LEAD / consent legs are unchanged. When omitted (today's callers),
+ * the helper is byte-identical to before — so this slice changes no behavior.
+ * Hard per-stake floors (canViewProject, canViewTask, canViewUserActivity) take
+ * NO caps param: no capability can ever widen them.
  */
 
 // Minimal shapes — kept narrow on purpose so callers pass
@@ -48,13 +59,15 @@ export type TaskForPerm = {
 // ---- Project ------------------------------------------------------------
 
 /** Only ADMIN and PM can create new projects. */
-export function canCreateProject(user: SessionUser): boolean {
+export function canCreateProject(user: SessionUser, caps?: EffectiveCaps): boolean {
+  if (caps) return caps.has('project.create');
   return user.role === 'ADMIN' || user.role === 'PM';
 }
 
-/** Edit project metadata: ADMIN, project owner, or member with role LEAD. */
-export function canEditProject(user: SessionUser, project: ProjectForPerm): boolean {
-  if (user.role === 'ADMIN') return true;
+/** Edit project metadata: ADMIN (org), project owner, or member with role LEAD. */
+export function canEditProject(user: SessionUser, project: ProjectForPerm, caps?: EffectiveCaps): boolean {
+  const org = caps ? caps.has('project.edit') : user.role === 'ADMIN';
+  if (org) return true;
   if (project.ownerId === user.id) return true;
   return !!project.members?.some((m) => m.userId === user.id && m.role === 'LEAD');
 }
@@ -70,8 +83,10 @@ export function canEditProject(user: SessionUser, project: ProjectForPerm): bool
 export function canManageAssignments(
   user: SessionUser,
   project: ProjectForPerm,
+  caps?: EffectiveCaps,
 ): boolean {
-  if (user.role === 'ADMIN' || user.role === 'PM') return true;
+  const org = caps ? caps.has('task.staff') : user.role === 'ADMIN' || user.role === 'PM';
+  if (org) return true;
   if (project.ownerId === user.id) return true;
   return !!project.members?.some((m) => m.userId === user.id && m.role === 'LEAD');
 }
@@ -115,9 +130,10 @@ export function canCreateTask(user: SessionUser, project: ProjectForPerm): boole
  * read-only on our side — editing must happen in the source-of-truth so
  * the next sync doesn't overwrite local changes.
  */
-export function canEditTask(user: SessionUser, task: TaskForPerm): boolean {
+export function canEditTask(user: SessionUser, task: TaskForPerm, caps?: EffectiveCaps): boolean {
   if (task.externalSource) return false;
-  if (user.role === 'ADMIN') return true;
+  const org = caps ? caps.has('task.editAny') : user.role === 'ADMIN';
+  if (org) return true;
   if (task.creatorId === user.id) return true;
   if (task.assigneeId === user.id) return true;
   if (task.project.ownerId === user.id) return true;
@@ -134,8 +150,9 @@ export function canEditTask(user: SessionUser, task: TaskForPerm): boolean {
  * Permission shape is otherwise identical to canEditTask: the same
  * roles get the same rights, just without the externalSource veto.
  */
-export function canEditTaskInternal(user: SessionUser, task: TaskForPerm): boolean {
-  if (user.role === 'ADMIN') return true;
+export function canEditTaskInternal(user: SessionUser, task: TaskForPerm, caps?: EffectiveCaps): boolean {
+  const org = caps ? caps.has('task.editAny') : user.role === 'ADMIN';
+  if (org) return true;
   if (task.creatorId === user.id) return true;
   if (task.assigneeId === user.id) return true;
   if (task.project.ownerId === user.id) return true;
@@ -164,11 +181,11 @@ export function canViewTask(user: SessionUser, task: TaskForPerm): boolean {
  * side — the next sync would re-create them and the audit history would
  * desync from the source.
  */
-export function canDeleteTask(user: SessionUser, task: TaskForPerm): boolean {
+export function canDeleteTask(user: SessionUser, task: TaskForPerm, caps?: EffectiveCaps): boolean {
   if (task.externalSource) return false;
-  if (user.role === 'ADMIN') return true;
+  const org = caps ? caps.has('task.delete') : user.role === 'ADMIN' || user.role === 'PM';
+  if (org) return true;
   if (task.project.ownerId === user.id) return true;
-  if (user.role === 'PM') return true;
   return !!task.project.members?.some((m) => m.userId === user.id && m.role === 'LEAD');
 }
 
@@ -183,18 +200,20 @@ export function canDeleteTask(user: SessionUser, task: TaskForPerm): boolean {
  *     aggregates are exposed via a separate path)
  *   - VIEWER only sees own
  */
-export function canViewUserTime(viewer: SessionUser, target: { id: string }): boolean {
+export function canViewUserTime(viewer: SessionUser, target: { id: string }, caps?: EffectiveCaps): boolean {
   if (viewer.id === target.id) return true;
-  if (viewer.role === 'ADMIN' || viewer.role === 'PM') return true;
-  return false;
+  if (caps) return caps.has('reports.viewTeamTime');
+  return viewer.role === 'ADMIN' || viewer.role === 'PM';
 }
 
 /** Edit/delete time entry: own entries always; ADMIN/PM can edit team entries. */
 export function canEditTimeEntry(
   user: SessionUser,
   entry: { userId: string },
+  caps?: EffectiveCaps,
 ): boolean {
   if (entry.userId === user.id) return true;
+  if (caps) return caps.has('reports.viewTeamTime');
   return user.role === 'ADMIN' || user.role === 'PM';
 }
 
@@ -213,22 +232,28 @@ export function canViewUserScreenshots(
   viewer: SessionUser,
   target: { id: string; pmId?: string | null },
   reviewConsent: boolean = false,
+  caps?: EffectiveCaps,
 ): boolean {
   if (viewer.id === target.id) return true;
   if (viewer.role === 'PM' && target.pmId === viewer.id) return true;
-  if (viewer.role === 'ADMIN' && reviewConsent) return true;
+  // Org-level screenshot access still requires explicit review consent — the
+  // capability only replaces the role check, never the consent floor.
+  const org = caps ? caps.has('reports.viewScreenshots') : viewer.role === 'ADMIN';
+  if (org && reviewConsent) return true;
   return false;
 }
 
 // ---- Reports / Settings -----------------------------------------------
 
 /** Reports section visibility (UI-level). VIEWER doesn't see it. */
-export function canSeeReports(user: SessionUser): boolean {
+export function canSeeReports(user: SessionUser, caps?: EffectiveCaps): boolean {
+  if (caps) return caps.has('reports.view');
   return user.role !== 'VIEWER';
 }
 
 /** Settings (admin) visibility (UI-level). Only ADMIN and PM. */
-export function canSeeSettings(user: SessionUser): boolean {
+export function canSeeSettings(user: SessionUser, caps?: EffectiveCaps): boolean {
+  if (caps) return caps.has('settings.view');
   return user.role === 'ADMIN' || user.role === 'PM';
 }
 
@@ -238,10 +263,12 @@ export function canSeeSettings(user: SessionUser): boolean {
  * must also include opt-in scoped sales reps use `resolveCrmAccess(...)` instead
  * (below). Do NOT widen these bodies, or unrelated callers leak.
  */
-export function canSeeCrm(user: SessionUser): boolean {
+export function canSeeCrm(user: SessionUser, caps?: EffectiveCaps): boolean {
+  if (caps) return caps.has('crm.view');
   return user.role === 'ADMIN' || user.role === 'PM';
 }
-export function canEditCrm(user: SessionUser): boolean {
+export function canEditCrm(user: SessionUser, caps?: EffectiveCaps): boolean {
+  if (caps) return caps.has('crm.edit');
   return user.role === 'ADMIN' || user.role === 'PM';
 }
 
@@ -276,14 +303,17 @@ export function canMutateCrmRecord(access: CrmAccess, ownerId: string | null, me
 }
 
 /** Destructive pipeline ops (archive/delete) are ADMIN-only. */
-export function canDeleteCrmPipeline(user: SessionUser): boolean {
+export function canDeleteCrmPipeline(user: SessionUser, caps?: EffectiveCaps): boolean {
+  if (caps) return caps.has('crm.pipeline.destroy');
   return user.role === 'ADMIN';
 }
 
 /** Service-desk agent queue is for ADMIN/PM; everyone but VIEWER can log/work tickets. */
-export function canSeeServiceDesk(user: SessionUser): boolean {
+export function canSeeServiceDesk(user: SessionUser, caps?: EffectiveCaps): boolean {
+  if (caps) return caps.has('servicedesk.viewQueue');
   return user.role === 'ADMIN' || user.role === 'PM';
 }
-export function canWorkTickets(user: SessionUser): boolean {
+export function canWorkTickets(user: SessionUser, caps?: EffectiveCaps): boolean {
+  if (caps) return caps.has('servicedesk.workTickets');
   return user.role !== 'VIEWER';
 }

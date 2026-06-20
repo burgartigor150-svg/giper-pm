@@ -5,6 +5,8 @@ import bcrypt from 'bcryptjs';
 import { prisma, type UserRole } from '@giper/db';
 import { DomainError } from './errors';
 import { resolveSsoUser } from './authProvisioning';
+import { getEffectiveCaps } from './capabilities';
+import type { CapabilityKey } from './capabilities';
 
 declare module 'next-auth' {
   interface Session {
@@ -154,6 +156,21 @@ export async function requireAuth() {
 export async function requireRole(...allowed: UserRole[]) {
   const user = await requireAuth();
   if (!allowed.includes(user.role)) {
+    throw new DomainError('INSUFFICIENT_PERMISSIONS', 403, 'Forbidden');
+  }
+  return user;
+}
+
+/**
+ * Throws DomainError('INSUFFICIENT_PERMISSIONS', 403) when the current user's
+ * effective capabilities (custom-role overlay resolved from the DB, falling
+ * back to the UserRole baseline) don't include `cap`. The org-level companion
+ * to requireRole — use it once call sites are wired to capabilities (slice 4).
+ */
+export async function requireCap(cap: CapabilityKey) {
+  const user = await requireAuth();
+  const caps = await getEffectiveCaps(user);
+  if (!caps.has(cap)) {
     throw new DomainError('INSUFFICIENT_PERMISSIONS', 403, 'Forbidden');
   }
   return user;
