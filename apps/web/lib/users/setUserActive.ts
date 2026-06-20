@@ -1,14 +1,16 @@
 import { prisma } from '@giper/db';
 import { DomainError } from '../errors';
 import type { SessionUser } from '../permissions';
+import type { EffectiveCaps } from '../capabilities';
 
-/** Admin-only soft-delete / re-activate. */
+/** Admin-only soft-delete / re-activate. `caps` overrides the role check. */
 export async function setUserActive(
   userId: string,
   isActive: boolean,
   actor: SessionUser,
+  caps?: EffectiveCaps,
 ) {
-  if (actor.role !== 'ADMIN') {
+  if (caps ? !caps.has('users.setActive') : actor.role !== 'ADMIN') {
     throw new DomainError('INSUFFICIENT_PERMISSIONS', 403);
   }
   if (userId === actor.id && !isActive) {

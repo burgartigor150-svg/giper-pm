@@ -9,7 +9,7 @@ import { UserPositionsForm } from '@/components/domain/UserPositionsForm';
 import { SyncUserFromBitrixButton } from '@/components/domain/SyncUserFromBitrixButton';
 import { AssignRoleControl } from '@/components/domain/roles/AssignRoleControl';
 import { listAssignableRoles, getUserAssignment } from '@/lib/customRoles';
-import { getMyCustomCaps, resolveEffectiveCaps } from '@/lib/capabilities';
+import { getMyCustomCaps, resolveEffectiveCaps, getEffectiveCaps } from '@/lib/capabilities';
 import { CAPABILITY_GROUPS } from '@/lib/capabilities/catalog';
 
 export default async function UserDetailPage({
@@ -18,7 +18,8 @@ export default async function UserDetailPage({
   params: Promise<{ userId: string }>;
 }) {
   const me = await requireAuth();
-  if (me.role !== 'ADMIN') notFound();
+  const myCaps = await getEffectiveCaps({ id: me.id, role: me.role });
+  if (!myCaps.has('settings.users.manage')) notFound();
   const t = await getT('users');
 
   const { userId } = await params;

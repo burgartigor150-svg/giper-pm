@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { prisma, Prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
 import { canEditTaskInternal } from '@/lib/permissions';
+import { getEffectiveCaps } from '@/lib/capabilities';
 import { fanoutToTaskAudience } from '@/lib/notifications/createNotifications';
 
 /**
@@ -198,7 +199,8 @@ export async function deleteTagAction(
   tagId: string,
 ): Promise<ActionResult> {
   const me = await requireAuth();
-  if (me.role !== 'ADMIN') {
+  const caps = await getEffectiveCaps({ id: me.id, role: me.role });
+  if (!caps.has('settings.tags.manageOrg')) {
     const project = await prisma.project.findUnique({
       where: { id: projectId },
       select: { ownerId: true },

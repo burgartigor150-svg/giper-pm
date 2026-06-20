@@ -8,6 +8,7 @@ import {
   updateUserSchema,
 } from '@giper/shared';
 import { requireAuth, signOut } from '@/lib/auth';
+import { getEffectiveCaps } from '@/lib/capabilities';
 import { DomainError } from '@/lib/errors';
 import {
   changeOwnPassword,
@@ -88,10 +89,11 @@ export async function createUserAction(
     };
   }
   try {
+    const caps = await getEffectiveCaps({ id: me.id, role: me.role });
     const { user, tempPassword } = await createUser(parsed.data, {
       id: me.id,
       role: me.role,
-    });
+    }, caps);
     // Best-effort: pull bitrixUserId / name / image / timezone from
     // Bitrix24 in the same flow. Failures are silent — the user is
     // created either way, manual "Подтянуть из Bitrix" button on the
@@ -152,7 +154,8 @@ export async function updateUserAction(
     };
   }
   try {
-    await updateUser(userId, parsed.data, { id: me.id, role: me.role });
+    const caps = await getEffectiveCaps({ id: me.id, role: me.role });
+    await updateUser(userId, parsed.data, { id: me.id, role: me.role }, caps);
     revalidatePath('/settings/users');
     revalidatePath(`/settings/users/${userId}`);
     return { ok: true };
@@ -173,7 +176,8 @@ export async function setUserActiveAction(
         select: { isActive: true },
       })
     )?.isActive;
-    await setUserActive(userId, isActive, { id: me.id, role: me.role });
+    const caps = await getEffectiveCaps({ id: me.id, role: me.role });
+    await setUserActive(userId, isActive, { id: me.id, role: me.role }, caps);
     revalidatePath('/settings/users');
     revalidatePath(`/settings/users/${userId}`);
 
@@ -220,7 +224,8 @@ export async function resetPasswordAction(
 ): Promise<ActionResult<{ tempPassword: string }>> {
   const me = await requireAuth();
   try {
-    const { tempPassword } = await resetPassword(userId, { id: me.id, role: me.role });
+    const caps = await getEffectiveCaps({ id: me.id, role: me.role });
+    const { tempPassword } = await resetPassword(userId, { id: me.id, role: me.role }, caps);
 
     // Push the temp password to the user's Bitrix24 IM. Best-effort:
     // the admin still sees it in the modal regardless of whether the

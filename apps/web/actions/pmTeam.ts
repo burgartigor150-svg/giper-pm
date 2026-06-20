@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
+import { getEffectiveCaps } from '@/lib/capabilities';
 import type { TeamMemberRow } from '@/lib/teams/types';
 
 type ActionResult<T = unknown> =
@@ -22,7 +23,8 @@ export async function addToPmTeamAction(
   note?: string,
 ): Promise<ActionResult> {
   const me = await requireAuth();
-  if (me.role !== 'ADMIN' && me.role !== 'PM') {
+  const caps = await getEffectiveCaps({ id: me.id, role: me.role });
+  if (!caps.has('team.manageRoster')) {
     return {
       ok: false,
       error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Только PM/ADMIN' },
@@ -48,7 +50,8 @@ export async function addToPmTeamAction(
 
 export async function removeFromPmTeamAction(memberId: string): Promise<ActionResult> {
   const me = await requireAuth();
-  if (me.role !== 'ADMIN' && me.role !== 'PM') {
+  const caps = await getEffectiveCaps({ id: me.id, role: me.role });
+  if (!caps.has('team.manageRoster')) {
     return {
       ok: false,
       error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Только PM/ADMIN' },

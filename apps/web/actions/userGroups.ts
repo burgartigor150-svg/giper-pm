@@ -4,14 +4,18 @@ import { revalidatePath } from 'next/cache';
 import { prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
 import { canEditProject } from '@/lib/permissions';
+import { getEffectiveCaps } from '@/lib/capabilities';
 
 type ActionResult<T = unknown> =
   | { ok: true; data?: T }
   | { ok: false; error: { code: string; message: string } };
 
+// Group management is gated on the settings.groups.manage capability (baseline:
+// ADMIN), so a custom role can grant it without flipping the user to ADMIN.
 async function requireAdmin() {
   const me = await requireAuth();
-  if (me.role !== 'ADMIN') return null;
+  const caps = await getEffectiveCaps({ id: me.id, role: me.role });
+  if (!caps.has('settings.groups.manage')) return null;
   return me;
 }
 

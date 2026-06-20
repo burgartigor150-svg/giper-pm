@@ -31,7 +31,14 @@ import { listCustomRoles, getCustomRole, getUserAssignment, listAssignableRoles 
 import { loadCustomCaps, resolveEffectiveCaps } from '@/lib/capabilities';
 import { canSeeReports, canSeeSettings, canSeeServiceDesk } from '@/lib/permissions';
 import { resolveMyCrmAccess } from '@/lib/crm';
+import { createUser, updateUser } from '@/lib/users';
+import type { CapabilityKey, EffectiveCaps } from '@/lib/capabilities';
 import { makeUser } from './helpers/factories';
+
+const capsWith = (keys: CapabilityKey[]): EffectiveCaps => {
+  const s = new Set(keys);
+  return { has: (k) => s.has(k), source: 'custom' };
+};
 
 async function asAdmin() {
   const admin = await makeUser({ role: 'ADMIN' });
@@ -194,6 +201,25 @@ describe('custom-role admin — assignment', () => {
 
     // ADMIN always org-wide regardless.
     expect(await resolveMyCrmAccess({ id: admin.id, role: 'ADMIN' })).toEqual({ canSee: true, scope: 'all' });
+  });
+
+  it('admin-action gates honor caps: a non-admin actor with users.* can manage users', async () => {
+    const actor = { id: (await makeUser({ role: 'MEMBER' })).id, role: 'MEMBER' as const };
+    // With the cap → allowed (caps overrides the role check).
+    const created = await createUser(
+      { email: `caps-${Date.now()}@t.local`, name: 'Caps User', role: 'MEMBER' },
+      actor,
+      capsWith(['users.create']),
+    );
+    expect(created.user.id).toBeTruthy();
+    // updateUser with the cap → allowed.
+    await expect(
+      updateUser(created.user.id, { name: 'Renamed' }, actor, capsWith(['users.update'])),
+    ).resolves.toBeTruthy();
+    // Without the cap → denied even though the lib call is reached.
+    await expect(
+      updateUser(created.user.id, { name: 'Nope' }, actor, capsWith([])),
+    ).rejects.toThrow();
   });
 
   it('listAssignableRoles returns only active roles', async () => {

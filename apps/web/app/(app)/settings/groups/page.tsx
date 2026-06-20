@@ -2,13 +2,15 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@giper/ui/components/Card';
 import { requireAuth } from '@/lib/auth';
+import { getEffectiveCaps } from '@/lib/capabilities';
 import { getUserGroups } from '@/lib/groups/getUserGroups';
 import { CreateGroupForm } from '@/components/domain/groups/CreateGroupForm';
 
 /** Admin-only: org-level user groups for bulk project add. */
 export default async function UserGroupsPage() {
   const me = await requireAuth();
-  if (me.role !== 'ADMIN') notFound();
+  const caps = await getEffectiveCaps({ id: me.id, role: me.role });
+  if (!caps.has('settings.groups.manage')) notFound();
 
   const groups = await getUserGroups();
 
