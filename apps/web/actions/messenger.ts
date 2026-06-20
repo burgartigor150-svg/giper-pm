@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { prisma, Prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
+import { getEffectiveCaps } from '@/lib/capabilities';
 import { ensureMembership, resolveChannelAccess } from '@/lib/messenger/access';
 import { publishChatEvent } from '@/lib/realtime/publishChat';
 import { extractTaskRefs } from '@/lib/text/taskRefs';
@@ -803,7 +804,8 @@ export async function editMessageAction(
   if (!access || !access.canRead) {
     return { ok: false, error: { code: 'NOT_FOUND', message: 'Сообщение не найдено' } };
   }
-  if (msg.authorId !== me.id && me.role !== 'ADMIN') {
+  const canModerate = (await getEffectiveCaps({ id: me.id, role: me.role })).has('messenger.message.moderateAny');
+  if (msg.authorId !== me.id && !canModerate) {
     return { ok: false, error: { code: 'FORBIDDEN', message: 'Нельзя редактировать чужое сообщение' } };
   }
   await prisma.message.update({
@@ -834,7 +836,8 @@ export async function deleteMessageAction(messageId: string): Promise<ActionResu
   if (!access || !access.canRead) {
     return { ok: false, error: { code: 'NOT_FOUND', message: 'Сообщение не найдено' } };
   }
-  if (msg.authorId !== me.id && me.role !== 'ADMIN') {
+  const canModerate = (await getEffectiveCaps({ id: me.id, role: me.role })).has('messenger.message.moderateAny');
+  if (msg.authorId !== me.id && !canModerate) {
     return { ok: false, error: { code: 'FORBIDDEN', message: 'Нельзя удалить чужое сообщение' } };
   }
   await prisma.$transaction(async (tx) => {
