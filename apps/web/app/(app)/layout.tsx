@@ -2,8 +2,7 @@ import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
-import { resolveCrmAccess } from '@/lib/permissions';
-import { getMyCrmAccess } from '@/lib/crm';
+import { resolveMyCrmAccess } from '@/lib/crm';
 import { getEffectiveCaps, type EffectiveCaps } from '@/lib/capabilities';
 import { getActiveTimerWithHealth } from '@/lib/time';
 import { AppShell } from '@/components/domain/AppShell';
@@ -46,19 +45,15 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     if (!path.startsWith('/me/security')) redirect('/me/security');
   }
 
-  const [{ timer: activeTimer, health: timerHealth }, inboxUnread, crmFlag, caps] = await Promise.all([
+  const [{ timer: activeTimer, health: timerHealth }, inboxUnread, caps, crmAccess] = await Promise.all([
     getActiveTimerWithHealth(sessionUser.id),
     prisma.notification.count({
       where: { userId: sessionUser.id, isRead: false },
     }),
-    getMyCrmAccess(sessionUser.id),
     getEffectiveCaps({ id: sessionUser.id, role: sessionUser.role }),
+    resolveMyCrmAccess({ id: sessionUser.id, role: sessionUser.role }),
   ]);
-  const crmCanSee = resolveCrmAccess(
-    { id: sessionUser.id, role: sessionUser.role },
-    crmFlag,
-  ).canSee;
-  const navItems = buildNav(caps, crmCanSee);
+  const navItems = buildNav(caps, crmAccess.canSee);
 
   return (
     <AppShell
