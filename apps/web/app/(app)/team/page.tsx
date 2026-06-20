@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@giper/ui/components/Card';
 import { prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
+import { getEffectiveCaps } from '@/lib/capabilities';
 import { listTeamStatus } from '@/lib/team/listTeamStatus';
 import { getT } from '@/lib/i18n';
 import Link from 'next/link';
@@ -13,7 +14,8 @@ import { listTeamMembers } from '@/actions/pmTeam';
 
 export default async function TeamPage() {
   const me = await requireAuth();
-  if (me.role !== 'ADMIN' && me.role !== 'PM') notFound();
+  const caps = await getEffectiveCaps({ id: me.id, role: me.role });
+  if (!caps.has('team.view')) notFound();
 
   const t = await getT('team');
   const [rows, members, pms] = await Promise.all([

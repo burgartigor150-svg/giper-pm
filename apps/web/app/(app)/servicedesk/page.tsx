@@ -4,6 +4,7 @@ import { Button } from '@giper/ui/components/Button';
 import { Card } from '@giper/ui/components/Card';
 import { requireAuth } from '@/lib/auth';
 import { canSeeServiceDesk, canWorkTickets } from '@/lib/permissions';
+import { getEffectiveCaps } from '@/lib/capabilities';
 import { listTickets } from '@/lib/servicedesk';
 import { listUsers } from '@/lib/users/listUsers';
 import { TicketQueueTable } from '@/components/domain/servicedesk/TicketQueueTable';
@@ -12,8 +13,9 @@ export const dynamic = 'force-dynamic';
 
 export default async function ServiceDeskPage() {
   const me = await requireAuth();
-  if (!canSeeServiceDesk({ id: me.id, role: me.role })) notFound();
-  const canEdit = canWorkTickets({ id: me.id, role: me.role });
+  const caps = await getEffectiveCaps({ id: me.id, role: me.role });
+  if (!canSeeServiceDesk({ id: me.id, role: me.role }, caps)) notFound();
+  const canEdit = canWorkTickets({ id: me.id, role: me.role }, caps);
   const tickets = await listTickets();
   // Agents eligible for assignment = active non-VIEWER users (same gate
   // the action enforces via canWorkTickets). Only needed when the viewer

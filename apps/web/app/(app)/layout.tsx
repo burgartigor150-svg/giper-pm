@@ -2,8 +2,9 @@ import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
-import { canSeeReports, canSeeSettings, canSeeServiceDesk, resolveCrmAccess, type SessionUser } from '@/lib/permissions';
+import { resolveCrmAccess } from '@/lib/permissions';
 import { getMyCrmAccess } from '@/lib/crm';
+import { getEffectiveCaps, type EffectiveCaps } from '@/lib/capabilities';
 import { getActiveTimerWithHealth } from '@/lib/time';
 import { AppShell } from '@/components/domain/AppShell';
 import { PushOptInBanner } from '@/components/domain/PushOptIn';
@@ -12,7 +13,7 @@ import { ActiveCallContainer } from '@/components/domain/ActiveCallContainer';
 import { NewCalendarEventDialog } from '@/components/domain/calendar/NewCalendarEventDialog';
 import type { NavItem } from '@/components/domain/Sidebar';
 
-function buildNav(user: SessionUser, crmCanSee: boolean): NavItem[] {
+function buildNav(caps: EffectiveCaps, crmCanSee: boolean): NavItem[] {
   const items: NavItem[] = [
     { key: 'dashboard', href: '/dashboard' },
     { key: 'me', href: '/me' },
@@ -24,16 +25,15 @@ function buildNav(user: SessionUser, crmCanSee: boolean): NavItem[] {
     // participated in / created, so it's safe for any role.
     { key: 'meetings', href: '/meetings' },
   ];
-  if (canSeeSettings(user)) {
-    items.push({ key: 'telegram', href: '/integrations/telegram' });
-  }
-  if (user.role === 'ADMIN' || user.role === 'PM') {
-    items.push({ key: 'team', href: '/team' });
-  }
-  if (canSeeReports(user)) items.push({ key: 'reports', href: '/reports' });
+  // Section visibility via effective capabilities (custom-role overlay; for an
+  // unassigned user caps === the UserRole baseline, so this is identical to the
+  // old role checks). CRM keeps its own scope resolution (crmAccess flag).
+  if (caps.has('integrations.telegram.view')) items.push({ key: 'telegram', href: '/integrations/telegram' });
+  if (caps.has('team.view')) items.push({ key: 'team', href: '/team' });
+  if (caps.has('reports.view')) items.push({ key: 'reports', href: '/reports' });
   if (crmCanSee) items.push({ key: 'crm', href: '/crm' });
-  if (canSeeServiceDesk(user)) items.push({ key: 'servicedesk', href: '/servicedesk' });
-  if (canSeeSettings(user)) items.push({ key: 'settings', href: '/settings' });
+  if (caps.has('servicedesk.viewQueue')) items.push({ key: 'servicedesk', href: '/servicedesk' });
+  if (caps.has('settings.view')) items.push({ key: 'settings', href: '/settings' });
   return items;
 }
 
@@ -46,18 +46,19 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     if (!path.startsWith('/me/security')) redirect('/me/security');
   }
 
-  const [{ timer: activeTimer, health: timerHealth }, inboxUnread, crmFlag] = await Promise.all([
+  const [{ timer: activeTimer, health: timerHealth }, inboxUnread, crmFlag, caps] = await Promise.all([
     getActiveTimerWithHealth(sessionUser.id),
     prisma.notification.count({
       where: { userId: sessionUser.id, isRead: false },
     }),
     getMyCrmAccess(sessionUser.id),
+    getEffectiveCaps({ id: sessionUser.id, role: sessionUser.role }),
   ]);
   const crmCanSee = resolveCrmAccess(
     { id: sessionUser.id, role: sessionUser.role },
     crmFlag,
   ).canSee;
-  const navItems = buildNav({ id: sessionUser.id, role: sessionUser.role }, crmCanSee);
+  const navItems = buildNav(caps, crmCanSee);
 
   return (
     <AppShell

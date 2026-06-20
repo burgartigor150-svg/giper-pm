@@ -3,13 +3,15 @@ import { notFound } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@giper/ui/components/Card';
 import { requireAuth } from '@/lib/auth';
 import { canSeeSettings } from '@/lib/permissions';
+import { getEffectiveCaps } from '@/lib/capabilities';
 import { getT } from '@/lib/i18n';
 import { getSpaces } from '@/lib/spaces/getSpaces';
 import { SpacesForm } from '@/components/domain/SpacesForm';
 
 export default async function SettingsPage() {
   const user = await requireAuth();
-  if (!canSeeSettings({ id: user.id, role: user.role })) notFound();
+  const caps = await getEffectiveCaps({ id: user.id, role: user.role });
+  if (!canSeeSettings({ id: user.id, role: user.role }, caps)) notFound();
   const t = await getT('settings');
   const tUsers = await getT('users');
   const spaces = await getSpaces();

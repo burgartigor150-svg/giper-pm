@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation';
 import { Card, CardContent } from '@giper/ui/components/Card';
 import { requireAuth } from '@/lib/auth';
+import { getEffectiveCaps } from '@/lib/capabilities';
 import { listPmTeamTasks } from '@/lib/teams/listPmTeamTasks';
 import { listTeamMembers } from '@/actions/pmTeam';
 import { PmTeamTasksTable } from '@/components/domain/team/PmTeamTasksTable';
@@ -18,7 +19,8 @@ type SP = Promise<Record<string, string | string[] | undefined>>;
  */
 export default async function PmTeamTasksPage({ searchParams }: { searchParams: SP }) {
   const me = await requireAuth();
-  if (me.role !== 'ADMIN' && me.role !== 'PM') notFound();
+  const caps = await getEffectiveCaps({ id: me.id, role: me.role });
+  if (!caps.has('team.view')) notFound();
 
   const sp = await searchParams;
   const memberId = typeof sp.memberId === 'string' ? sp.memberId : undefined;

@@ -189,12 +189,17 @@ describe('capabilities — resolver REPLACE semantics', () => {
 });
 
 describe('capabilities — floor clamp can only remove', () => {
-  it('VIEWER-templated role is stripped of every org capability', () => {
-    const greedy = new Set<CapabilityKey>(['crm.view', 'settings.view', 'reports.view', 'task.delete']);
+  it('explicit caps are honored from a VIEWER template (org caps survive; only crm.scope.all narrows)', () => {
+    const greedy = new Set<CapabilityKey>(['crm.view', 'settings.view', 'reports.view', 'task.delete', 'crm.scope.all']);
     const clamped = clampToFloors(greedy, 'VIEWER');
-    expect(clamped.size).toBe(0);
-    const eff = resolveEffectiveCaps(u('VIEWER'), { caps: greedy, baseRole: 'VIEWER', roleId: 'r3' });
-    for (const k of CAPABILITY_KEYS) expect(eff.has(k)).toBe(false);
+    // Section/action caps survive — an explicit admin grant is honored.
+    expect(clamped.has('reports.view')).toBe(true);
+    expect(clamped.has('settings.view')).toBe(true);
+    expect(clamped.has('crm.view')).toBe(true);
+    expect(clamped.has('task.delete')).toBe(true);
+    // …but org-wide CRM data access narrows to own-scope off a non-privileged base.
+    expect(clamped.has('crm.scope.all')).toBe(false);
+    expect(clamped.has('crm.scope.own')).toBe(true);
   });
 
   it('crm.scope.all downgrades to own off a non-privileged template; clamp keeps owner scope', () => {

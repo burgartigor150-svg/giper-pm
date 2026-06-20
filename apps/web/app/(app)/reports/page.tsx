@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@giper/ui/components/C
 import { prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
 import { canSeeReports } from '@/lib/permissions';
+import { getEffectiveCaps } from '@/lib/capabilities';
 import { reportsFilterSchema, resolveRange } from '@/lib/reports/filters';
 import { resolveScope } from '@/lib/reports/scope';
 import {
@@ -29,7 +30,8 @@ type SP = Promise<Record<string, string | string[] | undefined>>;
 
 export default async function ReportsPage({ searchParams }: { searchParams: SP }) {
   const me = await requireAuth();
-  if (!canSeeReports({ id: me.id, role: me.role })) notFound();
+  const caps = await getEffectiveCaps({ id: me.id, role: me.role });
+  if (!canSeeReports({ id: me.id, role: me.role }, caps)) notFound();
 
   const sp = await searchParams;
   const raw: Record<string, string> = {};
