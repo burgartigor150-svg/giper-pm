@@ -3,8 +3,13 @@ import { describe, it, expect } from 'vitest';
 /**
  * Custom-roles dark core (slice 1). Proves the capability overlay is INERT and
  * the resolver is correct BEFORE anything reads it:
- *  - GOLDEN parity: BASELINE_CAPS reproduces the live permission helpers for
- *    every role (anchored to runtime truth, not a second hand-copy).
+ *  - GOLDEN parity: the helper-backed capability keys (the 9 that map to a pure
+ *    exported permission helper) are anchored to RUNTIME truth, non-circular.
+ *    The remaining keys map to inline `role===` literals that have no exported
+ *    helper to call here — those are pinned by an explicit baseline SNAPSHOT
+ *    (EXPECTED_* below), so any future edit to baseline.ts trips a visible test
+ *    diff, plus the structural invariants. (Full literal↔cap equivalence is
+ *    proven per-surface when each area is wired in slice 4.)
  *  - structural invariants (VIEWER⊆MEMBER⊆PM⊆ADMIN; CRM scope exclusivity).
  *  - resolver REPLACE semantics: inert (no assignment → baseline), grant, and
  *    RESTRICT (a smaller set actually removes access).
@@ -27,6 +32,7 @@ import {
   canSeeServiceDesk,
   canWorkTickets,
   canCreateProject,
+  canViewUserTime,
 } from '@/lib/permissions';
 import {
   CAPABILITY_KEYS,
@@ -52,6 +58,8 @@ describe('capabilities — golden parity with live helpers', () => {
     { key: 'servicedesk.viewQueue', fn: canSeeServiceDesk },
     { key: 'servicedesk.workTickets', fn: canWorkTickets },
     { key: 'project.create', fn: canCreateProject },
+    // canViewUserTime(viewer, target) is pure-role (ADMIN||PM) for a foreign target.
+    { key: 'reports.viewTeamTime', fn: (user) => canViewUserTime(user, { id: 'other' }) },
   ];
 
   for (const role of ROLES) {
@@ -61,6 +69,49 @@ describe('capabilities — golden parity with live helpers', () => {
       });
     }
   }
+});
+
+describe('capabilities — baseline snapshot (drift trip-wire)', () => {
+  // Explicit expected sets for the small, drift-prone roles. A change to
+  // baseline.ts MUST also change these → the diff is visible in review. This is
+  // the protection for the ~36 keys that have no exported helper to anchor.
+  const EXPECTED_MEMBER: CapabilityKey[] = ['reports.view', 'servicedesk.workTickets'];
+  const EXPECTED_PM: CapabilityKey[] = [
+    'project.create', 'project.viewAll',
+    'task.delete', 'task.staff', 'task.review.close', 'task.checklist.toggle',
+    'crm.view', 'crm.edit', 'crm.scope.all',
+    'servicedesk.viewQueue', 'servicedesk.workTickets',
+    'reports.view', 'reports.teamScope', 'reports.viewTeamTime',
+    'settings.view', 'settings.spaces.manage',
+    'team.view', 'team.manageRoster',
+    'integrations.bitrix24.syncTeam', 'integrations.telegram.view',
+    'meetings.calendar.teamScope',
+  ];
+  // The exact ADMIN↛PM boundary (keys ADMIN has that PM lacks). Pins the split
+  // non-tautologically — dropping/adding an admin-only key trips this.
+  const EXPECTED_ADMIN_ONLY: CapabilityKey[] = [
+    'project.edit',
+    'task.editAny', 'task.attachments.manageAny', 'task.tags.assign',
+    'crm.pipeline.destroy',
+    'reports.viewScreenshots',
+    'settings.users.manage', 'settings.audit.view', 'settings.groups.manage',
+    'settings.positions.manage', 'settings.tags.manageOrg', 'settings.roles.manage',
+    'users.create', 'users.update', 'users.resetPassword', 'users.setActive',
+    'integrations.bitrix24.config', 'integrations.bitrix24.syncNow', 'integrations.telegramBots.manageAny',
+    'meetings.viewAny', 'meetings.manageAny',
+    'messenger.message.moderateAny',
+  ];
+
+  it('MEMBER baseline matches the snapshot exactly', () => {
+    expect([...BASELINE_CAPS.MEMBER].sort()).toEqual([...EXPECTED_MEMBER].sort());
+  });
+  it('PM baseline matches the snapshot exactly', () => {
+    expect([...BASELINE_CAPS.PM].sort()).toEqual([...EXPECTED_PM].sort());
+  });
+  it('ADMIN-only caps (ADMIN minus PM) match the snapshot exactly', () => {
+    const adminOnly = [...BASELINE_CAPS.ADMIN].filter((k) => !BASELINE_CAPS.PM.has(k)).sort();
+    expect(adminOnly).toEqual([...EXPECTED_ADMIN_ONLY].sort());
+  });
 });
 
 describe('capabilities — baseline structural invariants', () => {
@@ -111,6 +162,8 @@ describe('capabilities — resolver REPLACE semantics', () => {
     expect(eff.source).toBe('custom');
     expect(eff.has('crm.view')).toBe(true);
     expect(eff.has('reports.teamScope')).toBe(true);
+    // crm.scope.own survives the floor clamp for a MEMBER base (only .all downgrades).
+    expect(eff.has('crm.scope.own')).toBe(true);
     // and ONLY the granted caps — replace, not union with MEMBER baseline.
     expect(eff.has('reports.view')).toBe(false); // MEMBER baseline had it; replace dropped it
   });
@@ -140,10 +193,12 @@ describe('capabilities — floor clamp can only remove', () => {
     const clamped = clampToFloors(new Set<CapabilityKey>(['crm.view', 'crm.scope.all']), 'MEMBER');
     expect(clamped.has('crm.scope.all')).toBe(false);
     expect(clamped.has('crm.scope.own')).toBe(true);
-    // ADMIN/PM template keeps org-wide.
-    const adminClamp = clampToFloors(new Set<CapabilityKey>(['crm.scope.all']), 'PM');
-    expect(adminClamp.has('crm.scope.all')).toBe(true);
-    expect(adminClamp.has('crm.scope.own')).toBe(false);
+    // ADMIN and PM templates BOTH keep org-wide (both arms of the gate tested).
+    for (const base of ['ADMIN', 'PM'] as const) {
+      const kept = clampToFloors(new Set<CapabilityKey>(['crm.scope.all']), base);
+      expect(kept.has('crm.scope.all')).toBe(true);
+      expect(kept.has('crm.scope.own')).toBe(false);
+    }
   });
 });
 
