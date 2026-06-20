@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import { Card } from '@giper/ui/components/Card';
 import { Avatar } from '@giper/ui/components/Avatar';
 import { requireAuth } from '@/lib/auth';
+import { getEffectiveCaps } from '@/lib/capabilities';
 import { listAuditLogs, getAuditFacets } from '@/lib/audit/listAuditLogs';
 import { Pagination } from '@/components/domain/Pagination';
 
@@ -20,7 +21,8 @@ export default async function AuditLogPage({
   searchParams: SearchParams;
 }) {
   const me = await requireAuth();
-  if (me.role !== 'ADMIN') notFound();
+  const caps = await getEffectiveCaps({ id: me.id, role: me.role });
+  if (!caps.has('settings.audit.view')) notFound();
 
   const sp = await searchParams;
   const filter = {

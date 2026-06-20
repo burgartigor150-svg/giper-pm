@@ -3,13 +3,15 @@ import { prisma } from '@giper/db';
 import { generateTemporaryPassword } from '@giper/shared';
 import { DomainError } from '../errors';
 import type { SessionUser } from '../permissions';
+import type { EffectiveCaps } from '../capabilities';
 
 /**
  * Admin-only: regenerate a temporary password for a user. Returns plaintext
  * once. Sets mustChangePassword=true so the user must rotate it on next login.
+ * `caps` overrides the role check when supplied.
  */
-export async function resetPassword(userId: string, actor: SessionUser) {
-  if (actor.role !== 'ADMIN') {
+export async function resetPassword(userId: string, actor: SessionUser, caps?: EffectiveCaps) {
+  if (caps ? !caps.has('users.resetPassword') : actor.role !== 'ADMIN') {
     throw new DomainError('INSUFFICIENT_PERMISSIONS', 403);
   }
   const target = await prisma.user.findUnique({

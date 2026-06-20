@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { prisma, type Position } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
+import { getEffectiveCaps } from '@/lib/capabilities';
 
 const ALL_POSITIONS: Position[] = [
   'FRONTEND', 'BACKEND', 'FULLSTACK', 'MOBILE',
@@ -36,7 +37,8 @@ export async function setUserPositionsAction(
   primary: string | null,
 ): Promise<ActionResult> {
   const me = await requireAuth();
-  if (me.role !== 'ADMIN') {
+  const caps = await getEffectiveCaps({ id: me.id, role: me.role });
+  if (!caps.has('settings.positions.manage')) {
     return {
       ok: false,
       error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Только ADMIN' },

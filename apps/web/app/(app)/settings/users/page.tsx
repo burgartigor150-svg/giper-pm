@@ -4,12 +4,14 @@ import { Avatar } from '@giper/ui/components/Avatar';
 import { Button } from '@giper/ui/components/Button';
 import { Card } from '@giper/ui/components/Card';
 import { requireAuth } from '@/lib/auth';
+import { getEffectiveCaps } from '@/lib/capabilities';
 import { listUsers } from '@/lib/users';
 import { getT } from '@/lib/i18n';
 
 export default async function UsersPage() {
   const me = await requireAuth();
-  if (me.role !== 'ADMIN') notFound();
+  const caps = await getEffectiveCaps({ id: me.id, role: me.role });
+  if (!caps.has('settings.users.manage')) notFound();
 
   const t = await getT('users');
   const tRoles = await getT('users.role');

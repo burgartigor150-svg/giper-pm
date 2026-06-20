@@ -2,14 +2,16 @@ import { prisma } from '@giper/db';
 import type { UpdateUserInput } from '@giper/shared';
 import { DomainError } from '../errors';
 import type { SessionUser } from '../permissions';
+import type { EffectiveCaps } from '../capabilities';
 
-/** Admin-only: change name/role/timezone for any user. */
+/** Admin-only: change name/role/timezone for any user. `caps` overrides role. */
 export async function updateUser(
   userId: string,
   input: UpdateUserInput,
   actor: SessionUser,
+  caps?: EffectiveCaps,
 ) {
-  if (actor.role !== 'ADMIN') {
+  if (caps ? !caps.has('users.update') : actor.role !== 'ADMIN') {
     throw new DomainError('INSUFFICIENT_PERMISSIONS', 403);
   }
   const target = await prisma.user.findUnique({

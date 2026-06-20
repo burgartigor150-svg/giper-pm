@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@giper/ui/components/Card';
 import { requireAuth } from '@/lib/auth';
+import { getEffectiveCaps } from '@/lib/capabilities';
 import { getUserGroup } from '@/lib/groups/getUserGroups';
 import { listUsers } from '@/lib/users';
 import { GroupSettingsForm } from '@/components/domain/groups/GroupSettingsForm';
@@ -13,7 +14,8 @@ export default async function UserGroupDetailPage({
   params: Promise<{ groupId: string }>;
 }) {
   const me = await requireAuth();
-  if (me.role !== 'ADMIN') notFound();
+  const caps = await getEffectiveCaps({ id: me.id, role: me.role });
+  if (!caps.has('settings.groups.manage')) notFound();
 
   const { groupId } = await params;
   const [group, users] = await Promise.all([getUserGroup(groupId), listUsers({})]);
