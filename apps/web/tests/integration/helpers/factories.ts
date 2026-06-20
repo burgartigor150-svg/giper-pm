@@ -11,6 +11,7 @@ export async function makeUser(overrides: Partial<{
   isActive: boolean;
   password: string;
   mustChangePassword: boolean;
+  crmAccess: boolean;
 }> = {}) {
   const i = next();
   const password = overrides.password ?? 'pw-' + i;
@@ -22,6 +23,7 @@ export async function makeUser(overrides: Partial<{
       isActive: overrides.isActive ?? true,
       passwordHash: await bcrypt.hash(password, 4),
       mustChangePassword: overrides.mustChangePassword ?? false,
+      crmAccess: overrides.crmAccess ?? false,
     },
   });
 }

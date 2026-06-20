@@ -34,7 +34,8 @@ export async function updateUser(
       ...(input.name !== undefined ? { name: input.name } : {}),
       ...(input.role !== undefined ? { role: input.role } : {}),
       ...(input.timezone !== undefined ? { timezone: input.timezone } : {}),
+      ...(input.crmAccess !== undefined ? { crmAccess: input.crmAccess } : {}),
     },
-    select: { id: true, email: true, name: true, role: true, timezone: true },
+    select: { id: true, email: true, name: true, role: true, timezone: true, crmAccess: true },
   });
 }

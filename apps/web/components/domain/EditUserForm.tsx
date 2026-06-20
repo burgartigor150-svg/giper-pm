@@ -26,6 +26,7 @@ type Props = {
     image: string | null;
     isActive: boolean;
     timezone: string;
+    crmAccess: boolean;
   };
   isSelf: boolean;
   /**
@@ -125,6 +126,21 @@ export function EditUserForm({ user, isSelf, hasPositions }: Props) {
             Timezone
           </label>
           <Input id="timezone" name="timezone" defaultValue={user.timezone} />
+        </div>
+
+        <div className="flex flex-col gap-1">
+          {/* Hidden mirror so an unchecked box still posts "false" (a bare
+              checkbox sends nothing when off). Checkbox is later in DOM order,
+              so it wins when checked. */}
+          <input type="hidden" name="crmAccess" value="false" />
+          <label className="flex items-center gap-2 text-sm font-medium">
+            <input type="checkbox" name="crmAccess" value="true" defaultChecked={user.crmAccess} />
+            CRM-доступ (только свои записи)
+          </label>
+          <p className="text-xs text-muted-foreground">
+            Сотрудник видит и редактирует только свои сделки, контакты и лиды.
+            ADMIN/PM видят весь CRM независимо от этой галочки.
+          </p>
         </div>
 
         {state && !state.ok ? (

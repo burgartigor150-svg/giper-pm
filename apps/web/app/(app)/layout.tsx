@@ -2,7 +2,8 @@ import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
-import { canSeeReports, canSeeSettings, canSeeCrm, canSeeServiceDesk, type SessionUser } from '@/lib/permissions';
+import { canSeeReports, canSeeSettings, canSeeServiceDesk, resolveCrmAccess, type SessionUser } from '@/lib/permissions';
+import { getMyCrmAccess } from '@/lib/crm';
 import { getActiveTimerWithHealth } from '@/lib/time';
 import { AppShell } from '@/components/domain/AppShell';
 import { PushOptInBanner } from '@/components/domain/PushOptIn';
@@ -11,7 +12,7 @@ import { ActiveCallContainer } from '@/components/domain/ActiveCallContainer';
 import { NewCalendarEventDialog } from '@/components/domain/calendar/NewCalendarEventDialog';
 import type { NavItem } from '@/components/domain/Sidebar';
 
-function buildNav(user: SessionUser): NavItem[] {
+function buildNav(user: SessionUser, crmCanSee: boolean): NavItem[] {
   const items: NavItem[] = [
     { key: 'dashboard', href: '/dashboard' },
     { key: 'me', href: '/me' },
@@ -30,7 +31,7 @@ function buildNav(user: SessionUser): NavItem[] {
     items.push({ key: 'team', href: '/team' });
   }
   if (canSeeReports(user)) items.push({ key: 'reports', href: '/reports' });
-  if (canSeeCrm(user)) items.push({ key: 'crm', href: '/crm' });
+  if (crmCanSee) items.push({ key: 'crm', href: '/crm' });
   if (canSeeServiceDesk(user)) items.push({ key: 'servicedesk', href: '/servicedesk' });
   if (canSeeSettings(user)) items.push({ key: 'settings', href: '/settings' });
   return items;
@@ -45,13 +46,18 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     if (!path.startsWith('/me/security')) redirect('/me/security');
   }
 
-  const navItems = buildNav({ id: sessionUser.id, role: sessionUser.role });
-  const [{ timer: activeTimer, health: timerHealth }, inboxUnread] = await Promise.all([
+  const [{ timer: activeTimer, health: timerHealth }, inboxUnread, crmFlag] = await Promise.all([
     getActiveTimerWithHealth(sessionUser.id),
     prisma.notification.count({
       where: { userId: sessionUser.id, isRead: false },
     }),
+    getMyCrmAccess(sessionUser.id),
   ]);
+  const crmCanSee = resolveCrmAccess(
+    { id: sessionUser.id, role: sessionUser.role },
+    crmFlag,
+  ).canSee;
+  const navItems = buildNav({ id: sessionUser.id, role: sessionUser.role }, crmCanSee);
 
   return (
     <AppShell

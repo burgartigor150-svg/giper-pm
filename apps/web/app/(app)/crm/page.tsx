@@ -2,8 +2,8 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@giper/ui/components/Card';
 import { requireAuth } from '@/lib/auth';
-import { canSeeCrm, canEditCrm, canDeleteCrmPipeline } from '@/lib/permissions';
-import { listPipelines, listDealsForPipeline, getPipelineSummary, listContacts } from '@/lib/crm';
+import { canEditCrm, canDeleteCrmPipeline, resolveCrmAccess } from '@/lib/permissions';
+import { listPipelines, listDealsForPipeline, getPipelineSummary, listContacts, getMyCrmAccess } from '@/lib/crm';
 import { listProjectsForUser } from '@/lib/projects';
 import { DealPipeline } from '@/components/domain/crm/DealPipeline';
 import { NewDealForm } from '@/components/domain/crm/NewDealForm';
@@ -17,10 +17,17 @@ type SP = Promise<Record<string, string | string[] | undefined>>;
 
 export default async function CrmPage({ searchParams }: { searchParams: SP }) {
   const me = await requireAuth();
-  if (!canSeeCrm({ id: me.id, role: me.role })) notFound();
+  const access = resolveCrmAccess({ id: me.id, role: me.role }, await getMyCrmAccess(me.id));
+  if (!access.canSee) notFound();
 
-  const canEdit = canEditCrm({ id: me.id, role: me.role });
+  // Scoped reps (scope 'own') only ever receive their own rows, so every
+  // visible card is theirs to edit; own-only is enforced server-side anyway.
+  const ownerId = access.scope === 'own' ? me.id : null;
+  const canEdit = access.canSee;
   const canArchivePipeline = canDeleteCrmPipeline({ id: me.id, role: me.role });
+  // Creating the shared default pipeline is ADMIN/PM-only — scoped reps never
+  // self-serve org structure.
+  const canCreatePipeline = canEditCrm({ id: me.id, role: me.role });
   const pipelines = await listPipelines();
 
   if (pipelines.length === 0) {
@@ -37,7 +44,7 @@ export default async function CrmPage({ searchParams }: { searchParams: SP }) {
               Воронок ещё нет. Создайте стандартную воронку (Новые → Квалификация →
               Предложение → Выиграно → Проиграно) и начните добавлять сделки.
             </p>
-            {canEdit ? <CreateDefaultPipelineButton /> : null}
+            {canCreatePipeline ? <CreateDefaultPipelineButton /> : null}
           </CardContent>
         </Card>
       </div>
@@ -49,9 +56,9 @@ export default async function CrmPage({ searchParams }: { searchParams: SP }) {
   const pipeline = pipelines.find((p) => p.id === wanted) ?? pipelines[0]!;
 
   const [deals, summary, contacts, allProjects] = await Promise.all([
-    listDealsForPipeline(pipeline.id),
-    getPipelineSummary(pipeline.id),
-    listContacts(),
+    listDealsForPipeline(pipeline.id, ownerId),
+    getPipelineSummary(pipeline.id, ownerId),
+    listContacts(ownerId),
     // CRM is ADMIN/PM org-level → list ALL active projects for the link
     // selector (scope:'all' self-gates to privileged; falls back to 'mine').
     listProjectsForUser({ id: me.id, role: me.role }, { scope: 'all', status: 'ACTIVE' }),

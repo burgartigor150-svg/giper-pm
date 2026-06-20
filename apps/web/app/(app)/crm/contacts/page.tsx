@@ -2,8 +2,8 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@giper/ui/components/Card';
 import { requireAuth } from '@/lib/auth';
-import { canSeeCrm, canEditCrm } from '@/lib/permissions';
-import { listContacts } from '@/lib/crm';
+import { resolveCrmAccess } from '@/lib/permissions';
+import { listContacts, getMyCrmAccess } from '@/lib/crm';
 import { NewContactForm } from '@/components/domain/crm/NewContactForm';
 import { ContactRow } from '@/components/domain/crm/ContactRow';
 
@@ -11,9 +11,11 @@ export const dynamic = 'force-dynamic';
 
 export default async function CrmContactsPage() {
   const me = await requireAuth();
-  if (!canSeeCrm({ id: me.id, role: me.role })) notFound();
-  const canEdit = canEditCrm({ id: me.id, role: me.role });
-  const contacts = await listContacts();
+  const access = resolveCrmAccess({ id: me.id, role: me.role }, await getMyCrmAccess(me.id));
+  if (!access.canSee) notFound();
+  const canEdit = access.canSee;
+  const ownerId = access.scope === 'own' ? me.id : null;
+  const contacts = await listContacts(ownerId);
 
   return (
     <div className="mx-auto max-w-4xl space-y-4">

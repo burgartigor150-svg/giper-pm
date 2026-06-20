@@ -36,6 +36,12 @@ model User {
   mustChangePassword     Boolean   @default(false)
   lastPasswordChangeAt   DateTime?
 
+  /// Opt-in per-owner CRM access for non-ADMIN/PM users. Default false →
+  /// inert until an admin grants it. ADMIN/PM see the whole CRM regardless;
+  /// a MEMBER with this flag becomes a "scoped sales rep" who sees/edits only
+  /// the Deal/Contact/Lead they own. VIEWER never qualifies even if set.
+  crmAccess              Boolean   @default(false)
+
   // External integrations
   bitrixUserId  String?   @unique // user.ID in cloud Bitrix24
 

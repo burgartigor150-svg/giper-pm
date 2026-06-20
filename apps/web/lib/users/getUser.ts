@@ -12,6 +12,7 @@ export async function getUserById(id: string) {
       image: true,
       isActive: true,
       timezone: true,
+      crmAccess: true,
       mustChangePassword: true,
       lastPasswordChangeAt: true,
       createdAt: true,
