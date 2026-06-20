@@ -232,13 +232,49 @@ export function canSeeSettings(user: SessionUser): boolean {
   return user.role === 'ADMIN' || user.role === 'PM';
 }
 
-/** CRM is org-level sales data — ADMIN/PM see and edit it; others are excluded. */
+/**
+ * Privileged (org-wide) CRM access. ADMIN/PM see and edit ALL CRM data.
+ * These stay pure-role on purpose — they now mean "full-org CRM". Callers that
+ * must also include opt-in scoped sales reps use `resolveCrmAccess(...)` instead
+ * (below). Do NOT widen these bodies, or unrelated callers leak.
+ */
 export function canSeeCrm(user: SessionUser): boolean {
   return user.role === 'ADMIN' || user.role === 'PM';
 }
 export function canEditCrm(user: SessionUser): boolean {
   return user.role === 'ADMIN' || user.role === 'PM';
 }
+
+/** How much of the CRM a user may touch. */
+export type CrmScope = 'all' | 'own' | 'none';
+export type CrmAccess = { canSee: boolean; scope: CrmScope };
+
+/**
+ * Resolve CRM access for a user. `crmAccess` MUST be read from the DB at request
+ * time (see getMyCrmAccess in lib/crm.ts), NEVER piggybacked on the session/JWT —
+ * auth only refreshes role on an explicit update, so a session-carried flag would
+ * lag an admin grant/revoke by up to a full session, and revoke-lag (a
+ * de-authorized rep keeping access) is the dangerous direction.
+ *
+ *   ADMIN | PM                 → { canSee:true,  scope:'all'  }  (org-wide, unchanged)
+ *   VIEWER                     → { canSee:false, scope:'none' }  (hard exclusion even if flag set)
+ *   crmAccess===true (MEMBER)  → { canSee:true,  scope:'own'  }  (scoped sales rep)
+ *   else (default for all)     → { canSee:false, scope:'none' }
+ */
+export function resolveCrmAccess(user: SessionUser, crmAccess: boolean): CrmAccess {
+  if (user.role === 'ADMIN' || user.role === 'PM') return { canSee: true, scope: 'all' };
+  if (user.role === 'VIEWER') return { canSee: false, scope: 'none' };
+  if (crmAccess) return { canSee: true, scope: 'own' };
+  return { canSee: false, scope: 'none' };
+}
+
+/** Own-only mutation check for scoped reps. scope 'all' always passes. */
+export function canMutateCrmRecord(access: CrmAccess, ownerId: string | null, meId: string): boolean {
+  if (access.scope === 'all') return true;
+  if (access.scope === 'none') return false;
+  return ownerId === meId; // scope === 'own'
+}
+
 /** Destructive pipeline ops (archive/delete) are ADMIN-only. */
 export function canDeleteCrmPipeline(user: SessionUser): boolean {
   return user.role === 'ADMIN';

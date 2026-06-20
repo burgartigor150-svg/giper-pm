@@ -22,6 +22,12 @@ export const updateUserSchema = z.object({
   name: z.string().trim().min(1).max(80).optional(),
   role: userRoleSchema.optional(),
   timezone: z.string().trim().min(1).max(64).optional(),
+  // Opt-in per-owner CRM access. Posted by a hidden+checkbox pair as the string
+  // 'true'/'false' (also accepts a raw boolean for programmatic callers).
+  crmAccess: z
+    .union([z.literal('true'), z.literal('false'), z.boolean()])
+    .transform((v) => v === true || v === 'true')
+    .optional(),
 });
 export type UpdateUserInput = z.infer<typeof updateUserSchema>;
 

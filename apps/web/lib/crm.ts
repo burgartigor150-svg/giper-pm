@@ -41,6 +41,28 @@ export type PipelineSummary = {
 
 const num = (d: { toNumber: () => number } | null): number | null => (d ? d.toNumber() : null);
 
+/**
+ * Read the current user's opt-in CRM flag from the DB at request time.
+ * Fault-tolerant → false (a DB blip must never silently elevate access).
+ * Resolve scope via resolveCrmAccess(user, getMyCrmAccess(user.id)).
+ */
+export async function getMyCrmAccess(userId: string): Promise<boolean> {
+  try {
+    const u = await prisma.user.findUnique({ where: { id: userId }, select: { crmAccess: true } });
+    return u?.crmAccess ?? false;
+  } catch (e) {
+    console.warn('getMyCrmAccess: unavailable', e);
+    return false;
+  }
+}
+
+/**
+ * Owner scope for CRM queries. `null` → org-wide (ADMIN/PM, scope 'all');
+ * a userId → a scoped rep, own records only. Pass the SAME value to the deal
+ * list and the summary so the board and its stats can never desync.
+ */
+const ownerFilter = (ownerId: string | null) => (ownerId ? { ownerId } : {});
+
 /** Active (non-archived) pipelines with their ordered stages. Fault-tolerant. */
 export async function listPipelines(): Promise<PipelineView[]> {
   try {
@@ -67,11 +89,14 @@ export async function listPipelines(): Promise<PipelineView[]> {
   }
 }
 
-/** Deals (non-deleted) in a pipeline, with contact/owner names. Fault-tolerant. */
-export async function listDealsForPipeline(pipelineId: string): Promise<BoardDeal[]> {
+/**
+ * Deals (non-deleted) in a pipeline, with contact/owner names. Fault-tolerant.
+ * `ownerId` (null = org-wide) scopes to a single rep's own deals.
+ */
+export async function listDealsForPipeline(pipelineId: string, ownerId: string | null = null): Promise<BoardDeal[]> {
   try {
     const rows = await prisma.deal.findMany({
-      where: { pipelineId, deletedAt: null },
+      where: { pipelineId, deletedAt: null, ...ownerFilter(ownerId) },
       orderBy: { createdAt: 'desc' },
       select: {
         id: true,
@@ -118,11 +143,15 @@ export type ContactRow = {
   dealCount: number;
 };
 
-/** Contacts (non-deleted) with deal counts. Fault-tolerant. */
-export async function listContacts(): Promise<ContactRow[]> {
+/**
+ * Contacts (non-deleted) with deal counts. Fault-tolerant. `ownerId` (null =
+ * org-wide) scopes to a rep's own contacts AND makes the per-contact deal count
+ * own-only, so a scoped rep never sees a foreign deal tally on a shared contact.
+ */
+export async function listContacts(ownerId: string | null = null): Promise<ContactRow[]> {
   try {
     const rows = await prisma.contact.findMany({
-      where: { deletedAt: null },
+      where: { deletedAt: null, ...ownerFilter(ownerId) },
       orderBy: { name: 'asc' },
       select: {
         id: true,
@@ -130,7 +159,7 @@ export async function listContacts(): Promise<ContactRow[]> {
         company: true,
         email: true,
         phone: true,
-        _count: { select: { deals: true } },
+        _count: { select: { deals: ownerId ? { where: { ownerId, deletedAt: null } } : true } },
       },
     });
     return rows.map((c) => ({
@@ -161,11 +190,14 @@ export type LeadRow = {
   createdAt: Date;
 };
 
-/** Leads (non-deleted), newest-first, with owner name. Fault-tolerant. */
-export async function listLeads(): Promise<LeadRow[]> {
+/**
+ * Leads (non-deleted), newest-first, with owner name. Fault-tolerant.
+ * `ownerId` (null = org-wide) scopes to a single rep's own leads.
+ */
+export async function listLeads(ownerId: string | null = null): Promise<LeadRow[]> {
   try {
     const rows = await prisma.lead.findMany({
-      where: { deletedAt: null },
+      where: { deletedAt: null, ...ownerFilter(ownerId) },
       // id is a deterministic tiebreaker for leads created in the same ms
       // (cuid increments monotonically within a process → newest id sorts last).
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
@@ -202,8 +234,12 @@ export async function listLeads(): Promise<LeadRow[]> {
   }
 }
 
-/** Aggregate pipeline stats for the summary strip. Fault-tolerant → zeros. */
-export async function getPipelineSummary(pipelineId: string): Promise<PipelineSummary> {
+/**
+ * Aggregate pipeline stats for the summary strip. Fault-tolerant → zeros.
+ * `ownerId` MUST match the value passed to listDealsForPipeline, or the summary
+ * counts deals the rep can't see (scope desync).
+ */
+export async function getPipelineSummary(pipelineId: string, ownerId: string | null = null): Promise<PipelineSummary> {
   const empty: PipelineSummary = {
     openValue: 0,
     wonValue: 0,
@@ -214,7 +250,7 @@ export async function getPipelineSummary(pipelineId: string): Promise<PipelineSu
   };
   try {
     const deals = await prisma.deal.findMany({
-      where: { pipelineId, deletedAt: null },
+      where: { pipelineId, deletedAt: null, ...ownerFilter(ownerId) },
       select: { amount: true, status: true },
     });
     let openValue = 0;

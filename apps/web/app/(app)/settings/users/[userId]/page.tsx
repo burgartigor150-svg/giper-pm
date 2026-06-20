@@ -42,6 +42,7 @@ export default async function UserDetailPage({
               image: user.image,
               isActive: user.isActive,
               timezone: user.timezone,
+              crmAccess: user.crmAccess,
             }}
             isSelf={user.id === me.id}
             hasPositions={user.positions.length > 0}

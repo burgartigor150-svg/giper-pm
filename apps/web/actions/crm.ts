@@ -1,16 +1,38 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { prisma } from '@giper/db';
+import { prisma, type UserRole } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
 import { DomainError } from '@/lib/errors';
-import { canDeleteCrmPipeline, canEditCrm } from '@/lib/permissions';
+import {
+  canDeleteCrmPipeline,
+  canEditCrm,
+  resolveCrmAccess,
+  type CrmAccess,
+} from '@/lib/permissions';
+import { getMyCrmAccess } from '@/lib/crm';
+import { listProjectsForUser } from '@/lib/projects';
 
 type ActionResult<T = unknown> =
   | { ok: true; data?: T }
   | { ok: false; error: { code: string; message: string } };
 
 const DENY = { ok: false, error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Только продажи (ADMIN/PM)' } } as const;
+
+/**
+ * Resolve the caller's CRM access from the DB flag (never the session). Use
+ * `access.canSee` as the visibility gate and `ownWhere(access, me.id)` to scope
+ * every id-targeted mutation to the rep's own rows (scope 'own'); ADMIN/PM
+ * (scope 'all') get an empty filter = unchanged org-wide behavior.
+ */
+async function crmAccessFor(me: { id: string; role: UserRole }): Promise<CrmAccess> {
+  return resolveCrmAccess({ id: me.id, role: me.role }, await getMyCrmAccess(me.id));
+}
+
+/** Owner filter for a scoped rep's WHERE clause. scope 'all'/'none' → {} (the
+ *  canSee gate already blocked 'none'). */
+const ownWhere = (access: CrmAccess, meId: string) =>
+  access.scope === 'own' ? { ownerId: meId } : {};
 
 function parseAmount(v: string | number | null | undefined): number | null {
   if (v === null || v === undefined || v === '') return null;
@@ -19,17 +41,45 @@ function parseAmount(v: string | number | null | undefined): number | null {
 }
 
 /**
- * A deal may link to any ACTIVE (non-archived) project — CRM is ADMIN/PM
- * org-level, so this is existence-only, not a per-stake visibility check.
+ * Whether a deal may link to `projectId`. For privileged callers (scope 'all')
+ * this is existence-only (any ACTIVE project) — CRM is org-level. For a scoped
+ * rep (scope 'own') it must be a project they can actually SEE (per-stake), else
+ * linking + reading the deal back would disclose a foreign project's key/name.
  * null/empty (unlink) is always allowed.
  */
-async function isLinkableProject(projectId: string | null | undefined): Promise<boolean> {
+async function isLinkableProject(
+  projectId: string | null | undefined,
+  viewer: { access: CrmAccess; id: string; role: UserRole },
+): Promise<boolean> {
   if (!projectId) return true;
+  if (viewer.access.scope === 'own') {
+    const visible = await listProjectsForUser({ id: viewer.id, role: viewer.role }, { scope: 'mine' });
+    return visible.some((p) => p.id === projectId);
+  }
   const p = await prisma.project.findFirst({
     where: { id: projectId, status: { not: 'ARCHIVED' } },
     select: { id: true },
   });
   return !!p;
+}
+
+/**
+ * Whether a deal may link to `contactId`. Privileged callers are unrestricted
+ * (the FK enforces existence). A scoped rep (scope 'own') may only attach a
+ * contact they OWN — otherwise linking + reading back would disclose a foreign
+ * contact's name. null/empty (no contact) is always allowed.
+ */
+async function isLinkableContact(
+  contactId: string | null | undefined,
+  access: CrmAccess,
+  meId: string,
+): Promise<boolean> {
+  if (!contactId || access.scope !== 'own') return true;
+  const c = await prisma.contact.findFirst({
+    where: { id: contactId, deletedAt: null, ownerId: meId },
+    select: { id: true },
+  });
+  return !!c;
 }
 
 /** Seed a default "Продажи" pipeline with standard stages (idempotent-ish). */
@@ -70,12 +120,16 @@ export async function createDealAction(input: {
   projectId?: string | null;
 }): Promise<ActionResult<{ id: string }>> {
   const me = await requireAuth();
-  if (!canEditCrm({ id: me.id, role: me.role })) return DENY;
+  const access = await crmAccessFor(me);
+  if (!access.canSee) return DENY;
   if (input.title.trim().length < 2) {
     return { ok: false, error: { code: 'VALIDATION', message: 'Название сделки ≥ 2 символов' } };
   }
-  if (!(await isLinkableProject(input.projectId))) {
+  if (!(await isLinkableProject(input.projectId, { access, id: me.id, role: me.role }))) {
     return { ok: false, error: { code: 'VALIDATION', message: 'Проект не найден' } };
+  }
+  if (!(await isLinkableContact(input.contactId, access, me.id))) {
+    return { ok: false, error: { code: 'VALIDATION', message: 'Контакт не найден' } };
   }
   const stages = await prisma.pipelineStage.findMany({
     where: { pipelineId: input.pipelineId },
@@ -121,26 +175,27 @@ export async function updateDealAction(
   },
 ): Promise<ActionResult> {
   const me = await requireAuth();
-  if (!canEditCrm({ id: me.id, role: me.role })) return DENY;
+  const access = await crmAccessFor(me);
+  if (!access.canSee) return DENY;
   if (input.title.trim().length < 2) {
     return { ok: false, error: { code: 'VALIDATION', message: 'Название сделки ≥ 2 символов' } };
   }
-  if (!(await isLinkableProject(input.projectId))) {
+  if (!(await isLinkableProject(input.projectId, { access, id: me.id, role: me.role }))) {
     return { ok: false, error: { code: 'VALIDATION', message: 'Проект не найден' } };
   }
-  try {
-    await prisma.deal.update({
-      where: { id: dealId },
-      data: {
-        title: input.title.trim().slice(0, 200),
-        amount: parseAmount(input.amount),
-        contactId: input.contactId || null,
-        projectId: input.projectId || null,
-      },
-    });
-  } catch {
-    return { ok: false, error: { code: 'NOT_FOUND', message: 'Сделка не найдена' } };
+  if (!(await isLinkableContact(input.contactId, access, me.id))) {
+    return { ok: false, error: { code: 'VALIDATION', message: 'Контакт не найден' } };
   }
+  const upd = await prisma.deal.updateMany({
+    where: { id: dealId, deletedAt: null, ...ownWhere(access, me.id) },
+    data: {
+      title: input.title.trim().slice(0, 200),
+      amount: parseAmount(input.amount),
+      contactId: input.contactId || null,
+      projectId: input.projectId || null,
+    },
+  });
+  if (upd.count === 0) return { ok: false, error: { code: 'NOT_FOUND', message: 'Сделка не найдена' } };
   revalidatePath('/crm');
   return { ok: true };
 }
@@ -148,9 +203,10 @@ export async function updateDealAction(
 /** Move a deal to another stage in the same pipeline; flips WON/LOST on terminal stages. */
 export async function moveDealStageAction(dealId: string, stageId: string): Promise<ActionResult> {
   const me = await requireAuth();
-  if (!canEditCrm({ id: me.id, role: me.role })) return DENY;
-  const deal = await prisma.deal.findUnique({
-    where: { id: dealId },
+  const access = await crmAccessFor(me);
+  if (!access.canSee) return DENY;
+  const deal = await prisma.deal.findFirst({
+    where: { id: dealId, ...ownWhere(access, me.id) },
     select: { pipelineId: true, status: true },
   });
   if (!deal) return { ok: false, error: { code: 'NOT_FOUND', message: 'Сделка не найдена' } };
@@ -162,14 +218,15 @@ export async function moveDealStageAction(dealId: string, stageId: string): Prom
     return { ok: false, error: { code: 'VALIDATION', message: 'Стадия не из этой воронки' } };
   }
   const nextStatus = stage.kind === 'WON' ? 'WON' : stage.kind === 'LOST' ? 'LOST' : 'OPEN';
-  await prisma.deal.update({
-    where: { id: dealId },
+  const upd = await prisma.deal.updateMany({
+    where: { id: dealId, ...ownWhere(access, me.id) },
     data: {
       stageId,
       status: nextStatus,
       closedAt: nextStatus === 'OPEN' ? null : new Date(),
     },
   });
+  if (upd.count === 0) return { ok: false, error: { code: 'NOT_FOUND', message: 'Сделка не найдена' } };
   revalidatePath('/crm');
   return { ok: true };
 }
@@ -181,15 +238,17 @@ export async function setDealStatusAction(
   opts: { lostReason?: string } = {},
 ): Promise<ActionResult> {
   const me = await requireAuth();
-  if (!canEditCrm({ id: me.id, role: me.role })) return DENY;
-  await prisma.deal.update({
-    where: { id: dealId },
+  const access = await crmAccessFor(me);
+  if (!access.canSee) return DENY;
+  const upd = await prisma.deal.updateMany({
+    where: { id: dealId, ...ownWhere(access, me.id) },
     data: {
       status,
       closedAt: status === 'OPEN' ? null : new Date(),
       lostReason: status === 'LOST' ? (opts.lostReason?.slice(0, 2000) ?? null) : null,
     },
   });
+  if (upd.count === 0) return { ok: false, error: { code: 'NOT_FOUND', message: 'Сделка не найдена' } };
   revalidatePath('/crm');
   return { ok: true };
 }
@@ -202,7 +261,8 @@ export async function createContactAction(input: {
   phone?: string;
 }): Promise<ActionResult<{ id: string }>> {
   const me = await requireAuth();
-  if (!canEditCrm({ id: me.id, role: me.role })) return DENY;
+  const access = await crmAccessFor(me);
+  if (!access.canSee) return DENY;
   if (input.name.trim().length < 2) {
     return { ok: false, error: { code: 'VALIDATION', message: 'Имя ≥ 2 символов' } };
   }
@@ -226,23 +286,21 @@ export async function updateContactAction(
   input: { name: string; company?: string; email?: string; phone?: string },
 ): Promise<ActionResult> {
   const me = await requireAuth();
-  if (!canEditCrm({ id: me.id, role: me.role })) return DENY;
+  const access = await crmAccessFor(me);
+  if (!access.canSee) return DENY;
   if (input.name.trim().length < 2) {
     return { ok: false, error: { code: 'VALIDATION', message: 'Имя ≥ 2 символов' } };
   }
-  try {
-    await prisma.contact.update({
-      where: { id: contactId },
-      data: {
-        name: input.name.trim().slice(0, 200),
-        company: input.company?.trim().slice(0, 200) || null,
-        email: input.email?.trim().slice(0, 200) || null,
-        phone: input.phone?.trim().slice(0, 60) || null,
-      },
-    });
-  } catch {
-    return { ok: false, error: { code: 'NOT_FOUND', message: 'Контакт не найден' } };
-  }
+  const upd = await prisma.contact.updateMany({
+    where: { id: contactId, deletedAt: null, ...ownWhere(access, me.id) },
+    data: {
+      name: input.name.trim().slice(0, 200),
+      company: input.company?.trim().slice(0, 200) || null,
+      email: input.email?.trim().slice(0, 200) || null,
+      phone: input.phone?.trim().slice(0, 60) || null,
+    },
+  });
+  if (upd.count === 0) return { ok: false, error: { code: 'NOT_FOUND', message: 'Контакт не найден' } };
   revalidatePath('/crm/contacts');
   return { ok: true };
 }
@@ -250,15 +308,13 @@ export async function updateContactAction(
 /** Soft-delete a contact (sets deletedAt; deals are kept). CRM editors only. */
 export async function deleteContactAction(contactId: string): Promise<ActionResult> {
   const me = await requireAuth();
-  if (!canEditCrm({ id: me.id, role: me.role })) return DENY;
-  try {
-    await prisma.contact.update({
-      where: { id: contactId },
-      data: { deletedAt: new Date() },
-    });
-  } catch {
-    return { ok: false, error: { code: 'NOT_FOUND', message: 'Контакт не найден' } };
-  }
+  const access = await crmAccessFor(me);
+  if (!access.canSee) return DENY;
+  const upd = await prisma.contact.updateMany({
+    where: { id: contactId, deletedAt: null, ...ownWhere(access, me.id) },
+    data: { deletedAt: new Date() },
+  });
+  if (upd.count === 0) return { ok: false, error: { code: 'NOT_FOUND', message: 'Контакт не найден' } };
   revalidatePath('/crm/contacts');
   return { ok: true };
 }
@@ -289,7 +345,8 @@ export async function createLeadAction(input: {
   notes?: string;
 }): Promise<ActionResult<{ id: string }>> {
   const me = await requireAuth();
-  if (!canEditCrm({ id: me.id, role: me.role })) return DENY;
+  const access = await crmAccessFor(me);
+  if (!access.canSee) return DENY;
   if (input.name.trim().length < 2) {
     return { ok: false, error: { code: 'VALIDATION', message: 'Имя ≥ 2 символов' } };
   }
@@ -332,15 +389,16 @@ export async function updateLeadAction(
   },
 ): Promise<ActionResult> {
   const me = await requireAuth();
-  if (!canEditCrm({ id: me.id, role: me.role })) return DENY;
+  const access = await crmAccessFor(me);
+  if (!access.canSee) return DENY;
   if (input.name.trim().length < 2) {
     return { ok: false, error: { code: 'VALIDATION', message: 'Имя ≥ 2 символов' } };
   }
   if (!leadHasContact(input.email, input.phone)) {
     return { ok: false, error: { code: 'VALIDATION', message: 'Укажите email или телефон' } };
   }
-  const lead = await prisma.lead.findUnique({
-    where: { id: leadId },
+  const lead = await prisma.lead.findFirst({
+    where: { id: leadId, ...ownWhere(access, me.id) },
     select: { status: true, deletedAt: true },
   });
   if (!lead || lead.deletedAt) {
@@ -349,8 +407,8 @@ export async function updateLeadAction(
   if (lead.status === 'CONVERTED') {
     return { ok: false, error: { code: 'CONFLICT', message: 'Лид уже сконвертирован' } };
   }
-  await prisma.lead.update({
-    where: { id: leadId },
+  await prisma.lead.updateMany({
+    where: { id: leadId, ...ownWhere(access, me.id) },
     data: {
       name: input.name.trim().slice(0, 200),
       email: input.email?.trim().slice(0, 200) || null,
@@ -368,15 +426,13 @@ export async function updateLeadAction(
 /** Soft-delete a lead (sets deletedAt). CRM editors only. */
 export async function deleteLeadAction(leadId: string): Promise<ActionResult> {
   const me = await requireAuth();
-  if (!canEditCrm({ id: me.id, role: me.role })) return DENY;
-  try {
-    await prisma.lead.update({
-      where: { id: leadId },
-      data: { deletedAt: new Date() },
-    });
-  } catch {
-    return { ok: false, error: { code: 'NOT_FOUND', message: 'Лид не найден' } };
-  }
+  const access = await crmAccessFor(me);
+  if (!access.canSee) return DENY;
+  const upd = await prisma.lead.updateMany({
+    where: { id: leadId, deletedAt: null, ...ownWhere(access, me.id) },
+    data: { deletedAt: new Date() },
+  });
+  if (upd.count === 0) return { ok: false, error: { code: 'NOT_FOUND', message: 'Лид не найден' } };
   revalidatePath('/crm/leads');
   return { ok: true };
 }
@@ -392,7 +448,8 @@ export async function convertLeadAction(
   opts: { createDeal?: boolean; dealTitle?: string; amount?: string | number | null } = {},
 ): Promise<ActionResult<{ contactId: string; dealId: string | null }>> {
   const me = await requireAuth();
-  if (!canEditCrm({ id: me.id, role: me.role })) return DENY;
+  const access = await crmAccessFor(me);
+  if (!access.canSee) return DENY;
 
   // Resolve the target stage OUTSIDE the tx, only when a deal is requested.
   // Contact-only convert must work for brand-new orgs that have no pipeline yet.
@@ -413,8 +470,8 @@ export async function convertLeadAction(
 
   try {
     const result = await prisma.$transaction(async (tx) => {
-      const lead = await tx.lead.findUnique({
-        where: { id: leadId },
+      const lead = await tx.lead.findFirst({
+        where: { id: leadId, ...ownWhere(access, me.id) },
         select: { id: true, status: true, name: true, email: true, phone: true, company: true, deletedAt: true },
       });
       if (!lead || lead.deletedAt) throw new DomainError('NOT_FOUND', 404, 'Лид не найден');
@@ -453,7 +510,7 @@ export async function convertLeadAction(
 
       // Atomic idempotency lock: only the convert that flips NEW→CONVERTED wins.
       const upd = await tx.lead.updateMany({
-        where: { id: leadId, status: 'NEW' },
+        where: { id: leadId, status: 'NEW', ...ownWhere(access, me.id) },
         data: {
           status: 'CONVERTED',
           convertedContactId: contact.id,

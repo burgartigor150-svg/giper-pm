@@ -2,8 +2,8 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@giper/ui/components/Card';
 import { requireAuth } from '@/lib/auth';
-import { canSeeCrm, canEditCrm } from '@/lib/permissions';
-import { listLeads, listPipelines } from '@/lib/crm';
+import { resolveCrmAccess } from '@/lib/permissions';
+import { listLeads, listPipelines, getMyCrmAccess } from '@/lib/crm';
 import { NewLeadForm } from '@/components/domain/crm/NewLeadForm';
 import { LeadRow } from '@/components/domain/crm/LeadRow';
 
@@ -11,9 +11,11 @@ export const dynamic = 'force-dynamic';
 
 export default async function CrmLeadsPage() {
   const me = await requireAuth();
-  if (!canSeeCrm({ id: me.id, role: me.role })) notFound();
-  const canEdit = canEditCrm({ id: me.id, role: me.role });
-  const [leads, pipelines] = await Promise.all([listLeads(), listPipelines()]);
+  const access = resolveCrmAccess({ id: me.id, role: me.role }, await getMyCrmAccess(me.id));
+  if (!access.canSee) notFound();
+  const canEdit = access.canSee;
+  const ownerId = access.scope === 'own' ? me.id : null;
+  const [leads, pipelines] = await Promise.all([listLeads(ownerId), listPipelines()]);
   const hasPipeline = pipelines.length > 0;
   // "Active" = still in the funnel and actionable. DISQUALIFIED leads are
   // out of work (LeadRow only offers reactivate/delete), so exclude them too.
