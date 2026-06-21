@@ -7,6 +7,7 @@ import { getEffectiveCaps } from '@/lib/capabilities';
 import { getT } from '@/lib/i18n';
 import { getSpaces } from '@/lib/spaces/getSpaces';
 import { SpacesForm } from '@/components/domain/SpacesForm';
+import { BitrixAuthorBackfillButton } from '@/components/domain/BitrixAuthorBackfillButton';
 
 export default async function SettingsPage() {
   const user = await requireAuth();
@@ -75,6 +76,14 @@ export default async function SettingsPage() {
               <Link href="/integrations/telegram" className="text-sm underline">
                 Telegram (личные боты PM) →
               </Link>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle>Bitrix24 — обслуживание</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <BitrixAuthorBackfillButton />
             </CardContent>
           </Card>
           <Card>
