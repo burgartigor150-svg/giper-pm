@@ -9,6 +9,7 @@ import {
   deleteOneComment,
 } from '@giper/integrations/bitrix24';
 import { getBitrix24Client } from '@/lib/integrations/bitrix24';
+import { publishTaskEvent } from '@/lib/realtime/publishTask';
 
 /**
  * Inbound webhook receiver for Bitrix24 outbound events. Configured in
@@ -213,4 +214,11 @@ async function revalidateTaskPath(localTaskId: string) {
   if (!t) return;
   revalidatePath(`/projects/${t.project.key}/tasks/${t.number}`);
   revalidatePath(`/projects/${t.project.key}/list`);
+  // Push a live-refresh to anyone with the task/board open. Without this,
+  // Bitrix-mirrored activity (new comments, deadline/status changes) only
+  // appeared on a manual reload — revalidatePath busts the server cache but
+  // can't reach an already-open client. `task:updated` is an honest "the
+  // mirrored task changed upstream" signal; the detail page and board
+  // subscribe to it via RevalidateOnEvent.
+  void publishTaskEvent(localTaskId, { type: 'task:updated' });
 }

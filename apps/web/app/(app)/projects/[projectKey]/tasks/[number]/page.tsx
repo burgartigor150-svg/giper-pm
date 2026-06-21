@@ -26,6 +26,7 @@ import { listVersionsForProject } from '@/lib/versions/listVersionsForProject';
 import { ComponentPicker } from '@/components/domain/ComponentPicker';
 import { listComponentsForProject } from '@/lib/components/listComponentsForProject';
 import { TaskTimeline } from '@/components/domain/TaskTimeline';
+import { AutoRefresh } from '@/components/domain/AutoRefresh';
 import { LogTaskHoursForm } from '@/components/domain/LogTaskHoursForm';
 import { listTaskTimeEntries } from '@/actions/time';
 import { TaskStatusBadge } from '@/components/domain/TaskStatusBadge';
@@ -287,8 +288,16 @@ export default async function TaskDetailPage({ params }: { params: Params }) {
           'comment:added',
           'task:status-changed',
           'task:assigned',
+          // Bitrix-mirrored upstream changes (webhook → publishTaskEvent).
+          'task:updated',
         ]}
       />
+      {/* Bitrix collab/chat tasks sync via the 5-min bulk job (no per-comment
+          webhook), so the event push above can't cover them — a gentle visible-
+          only poll surfaces those without a manual reload. */}
+      {task.externalSource === 'bitrix24' ? (
+        <AutoRefresh intervalMs={30_000} />
+      ) : null}
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Link href={`/projects/${task.project.key}/list`} className="hover:underline">
