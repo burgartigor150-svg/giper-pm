@@ -5,6 +5,7 @@ import {
   mapBitrixTask,
   parseDate,
   stripBitrixHtml,
+  convertBitrixMarkup,
 } from './mappers';
 
 describe('mapBitrixStatus', () => {
@@ -61,6 +62,55 @@ describe('stripBitrixHtml', () => {
     // No markup → length passes through, then sliced at 50_000.
     const big = 'x'.repeat(60_000);
     expect(stripBitrixHtml(big).length).toBe(50_000);
+  });
+});
+
+describe('convertBitrixMarkup — chat system messages', () => {
+  // The exact payload pulled from im.dialog.messages.get for a deadline-change
+  // system message (task 118224). Previously rendered as "… на [, ](/workgroups…)".
+  const RAW_DEADLINE =
+    '[USER=1282]Зобков Игорь[/USER] установил крайний срок задачи на ' +
+    '[URL=/workgroups/group/930/tasks/task/view/118224/?chatAction=changeDeadline]' +
+    '[TIMESTAMP=1785513600 FORMAT=LONG_DATE_FORMAT], ' +
+    '[TIMESTAMP=1785513600 FORMAT=SHORT_TIME_FORMAT][/URL]';
+
+  it('drops the relative action-link and recovers the deadline date/time', () => {
+    const out = convertBitrixMarkup(RAW_DEADLINE);
+    // No raw markup leaks through.
+    expect(out).not.toContain('[URL');
+    expect(out).not.toContain('[TIMESTAMP');
+    expect(out).not.toContain('](/'); // no relative markdown link
+    expect(out).not.toContain('/workgroups/');
+    // User mention kept, and the date+time are now present.
+    expect(out).toMatch(
+      /^@Зобков Игорь установил крайний срок задачи на \d{2}\.\d{2}\.\d{4}, \d{2}:\d{2}$/,
+    );
+  });
+
+  it('formats [TIMESTAMP] in portal (Moscow) time deterministically', () => {
+    // 1785513600 = 2026-07-31 16:00 UTC → 19:00 MSK.
+    expect(convertBitrixMarkup('[TIMESTAMP=1785513600 FORMAT=LONG_DATE_FORMAT]')).toBe(
+      '31.07.2026',
+    );
+    expect(convertBitrixMarkup('[TIMESTAMP=1785513600 FORMAT=SHORT_TIME_FORMAT]')).toBe(
+      '19:00',
+    );
+  });
+
+  it('keeps absolute links as markdown but strips relative ones to the label', () => {
+    expect(convertBitrixMarkup('[URL=https://example.com]сайт[/URL]')).toBe(
+      '[сайт](https://example.com)',
+    );
+    expect(convertBitrixMarkup('[URL=/company/personal/user/42/]Иван[/URL]')).toBe(
+      'Иван',
+    );
+  });
+
+  it('leaves a bare absolute url, drops a bare relative url', () => {
+    expect(convertBitrixMarkup('[URL]https://example.com[/URL]')).toBe(
+      'https://example.com',
+    );
+    expect(convertBitrixMarkup('[URL]/workgroups/group/1/[/URL]')).toBe('');
   });
 });
 
