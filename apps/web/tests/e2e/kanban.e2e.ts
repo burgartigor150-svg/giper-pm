@@ -159,7 +159,7 @@ test.describe('kanban board', () => {
       data: { columnId: col.id, name: 'Разработка', order: 0 },
     });
     await prisma.boardSubColumn.create({
-      data: { columnId: col.id, name: 'Ревью', order: 1 },
+      data: { columnId: col.id, name: 'Проверка', order: 1 },
     });
     await prisma.task.create({
       data: {
@@ -174,7 +174,7 @@ test.describe('kanban board', () => {
     });
     await page.goto('/projects/SUB/board');
     await expect(page.getByText('Разработка')).toBeVisible();
-    await expect(page.getByText('Ревью')).toBeVisible();
+    await expect(page.getByText('Проверка')).toBeVisible();
     await expect(page.getByText('Sub card')).toBeVisible();
   });
 
