@@ -110,6 +110,8 @@ export const taskListFilterSchema = z.object({
   reviewer: z.literal('me').optional(),
   /** Release/version id the task must be slated for. */
   versionId: z.string().optional(),
+  /** Component id the task must belong to. */
+  componentId: z.string().optional(),
   q: z.string().trim().max(200).optional(),
   /** Tag IDs the task must have (AND-semantics). */
   tagIds: z.array(z.string()).optional(),

@@ -101,6 +101,8 @@ model User {
   apiTokens         ApiToken[]
   /// Saved board/list filter presets owned by this user.
   savedFilters      SavedFilter[]        @relation("SavedFilterOwner")
+  /// Components this user leads.
+  componentLeads    Component[]          @relation("ComponentLead")
 
   // Tags assigned by this user (audit trail of tag activity).
   tagAssignments    TaskTag[]            @relation("TaskTagAssigner")
@@ -439,6 +441,8 @@ model Project {
   sprints         Sprint[]
   /// Releases / versions (Jira fixVersion) for grouping cards by what ships.
   versions        Version[]
+  /// Components (Jira component) — product areas for grouping cards.
+  components      Component[]
   /// CRM deals linked to this project (org-level sales → delivery handoff).
   deals           Deal[]          @relation("DealProject")
   /// Per-project custom-role assignments. Reserved for v2 — no writer in v1.
@@ -587,6 +591,26 @@ model Version {
   tasks       Task[]
 
   @@index([projectId, status])
+}
+
+/// Component (Jira component): a named product area within a project (e.g.
+/// "Frontend", "API", "Billing"). Additive + inert — until one exists no card is
+/// categorized. Cards link via Task.componentId (SetNull on delete).
+model Component {
+  id          String   @id @default(cuid())
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name        String
+  description String?  @db.Text
+  /// Optional component lead (a user). SetNull if that user is removed.
+  leadId      String?
+  lead        User?    @relation("ComponentLead", fields: [leadId], references: [id], onDelete: SetNull)
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  tasks       Task[]
+
+  @@index([projectId])
 }
 
 /// Daily point-in-time snapshot of a sprint's remaining work, written by
@@ -1273,6 +1297,11 @@ model Task {
   versionId     String?
   version       Version?       @relation(fields: [versionId], references: [id], onDelete: SetNull)
 
+  /// Component (product area) the card belongs to (Jira component). Nullable.
+  /// SetNull on component delete → card keeps existing, just uncategorized.
+  componentId   String?
+  component     Component?     @relation(fields: [componentId], references: [id], onDelete: SetNull)
+
   /// Card cover. Either an uploaded image (S3 object key,
   /// served via /api/covers/[taskId]) or a solid colour (hex). At most one
   /// is set; both null = no cover (card renders as before).
@@ -1304,6 +1333,7 @@ model Task {
   @@index([projectId, internalStatus])
   @@index([sprintId, internalStatus])
   @@index([versionId])
+  @@index([componentId])
   @@index([dueDate])
   @@index([columnId, swimlaneId])
 }

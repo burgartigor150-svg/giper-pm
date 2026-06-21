@@ -73,6 +73,7 @@ export async function listTasksForProject(
       dueWithin: filter.dueWithin,
       reviewerMe: filter.reviewer === 'me',
       versionId: filter.versionId,
+      componentId: filter.componentId,
     },
     { userId: user.id, statusField: 'status' },
   );

@@ -27,6 +27,7 @@ const TABLES_IN_DELETE_ORDER = [
   'SprintSnapshot',
   'Sprint',
   'Version',
+  'Component',
   'Space',
   'Ticket',
   // Leaves first (no incoming FKs that matter).

@@ -18,6 +18,7 @@ export const SAVED_FILTER_PARAM_KEYS = [
   'dueWithin',
   'reviewer',
   'versionId',
+  'componentId',
   'tagIds',
   'onlyMine',
   'sprintId',

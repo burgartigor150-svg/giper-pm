@@ -19,6 +19,7 @@ import {
   hasExplicitFilterState,
 } from '@/lib/savedFilters/listSavedFiltersForView';
 import { listVersionsForProject } from '@/lib/versions/listVersionsForProject';
+import { listComponentsForProject } from '@/lib/components/listComponentsForProject';
 import { getCardTemplates } from '@/lib/board/getCardTemplates';
 import { canCreateTask, canEditProject } from '@/lib/permissions';
 import { getEffectiveCapsForProject } from '@/lib/capabilities';
@@ -57,6 +58,7 @@ export default async function ProjectBoardPage({
   const dueWithin = dueParsed?.success ? dueParsed.data : undefined;
   const reviewer = sp.reviewer === 'me' ? 'me' : undefined;
   const versionId = typeof sp.versionId === 'string' && sp.versionId ? sp.versionId : undefined;
+  const componentId = typeof sp.componentId === 'string' && sp.componentId ? sp.componentId : undefined;
   // tagIds may arrive as a single string or an array depending on the
   // form encoding. Normalize and trim before sending to the query.
   const rawTagIds = sp.tagIds ?? sp.tagId; // accept either spelling
@@ -70,7 +72,7 @@ export default async function ProjectBoardPage({
   try {
     result = await listTasksForBoard(
       projectKey,
-      { assigneeId, priority, q, onlyMine, tagIds, type, dueWithin, reviewer, versionId },
+      { assigneeId, priority, q, onlyMine, tagIds, type, dueWithin, reviewer, versionId, componentId },
       { id: me.id, role: me.role },
     );
   } catch (e) {
@@ -94,10 +96,11 @@ export default async function ProjectBoardPage({
   const availableTags = await listTagsForProject(project.id);
 
   // Saved filter presets + whether the viewer may publish/prune shared presets.
-  const [presets, projCaps, versions] = await Promise.all([
+  const [presets, projCaps, versions, components] = await Promise.all([
     listSavedFiltersForView(project.id, 'BOARD', me.id),
     getEffectiveCapsForProject({ id: me.id, role: me.role }, project.id),
     listVersionsForProject(project.id),
+    listComponentsForProject(project.id),
   ]);
   const canShare = canEditProject(
     { id: me.id, role: me.role },
@@ -153,6 +156,8 @@ export default async function ProjectBoardPage({
           reviewer={reviewer}
           versionId={versionId}
           versions={versions.map((v) => ({ id: v.id, name: v.name }))}
+          componentId={componentId}
+          components={components.map((c) => ({ id: c.id, name: c.name }))}
           availableTags={availableTags}
           activeTagIds={tagIds ?? []}
         />

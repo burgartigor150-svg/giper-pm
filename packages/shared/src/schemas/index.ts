@@ -4,3 +4,4 @@ export * from './task';
 export * from './time';
 export * from './savedFilter';
 export * from './version';
+export * from './component';
