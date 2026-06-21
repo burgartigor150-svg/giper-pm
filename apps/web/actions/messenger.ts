@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { prisma, Prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
+import { BITRIX_BOT_EMAIL } from '@giper/integrations/bitrix24';
 import { getEffectiveCaps } from '@/lib/capabilities';
 import { ensureMembership, resolveChannelAccess } from '@/lib/messenger/access';
 import { publishChatEvent } from '@/lib/realtime/publishChat';
@@ -503,7 +504,9 @@ export async function postMessageAction(input: {
   const mentionedIds = Array.from(new Set([...body.matchAll(/@([a-z0-9]{24,})\b/g)].map((m) => m[1]!)));
   const validMentions = mentionedIds.length
     ? await prisma.user.findMany({
-        where: { id: { in: mentionedIds } },
+        // Exclude the synthetic Bitrix bot so a crafted @<botId> can't persist a
+        // MessageMention pointing at a non-person.
+        where: { id: { in: mentionedIds }, NOT: { email: BITRIX_BOT_EMAIL } },
         select: { id: true },
       })
     : [];
@@ -1096,7 +1099,9 @@ export async function searchUsersForMention(
 ) {
   await requireAuth();
   const trimmed = q.trim();
-  const where: Record<string, unknown> = {};
+  // Never offer the synthetic Bitrix bot as a mention target — it's an inert
+  // system author, not a person.
+  const where: Record<string, unknown> = { NOT: { email: BITRIX_BOT_EMAIL } };
   if (!opts.includeInactive) {
     where.isActive = true;
   }

@@ -1,6 +1,7 @@
 import type { PrismaClient } from '@giper/db';
 import { Bitrix24Client } from './client';
 import { convertBitrixMarkup } from './mappers';
+import { getBitrixBotUserId } from './botUser';
 
 /**
  * Mirror Bitrix24 task chat (IM messenger conversation) into local
@@ -104,12 +105,9 @@ export async function syncTaskChat(
       .filter((u): u is typeof u & { bitrixUserId: string } => !!u.bitrixUserId)
       .map((u) => [u.bitrixUserId, u.id]),
   );
-  const adminFallback = await prisma.user.findFirst({
-    where: { role: 'ADMIN', isActive: true },
-    orderBy: { createdAt: 'asc' },
-    select: { id: true },
-  });
-  if (!adminFallback) return;
+  // Fallback for unmatched / system (author_id '0' = b24 robot) senders: the
+  // inert "Bitrix24" bot, not a real admin.
+  const botUserId = await getBitrixBotUserId(prisma);
 
   // The task can be deleted (or recreated with a new id) by a concurrent
   // ONTASKDELETE webhook or bulk sync while we paged through the chat above
@@ -142,7 +140,7 @@ export async function syncTaskChat(
       const authorId =
         bxAuthorId !== '0' && userByBxId.has(bxAuthorId)
           ? userByBxId.get(bxAuthorId)!
-          : adminFallback.id;
+          : botUserId;
       const body = convertBitrixMarkup(m.text ?? '').slice(0, 50_000);
       if (!body) continue;
       const createdAt = m.date ? new Date(m.date) : new Date();
@@ -154,13 +152,15 @@ export async function syncTaskChat(
             externalId,
           },
         },
-        select: { id: true, body: true },
+        select: { id: true, body: true, authorId: true },
       });
       if (existing) {
-        if (existing.body !== body) {
+        // Re-resolve authorId so a re-sync repairs rows previously
+        // mis-attributed to the admin fallback.
+        if (existing.body !== body || existing.authorId !== authorId) {
           await prisma.comment.update({
             where: { id: existing.id },
-            data: { body },
+            data: { body, authorId },
           });
           stats.updated++;
         }

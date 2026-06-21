@@ -1,5 +1,6 @@
 import type { PrismaClient } from '@giper/db';
 import { Bitrix24Client } from './client';
+import { getBitrixBotUserId } from './botUser';
 
 /**
  * Sync the task's "system events" (history) from Bitrix24 into local
@@ -84,12 +85,10 @@ export async function syncTaskHistory(
       .map((u) => [u.bitrixUserId, u.name]),
   );
 
-  const adminFallback = await prisma.user.findFirst({
-    where: { role: 'ADMIN', isActive: true },
-    orderBy: { createdAt: 'asc' },
-    select: { id: true },
-  });
-  if (!adminFallback) return;
+  // Fallback author for history events whose Bitrix author doesn't map to a
+  // local user (b24 robot / business processes / unsynced users): the inert
+  // "Bitrix24" bot, NOT a real admin — so system events aren't pinned on a person.
+  const botUserId = await getBitrixBotUserId(prisma);
 
   for (const it of items) {
     stats.totalSeen++;
@@ -101,7 +100,7 @@ export async function syncTaskHistory(
             select: { id: true },
           })
         : null;
-      const authorId = localAuthor?.id ?? adminFallback.id;
+      const authorId = localAuthor?.id ?? botUserId;
 
       const body = renderHistoryEvent(it, nameByBxId);
       if (!body) continue; // event we can't usefully render → skip
@@ -116,13 +115,15 @@ export async function syncTaskHistory(
             externalId,
           },
         },
-        select: { id: true, body: true },
+        select: { id: true, body: true, authorId: true },
       });
       if (existing) {
-        if (existing.body !== body) {
+        // Re-resolve authorId too so a re-sync repairs rows previously
+        // mis-attributed to the admin fallback (now → bot / real user).
+        if (existing.body !== body || existing.authorId !== authorId) {
           await prisma.comment.update({
             where: { id: existing.id },
-            data: { body },
+            data: { body, authorId },
           });
           stats.updated++;
         }
