@@ -1,6 +1,7 @@
 import type { PrismaClient } from '@giper/db';
 import { Bitrix24Client } from './client';
 import { convertBitrixMarkup } from './mappers';
+import { getBitrixBotUserId } from './botUser';
 
 export type SyncCommentsResult = {
   /** Comments seen across all tasks during this run. */
@@ -99,28 +100,21 @@ export async function syncTaskComments(
     }
   }
 
-  // Resolve a fallback author once per task.
-  const adminFallback = await prisma.user.findFirst({
-    where: { role: 'ADMIN', isActive: true },
-    orderBy: { createdAt: 'asc' },
-    select: { id: true },
-  });
-  if (!adminFallback) {
-    // No admin to attribute orphan comments to — bail with an error
-    // counter so the upstream caller can surface it. We don't throw
-    // because the rest of the task sync should still succeed.
-    if (comments.length > 0) stats.errors++;
-    return;
-  }
+  // Fallback author for comments whose Bitrix author doesn't map to a local
+  // user (b24 robot / business processes / unsynced users): an inert "Bitrix24"
+  // bot, NOT a real admin — otherwise robot comments get pinned on a person.
+  const botUserId = await getBitrixBotUserId(prisma);
 
   for (const c of comments) {
     stats.totalSeen++;
     try {
-      const author = await prisma.user.findFirst({
-        where: { bitrixUserId: c.AUTHOR_ID },
-        select: { id: true },
-      });
-      const authorId = author?.id ?? adminFallback.id;
+      const author = c.AUTHOR_ID
+        ? await prisma.user.findFirst({
+            where: { bitrixUserId: c.AUTHOR_ID },
+            select: { id: true },
+          })
+        : null;
+      const authorId = author?.id ?? botUserId;
       const body = convertBitrixMarkup(c.POST_MESSAGE ?? '').slice(0, 50_000);
       const createdAt = c.POST_DATE ? new Date(c.POST_DATE) : new Date();
 
@@ -131,16 +125,18 @@ export async function syncTaskComments(
             externalId: c.ID,
           },
         },
-        select: { id: true, body: true, taskId: true },
+        select: { id: true, body: true, taskId: true, authorId: true },
       });
 
       if (existing) {
-        // Edit detection: Bitrix allows comment edits. We mirror that
-        // by overwriting our row when the body differs.
-        if (existing.body !== body || existing.taskId !== task.id) {
+        // Edit detection: Bitrix allows comment edits. We mirror that by
+        // overwriting our row when the body differs. We also re-resolve the
+        // authorId so a re-sync repairs rows previously mis-attributed to the
+        // admin fallback (now → the Bitrix bot or a since-synced real user).
+        if (existing.body !== body || existing.taskId !== task.id || existing.authorId !== authorId) {
           await prisma.comment.update({
             where: { id: existing.id },
-            data: { body, taskId: task.id },
+            data: { body, taskId: task.id, authorId },
           });
           stats.updated++;
         }

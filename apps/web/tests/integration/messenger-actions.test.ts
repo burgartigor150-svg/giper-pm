@@ -41,12 +41,24 @@ import {
   leaveChannelAction,
   listPinnedMessagesAction,
   setPinnedAction,
+  searchUsersForMention,
 } from '@/actions/messenger';
+import { getBitrixBotUserId } from '@giper/integrations/bitrix24';
 import { makeUser } from './helpers/factories';
 
 beforeEach(() => {
   mockMe.id = '';
   mockMe.role = 'MEMBER';
+});
+
+describe('searchUsersForMention — excludes the Bitrix bot', () => {
+  it('never offers the synthetic Bitrix24 bot as a mention target', async () => {
+    const me = await makeUser();
+    mockMe.id = me.id;
+    const botId = await getBitrixBotUserId(prisma); // ensure the bot row exists
+    const hits = await searchUsersForMention('Bitrix', { includeInactive: true });
+    expect(hits.some((u) => u.id === botId)).toBe(false);
+  });
 });
 
 describe('createChannelAction — member picker', () => {
