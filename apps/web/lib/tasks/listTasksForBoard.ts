@@ -2,6 +2,11 @@ import { prisma, type Prisma, type TaskStatus } from '@giper/db';
 import { DomainError } from '../errors';
 import { canViewProject, type SessionUser } from '../permissions';
 import { getTasksSpentMinutes } from '../time/getTaskSpent';
+import {
+  buildTaskFilterClauses,
+  type TaskTypeFilter,
+  type DueWithinFilter,
+} from './buildTaskFilterClauses';
 
 export type BoardFilter = {
   assigneeId?: string;
@@ -10,6 +15,12 @@ export type BoardFilter = {
   onlyMine?: boolean;
   /** Tag IDs (from Tag model) — task must have ALL of them assigned. */
   tagIds?: string[];
+  /** Task type (TASK/BUG/FEATURE/EPIC/CHORE). */
+  type?: TaskTypeFilter;
+  /** Relative due-date window — still-open cards due in the window. */
+  dueWithin?: DueWithinFilter;
+  /** When 'me', restrict to cards where the viewer is the reviewer. */
+  reviewer?: 'me';
   /**
    * Sprint scope. A sprint id restricts to that sprint's cards; `null`
    * restricts to the backlog (no sprint); undefined = no sprint filter.
@@ -145,27 +156,22 @@ export async function listTasksForBoard(
   if (filter.sprintId !== undefined) where.sprintId = filter.sprintId;
 
   if (filter.priority) where.priority = filter.priority;
-  // `q` and tags go into AND so they NEVER clobber the per-stake `where.OR`
-  // access-control clause set above. Previously `q` REASSIGNED `where.OR`,
-  // dropping the stake scope entirely → with search on and "only mine" off,
-  // the board leaked every matching task in the project, including
-  // Bitrix-mirror tasks the viewer isn't a stakeholder on (which the
-  // per-stake clause exists specifically to hide).
-  const and: Prisma.TaskWhereInput[] = [];
-  if (filter.q) {
-    and.push({
-      OR: [
-        { title: { contains: filter.q, mode: 'insensitive' } },
-        { description: { contains: filter.q, mode: 'insensitive' } },
-      ],
-    });
-  }
-  if (filter.tagIds && filter.tagIds.length > 0) {
-    // AND-semantics: task must carry every selected tag.
-    for (const tagId of filter.tagIds) {
-      and.push({ taskTags: { some: { tagId } } });
-    }
-  }
+  // q / tags / type / dueWithin / reviewer all go into AND so they NEVER
+  // clobber the per-stake `where.OR` access-control clause set above. (A past
+  // bug REASSIGNED `where.OR` on `q`, dropping the stake scope and leaking
+  // Bitrix-mirror tasks the viewer isn't a stakeholder on.) The shared builder
+  // is the single place that produces these narrowing clauses — board buckets
+  // by internalStatus, so the overdue guard reads that track.
+  const and = buildTaskFilterClauses(
+    {
+      q: filter.q,
+      tagIds: filter.tagIds,
+      type: filter.type,
+      dueWithin: filter.dueWithin,
+      reviewerMe: filter.reviewer === 'me',
+    },
+    { userId: user.id, statusField: 'internalStatus' },
+  );
   if (and.length > 0) where.AND = and;
 
   const rawTasks = await prisma.task.findMany({

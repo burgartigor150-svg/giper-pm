@@ -16,6 +16,8 @@ const TABLES_IN_DELETE_ORDER = [
   'UserCustomRole',
   'ProjectMemberCustomRole',
   'CustomRole',
+  // Saved filter presets (FK → User + Project).
+  'SavedFilter',
   // CRM (Lead → Contact/Deal SetNull; Deal → Pipeline/Stage/Contact) + Sprint + Space.
   'Lead',
   'Deal',
