@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
+import { CornerDownRight, ListTree } from 'lucide-react';
 import { Avatar } from '@giper/ui/components/Avatar';
 import { Button } from '@giper/ui/components/Button';
 import { Card } from '@giper/ui/components/Card';
@@ -228,12 +229,29 @@ export default async function ProjectTasksListPage({
                     </Link>
                   </td>
                   <td className="px-4 py-3">
-                    <Link
-                      href={`/projects/${project.key}/tasks/${task.number}`}
-                      className="rounded hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    >
-                      {task.title}
-                    </Link>
+                    <span className="inline-flex items-center gap-1.5">
+                      {task.parentId ? (
+                        <CornerDownRight
+                          className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
+                          aria-label="Подзадача"
+                        />
+                      ) : null}
+                      <Link
+                        href={`/projects/${project.key}/tasks/${task.number}`}
+                        className="rounded hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        {task.title}
+                      </Link>
+                      {task._count.subtasks > 0 ? (
+                        <span
+                          className="inline-flex items-center gap-0.5 rounded bg-muted px-1 py-0.5 text-xs tabular-nums text-muted-foreground"
+                          title={`Подзадач: ${task._count.subtasks}`}
+                        >
+                          <ListTree className="h-3 w-3" />
+                          {task._count.subtasks}
+                        </span>
+                      ) : null}
+                    </span>
                   </td>
                   <td className="px-4 py-3">
                     <TaskStatusBadge status={task.status} />

@@ -78,6 +78,8 @@ export type DomainTaskFromBitrix = {
   bitrixGroupId: string | null;
   bitrixResponsibleId: string | null;
   bitrixCreatedById: string | null;
+  /** Upstream PARENT_ID (Bitrix task id), normalized; null when standalone. */
+  bitrixParentId: string | null;
   dueDate: Date | null;
   startedAt: Date | null;
   completedAt: Date | null;
@@ -99,6 +101,7 @@ export function mapBitrixTask(t: BxTask): DomainTaskFromBitrix {
     bitrixGroupId: t.groupId && t.groupId !== '0' ? t.groupId : null,
     bitrixResponsibleId: t.responsibleId ?? null,
     bitrixCreatedById: t.createdBy ?? null,
+    bitrixParentId: normalizeBitrixId(t.parentId),
     dueDate: parseDate(t.deadline),
     startedAt: parseDate(t.startDatePlan),
     completedAt: status === 'DONE' ? parseDate(t.closedDate) : null,

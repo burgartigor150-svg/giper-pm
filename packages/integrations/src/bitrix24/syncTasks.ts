@@ -280,6 +280,7 @@ async function upsertOne(
       bitrixCreatedById: true,
       bitrixResponsibleId: true,
       bitrixChatId: true,
+      bitrixParentId: true,
     },
   });
 
@@ -302,6 +303,7 @@ async function upsertOne(
       (found.bitrixCreatedById ?? null) !== (mapped.bitrixCreatedById ?? null) ||
       (found.bitrixResponsibleId ?? null) !== (mapped.bitrixResponsibleId ?? null) ||
       (found.bitrixChatId ?? null) !== (mapped.bitrixChatId ?? null) ||
+      (found.bitrixParentId ?? null) !== (mapped.bitrixParentId ?? null) ||
       creatorChanged;
     if (dirty) {
       await prisma.task.update({
@@ -319,6 +321,7 @@ async function upsertOne(
           bitrixCreatedById: mapped.bitrixCreatedById ?? null,
           bitrixResponsibleId: mapped.bitrixResponsibleId ?? null,
           bitrixChatId: mapped.bitrixChatId ?? null,
+          bitrixParentId: mapped.bitrixParentId ?? null,
           ...(creatorChanged ? { creatorId: upstreamCreatorId! } : {}),
         },
       });
@@ -353,12 +356,39 @@ async function upsertOne(
       bitrixCreatedById: mapped.bitrixCreatedById ?? null,
       bitrixResponsibleId: mapped.bitrixResponsibleId ?? null,
       bitrixChatId: mapped.bitrixChatId ?? null,
+      bitrixParentId: mapped.bitrixParentId ?? null,
     },
     select: { id: true },
   });
   await syncBitrixTagsToProject(prisma, projectId, created.id, mapped.tags);
   stats.created++;
   return created.id;
+}
+
+/**
+ * Resolve the local `parentId` self-relation from the stored `bitrixParentId`.
+ *
+ * A child task can be synced before its parent exists locally (Bitrix returns
+ * tasks in id order, parents aren't guaranteed first), so the link can't be set
+ * inline during upsert. This second pass runs after the task batch: it links
+ * every Bitrix task whose `bitrixParentId` now matches another Bitrix task's
+ * `externalId`. Idempotent (only touches rows whose parentId differs) and
+ * doubles as the one-shot backfill for tasks synced before bitrixParentId
+ * existed. Pure SQL, no Bitrix API calls. Returns the number of rows (re)linked.
+ */
+export async function relinkBitrixParents(prisma: PrismaClient): Promise<number> {
+  const linked = await prisma.$executeRaw`
+    UPDATE "Task" AS child
+    SET "parentId" = parent.id
+    FROM "Task" AS parent
+    WHERE child."externalSource" = 'bitrix24'
+      AND child."bitrixParentId" IS NOT NULL
+      AND parent."externalSource" = 'bitrix24'
+      AND parent."externalId" = child."bitrixParentId"
+      AND parent."id" <> child."id"
+      AND child."parentId" IS DISTINCT FROM parent."id"
+  `;
+  return linked;
 }
 
 /**

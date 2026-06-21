@@ -1280,6 +1280,12 @@ model Task {
   bitrixCreatedById   String?
   bitrixResponsibleId String?
 
+  // Upstream Bitrix24 PARENT_ID, preserved verbatim. The local `parentId`
+  // self-relation is resolved from this in a second pass (relinkBitrixParents)
+  // because a child can sync before its parent exists locally. Kept so the
+  // link can always be (re)derived without re-fetching from Bitrix.
+  bitrixParentId      String?
+
   // For Bitrix24 tasks whose discussion lives in the IM messenger
   // (modern "collab" mode and any task migrated to the new chat-based
   // discussion model). When set, comment sync uses
@@ -1356,6 +1362,8 @@ model Task {
   @@index([componentId])
   @@index([dueDate])
   @@index([columnId, swimlaneId])
+  @@index([parentId])
+  @@index([externalSource, bitrixParentId])
 }
 
 /// Configurable kanban column for a project board. Maps to the

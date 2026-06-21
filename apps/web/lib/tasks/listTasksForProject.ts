@@ -104,6 +104,8 @@ export async function listTasksForProject(
         dueDate: true,
         tags: true,
         updatedAt: true,
+        parentId: true,
+        _count: { select: { subtasks: true } },
         assignee: { select: { id: true, name: true, image: true } },
       },
     }),

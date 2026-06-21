@@ -8,7 +8,7 @@ export { enrichUserFromBitrix } from './enrichUser';
 export type { EnrichResult } from './enrichUser';
 export { syncProjects, syncProjectBitrixMembers } from './syncProjects';
 export type { SyncProjectsResult, SyncProjectMembersResult } from './syncProjects';
-export { syncTasks } from './syncTasks';
+export { syncTasks, relinkBitrixParents } from './syncTasks';
 export type { SyncTasksResult } from './syncTasks';
 export { syncTaskAttachments, bitrix24DownloadUrl } from './syncFiles';
 export type { SyncFilesResult } from './syncFiles';
