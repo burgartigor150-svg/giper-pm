@@ -26,6 +26,7 @@ const DUE_OPTIONS = [
 ] as const;
 
 type TagOption = { id: string; name: string; color: string };
+type VersionOption = { id: string; name: string };
 
 type Props = {
   status: string | undefined;
@@ -35,6 +36,8 @@ type Props = {
   type?: string | undefined;
   dueWithin?: string | undefined;
   reviewer?: string | undefined;
+  versionId?: string | undefined;
+  versions?: VersionOption[];
   members: UserSearchHit[];
   availableTags?: TagOption[];
   activeTagIds?: string[];
@@ -63,6 +66,8 @@ export function TaskFilters({
   type,
   dueWithin,
   reviewer,
+  versionId,
+  versions = [],
   members,
   availableTags = [],
   activeTagIds = [],
@@ -259,6 +264,32 @@ export function TaskFilters({
             ))}
           </select>
         </div>
+
+        {versions.length > 0 ? (
+          <div className="flex flex-col gap-1">
+            <label htmlFor="task-filter-version" className="text-xs font-medium text-muted-foreground">
+              Версия
+            </label>
+            <select
+              id="task-filter-version"
+              value={versionId ?? ''}
+              onChange={(e) =>
+                pushParams((sp) => {
+                  if (e.target.value) sp.set('versionId', e.target.value);
+                  else sp.delete('versionId');
+                })
+              }
+              className={selectClass}
+            >
+              <option value="">{tList('all')}</option>
+              {versions.map((v) => (
+                <option key={v.id} value={v.id}>
+                  {v.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : null}
 
         <div className="flex items-end">
           <label className="flex h-10 items-center gap-2 text-sm text-muted-foreground">

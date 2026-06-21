@@ -24,6 +24,7 @@ const DUE_OPTIONS = [
 
 type Member = { id: string; name: string };
 type TagOption = { id: string; name: string; color: string };
+type VersionOption = { id: string; name: string };
 
 type Props = {
   members: Member[];
@@ -34,6 +35,8 @@ type Props = {
   type?: string | undefined;
   dueWithin?: string | undefined;
   reviewer?: string | undefined;
+  versionId?: string | undefined;
+  versions?: VersionOption[];
   availableTags?: TagOption[];
   activeTagIds?: string[];
 };
@@ -47,6 +50,8 @@ export function KanbanFilters({
   type,
   dueWithin,
   reviewer,
+  versionId,
+  versions = [],
   availableTags = [],
   activeTagIds = [],
 }: Props) {
@@ -184,6 +189,29 @@ export function KanbanFilters({
         />
         {tCommon('onlyMine')}
       </label>
+
+      {versions.length > 0 ? (
+        <label className="flex items-center gap-1 text-sm text-muted-foreground">
+          <span>Версия:</span>
+          <select
+            value={versionId ?? ''}
+            onChange={(e) =>
+              pushParams((sp) => {
+                if (e.target.value) sp.set('versionId', e.target.value);
+                else sp.delete('versionId');
+              })
+            }
+            className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+          >
+            <option value="">{tList('all')}</option>
+            {versions.map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
 
       <label className="flex items-center gap-2 text-sm text-muted-foreground">
         <input

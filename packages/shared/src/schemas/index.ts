@@ -3,3 +3,4 @@ export * from './user';
 export * from './task';
 export * from './time';
 export * from './savedFilter';
+export * from './version';
