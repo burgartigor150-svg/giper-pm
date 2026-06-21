@@ -1,8 +1,9 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { prisma, type Position } from '@giper/db';
+import { prisma, type Position, type TaskStatus } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
+import { isTransitionAllowed } from '@/lib/workflow/isTransitionAllowed';
 import {
   createNotification,
   fanoutToTaskAudience,
@@ -181,6 +182,7 @@ export async function setInternalStatusAction(
       number: true,
       title: true,
       projectId: true,
+      internalStatus: true,
       creatorId: true,
       assigneeId: true,
       externalSource: true,
@@ -203,6 +205,14 @@ export async function setInternalStatusAction(
     return {
       ok: false,
       error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' },
+    };
+  }
+  // Configurable workflow: enforce the project's transition allowlist (inert when
+  // the project has defined no rules). The team board is the workflow track.
+  if (!(await isTransitionAllowed(task.projectId, task.internalStatus, rawStatus as TaskStatus))) {
+    return {
+      ok: false,
+      error: { code: 'TRANSITION_NOT_ALLOWED', message: 'Переход запрещён правилами рабочего процесса проекта' },
     };
   }
   await prisma.task.update({

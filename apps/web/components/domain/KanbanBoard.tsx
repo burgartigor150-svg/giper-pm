@@ -214,11 +214,15 @@ export function KanbanBoard({
         const res = moved.externalSource
           ? await setInternalStatusAction(taskId, projectKey, moved.number, newStatus)
           : await changeStatusAction(taskId, projectKey, moved.number, newStatus);
-        // Belt and braces: keep internalStatus in sync for legacy tasks too.
-        if (res.ok && !moved.externalSource) {
-          await setInternalStatusAction(taskId, projectKey, moved.number, newStatus);
-        }
         ok = res.ok;
+        // Native task: keep internalStatus (the board track) in sync with the
+        // mirror status. Honor THIS result too — both writes are workflow-gated,
+        // so a transition the allowlist forbids rolls the move back instead of
+        // leaving status and internalStatus diverged.
+        if (ok && !moved.externalSource) {
+          const mirror = await setInternalStatusAction(taskId, projectKey, moved.number, newStatus);
+          ok = mirror.ok;
+        }
       }
       if (ok && !sameLane) {
         const res = await setTaskSwimlaneAction(taskId, newSwimlaneId);

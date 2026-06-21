@@ -4,6 +4,7 @@ export type DomainErrorCode =
   | 'NOT_FOUND'
   | 'VALIDATION'
   | 'CONFLICT'
+  | 'TRANSITION_NOT_ALLOWED'
   | 'INTERNAL';
 
 export class DomainError extends Error {
