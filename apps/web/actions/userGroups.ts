@@ -134,6 +134,7 @@ export async function addGroupToProjectAction(
     select: { key: true, ownerId: true, members: { select: { userId: true, role: true } } },
   });
   if (!project) return { ok: false, error: { code: 'NOT_FOUND', message: 'Проект не найден' } };
+  // Adding a group adds project MEMBERS → meta-management → ORG caps only.
   if (!canEditProject({ id: me.id, role: me.role }, project, await getEffectiveCaps({ id: me.id, role: me.role }))) {
     return { ok: false, error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' } };
   }

@@ -3,6 +3,11 @@ import type { AddMemberInput } from '@giper/shared';
 import { DomainError } from '../errors';
 import { isUniqueConstraintError } from '../prisma-errors';
 import { canEditProject, type SessionUser } from '../permissions';
+// Member/role management is META — authorize on ORG caps (owner / LEAD / org
+// project.edit) ONLY, never a per-project capability. Otherwise a member granted
+// a PROJECT role with project.edit could self-promote to LEAD via
+// updateProjectMemberRole and persist past revocation. So getEffectiveCaps, NOT
+// getEffectiveCapsForProject, here.
 import { getEffectiveCaps } from '../capabilities';
 
 export async function addProjectMember(

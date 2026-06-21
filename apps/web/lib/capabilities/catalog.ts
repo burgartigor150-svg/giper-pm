@@ -76,6 +76,29 @@ export function isCapabilityKey(k: string): k is CapabilityKey {
 }
 
 /**
+ * The ONLY capabilities a PROJECT-scope custom role may carry — the project/task
+ * org-leg keys. A per-project role can grant these WITHIN one project; it can
+ * never grant org surfaces (settings/users/crm/reports/…) or widen visibility
+ * (there is no project.viewAll / *.viewAny here). `satisfies` keeps this subset
+ * typo-proof against the catalog.
+ */
+export const PROJECT_CAP_KEYS = [
+  'project.edit',
+  'task.staff',
+  'task.editAny',
+  'task.delete',
+  'task.review.close',
+  'task.checklist.toggle',
+  'task.attachments.manageAny',
+] as const satisfies readonly CapabilityKey[];
+
+export type ProjectCapKey = (typeof PROJECT_CAP_KEYS)[number];
+export const PROJECT_CAP_SET: ReadonlySet<CapabilityKey> = new Set(PROJECT_CAP_KEYS);
+export function isProjectCapKey(k: string): k is ProjectCapKey {
+  return PROJECT_CAP_SET.has(k as CapabilityKey);
+}
+
+/**
  * Capabilities that are dangerous to grant to a non-privileged base role —
  * surfaced with a warning in the admin role builder (slice 3). Not a security
  * boundary by itself (the floor clamp + per-template rules are); a UX guardrail.

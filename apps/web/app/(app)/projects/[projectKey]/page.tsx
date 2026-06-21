@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@giper/ui/components/C
 import { requireAuth } from '@/lib/auth';
 import { getProject } from '@/lib/projects';
 import { canEditProject, canCreateTask, canManageAssignments } from '@/lib/permissions';
-import { getEffectiveCaps } from '@/lib/capabilities';
+import { getEffectiveCapsForProject } from '@/lib/capabilities';
 import { DomainError } from '@/lib/errors';
 import { getT } from '@/lib/i18n';
 import { renderRichText } from '@/lib/text/renderRichText';
@@ -40,7 +40,7 @@ export default async function ProjectOverviewPage({
   const canEdit = canEditProject(
     { id: user.id, role: user.role },
     { ownerId: project.ownerId, members: project.members },
-    await getEffectiveCaps({ id: user.id, role: user.role }),
+    await getEffectiveCapsForProject({ id: user.id, role: user.role }, project.id),
   );
   const canTelegramHarvest = canManageAssignments(
     { id: user.id, role: user.role },

@@ -6,11 +6,12 @@ import { Button } from '@giper/ui/components/Button';
 import { Input } from '@giper/ui/components/Input';
 // Leaf imports only — NOT the '@/lib/capabilities' barrel (which re-exports the
 // prisma/react resolver and would pull server code into this client bundle).
-import { CAPABILITY_GROUPS, HIGH_TRUST_CAPS, type CapabilityKey } from '@/lib/capabilities/catalog';
+import { CAPABILITY_GROUPS, HIGH_TRUST_CAPS, isProjectCapKey, type CapabilityKey } from '@/lib/capabilities/catalog';
 import { BASELINE_CAPS } from '@/lib/capabilities/baseline';
 import { createCustomRoleAction, updateCustomRoleAction } from '@/actions/customRoles';
 
 type Role = 'ADMIN' | 'PM' | 'MEMBER' | 'VIEWER';
+type Scope = 'ORG' | 'PROJECT';
 const BASE_ROLES: Role[] = ['VIEWER', 'MEMBER', 'PM', 'ADMIN'];
 
 type Props = {
@@ -21,6 +22,7 @@ type Props = {
     description: string | null;
     baseRole: Role;
     capabilities: CapabilityKey[];
+    scope?: Scope;
   };
 };
 
@@ -36,8 +38,18 @@ export function RoleBuilder({ mode, initial }: Props) {
   const [name, setName] = useState(initial?.name ?? '');
   const [description, setDescription] = useState(initial?.description ?? '');
   const [baseRole, setBaseRole] = useState<Role>(initial?.baseRole ?? 'MEMBER');
+  const [scope, setScope] = useState<Scope>(initial?.scope ?? 'ORG');
   const [caps, setCaps] = useState<Set<CapabilityKey>>(new Set(initial?.capabilities ?? []));
   const [error, setError] = useState<string | null>(null);
+
+  // PROJECT-scope roles can only carry the project/task subset — filter the
+  // builder to those groups/keys (the server also enforces this).
+  const groups =
+    scope === 'PROJECT'
+      ? CAPABILITY_GROUPS.map((g) => ({ ...g, capabilities: g.capabilities.filter((c) => isProjectCapKey(c.key)) })).filter(
+          (g) => g.capabilities.length > 0,
+        )
+      : CAPABILITY_GROUPS;
 
   function toggle(key: CapabilityKey) {
     setCaps((prev) => {
@@ -67,7 +79,7 @@ export function RoleBuilder({ mode, initial }: Props) {
     startTransition(async () => {
       const res =
         mode === 'create'
-          ? await createCustomRoleAction(payload)
+          ? await createCustomRoleAction({ ...payload, scope }) // scope is immutable after create
           : await updateCustomRoleAction(initial!.id, payload);
       if (!res.ok) {
         setError(res.error.message);
@@ -80,6 +92,25 @@ export function RoleBuilder({ mode, initial }: Props) {
 
   return (
     <div className="space-y-5">
+      <div className="flex flex-col gap-1">
+        <label className="text-sm font-medium" htmlFor="role-scope">Уровень роли</label>
+        {mode === 'create' ? (
+          <select
+            id="role-scope"
+            value={scope}
+            onChange={(e) => setScope(e.target.value as Scope)}
+            className="h-10 rounded-md border border-input bg-background px-2 text-sm sm:w-72"
+          >
+            <option value="ORG">Организация (доступ ко всему по орг-правам)</option>
+            <option value="PROJECT">Проект (права только внутри одного проекта)</option>
+          </select>
+        ) : (
+          <div className="text-sm text-muted-foreground">
+            {scope === 'PROJECT' ? 'Проектная роль (назначается внутри проекта)' : 'Организационная роль'}
+          </div>
+        )}
+      </div>
+
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="flex flex-col gap-1">
           <label className="text-sm font-medium" htmlFor="role-name">Название роли</label>
@@ -97,9 +128,11 @@ export function RoleBuilder({ mode, initial }: Props) {
             >
               {BASE_ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
             </select>
-            <Button type="button" variant="outline" size="sm" onClick={prefillFromBase}>
-              Заполнить по шаблону
-            </Button>
+            {scope === 'ORG' ? (
+              <Button type="button" variant="outline" size="sm" onClick={prefillFromBase}>
+                Заполнить по шаблону
+              </Button>
+            ) : null}
           </div>
         </div>
       </div>
@@ -111,13 +144,17 @@ export function RoleBuilder({ mode, initial }: Props) {
       </div>
 
       <p className="text-xs text-muted-foreground">
-        Роль = точный набор прав. Отметьте то, что разрешено — снятая галочка с права
-        базовой роли действительно его <b>отнимает</b>. Права уровня проекта (видеть
-        свой проект/задачу) этой ролью не управляются.
+        {scope === 'PROJECT' ? (
+          <>Проектная роль <b>добавляет</b> отмеченные права пользователю <b>только внутри того проекта</b>,
+            где она назначена. Видимость проекта/задач не расширяется — пользователь должен уже быть участником.</>
+        ) : (
+          <>Роль = точный набор прав. Отметьте то, что разрешено — снятая галочка с права базовой роли
+            действительно его <b>отнимает</b>. Права уровня проекта (видеть свой проект/задачу) этой ролью не управляются.</>
+        )}
       </p>
 
       <div className="space-y-4">
-        {CAPABILITY_GROUPS.map((group) => (
+        {groups.map((group) => (
           <div key={group.area} className="rounded-md border border-border p-3">
             <div className="mb-2 text-sm font-semibold">{group.area}</div>
             <div className="grid gap-1.5 sm:grid-cols-2">

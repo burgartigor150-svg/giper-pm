@@ -47,6 +47,9 @@ export default async function CustomRolesPage() {
                   <span className="min-w-0">
                     <Link href={`/settings/roles/${r.id}`} className="font-medium hover:underline">{r.name}</Link>
                     {!r.isActive ? <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">выключена</span> : null}
+                    <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
+                      {r.scope === 'PROJECT' ? 'проект' : 'организация'}
+                    </span>
                     <span className="ml-2 text-xs text-muted-foreground">
                       база {r.baseRole} · {r.capabilities.length} прав · {r.assignedCount} польз.
                     </span>

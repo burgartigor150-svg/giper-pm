@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@giper/ui/components/C
 import { requireAuth } from '@/lib/auth';
 import { getProject } from '@/lib/projects';
 import { canEditProject } from '@/lib/permissions';
-import { getEffectiveCaps } from '@/lib/capabilities';
+import { getEffectiveCapsForProject } from '@/lib/capabilities';
 import { DomainError } from '@/lib/errors';
 import { getT } from '@/lib/i18n';
 import { EditProjectForm } from '@/components/domain/EditProjectForm';
@@ -29,6 +29,8 @@ import { getWebhooks } from '@/lib/webhooks/getWebhooks';
 import { ProjectSpaceSelect } from '@/components/domain/ProjectSpaceSelect';
 import { getSpaces } from '@/lib/spaces/getSpaces';
 import { PublishToBitrixButton } from '@/components/domain/PublishToBitrixButton';
+import { AssignProjectRoleControl } from '@/components/domain/roles/AssignProjectRoleControl';
+import { listProjectAssignableRoles, listProjectMemberAssignments } from '@/lib/customRoles';
 
 export default async function ProjectSettingsPage({
   params,
@@ -53,7 +55,7 @@ export default async function ProjectSettingsPage({
     !canEditProject(
       { id: user.id, role: user.role },
       { ownerId: project.ownerId, members: project.members },
-      await getEffectiveCaps({ id: user.id, role: user.role }),
+      await getEffectiveCapsForProject({ id: user.id, role: user.role }, project.id),
     )
   ) {
     notFound();
@@ -68,6 +70,10 @@ export default async function ProjectSettingsPage({
   const userGroups = await getUserGroups();
   const webhooks = await getWebhooks(project.id);
   const spaces = await getSpaces();
+  const [projectRoles, projectRoleAssignments] = await Promise.all([
+    listProjectAssignableRoles(),
+    listProjectMemberAssignments(project.id),
+  ]);
   const projectMirrored =
     project.externalSource === 'bitrix24' && !!project.externalId;
 
@@ -229,6 +235,25 @@ export default async function ProjectSettingsPage({
               />
             ))}
           </ul>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Проектные роли</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <AssignProjectRoleControl
+            projectId={project.id}
+            projectKey={project.key}
+            roles={projectRoles}
+            members={project.members.map((m) => ({
+              id: m.user.id,
+              name: m.user.name ?? m.user.id,
+              image: m.user.image ?? null,
+              currentRoleId: projectRoleAssignments.get(m.user.id) ?? null,
+            }))}
+          />
         </CardContent>
       </Card>
     </div>

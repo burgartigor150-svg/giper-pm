@@ -2,7 +2,7 @@ import { prisma } from '@giper/db';
 import type { UpdateProjectInput } from '@giper/shared';
 import { DomainError } from '../errors';
 import { canEditProject, type SessionUser } from '../permissions';
-import { getEffectiveCaps } from '../capabilities';
+import { getEffectiveCapsForProject } from '../capabilities';
 
 export async function updateProject(
   projectId: string,
@@ -18,7 +18,7 @@ export async function updateProject(
   });
   if (!project) throw new DomainError('NOT_FOUND', 404, 'Проект не найден');
 
-  if (!canEditProject(user, project, await getEffectiveCaps(user))) {
+  if (!canEditProject(user, project, await getEffectiveCapsForProject(user, projectId))) {
     throw new DomainError('INSUFFICIENT_PERMISSIONS', 403);
   }
 
