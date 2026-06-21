@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@giper/ui/components/C
 import { requireAuth } from '@/lib/auth';
 import { getBitrix24SyncStatus } from '@/lib/integrations/bitrix24';
 import { Bitrix24SyncButtons } from '@/components/domain/Bitrix24SyncButtons';
+import { BitrixAuthorBackfillButton } from '@/components/domain/BitrixAuthorBackfillButton';
 
 const STATUS_BADGE: Record<string, string> = {
   RUNNING: 'bg-blue-100 text-blue-700',
@@ -74,6 +75,17 @@ export default async function Bitrix24IntegrationPage() {
           </CardHeader>
           <CardContent>
             <Bitrix24SyncButtons />
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {status.configured ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Обслуживание</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <BitrixAuthorBackfillButton />
           </CardContent>
         </Card>
       ) : null}
