@@ -1,9 +1,10 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { prisma, type UserRole } from '@giper/db';
+import { prisma, type UserRole, type CustomRoleScope } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
-import { isCapabilityKey, type CapabilityKey } from '@/lib/capabilities';
+import { isCapabilityKey, isProjectCapKey, getEffectiveCapsForProject, type CapabilityKey } from '@/lib/capabilities';
+import { canEditProject } from '@/lib/permissions';
 
 type ActionResult<T = unknown> =
   | { ok: true; data?: T }
@@ -23,16 +24,24 @@ async function requireAdmin() {
 
 const VALID_ROLES: UserRole[] = ['ADMIN', 'PM', 'MEMBER', 'VIEWER'];
 
-/** Keep only real catalog keys — junk can never be stored, so it can never grant. */
-function sanitizeCaps(caps: string[]): CapabilityKey[] {
-  return Array.from(new Set(caps.filter(isCapabilityKey)));
+/** Keep only real catalog keys — junk can never be stored, so it can never grant.
+ *  PROJECT-scope roles are additionally narrowed to the project/task subset, so
+ *  an org-surface key can never be smuggled into a per-project role (write-layer
+ *  guard #1 of 3; the resolver + merge layers also contain it). */
+function sanitizeForScope(caps: string[], scope: CustomRoleScope): CapabilityKey[] {
+  const clean = caps.filter(isCapabilityKey);
+  const scoped = scope === 'PROJECT' ? clean.filter(isProjectCapKey) : clean;
+  return Array.from(new Set(scoped));
 }
+
+const VALID_SCOPES: CustomRoleScope[] = ['ORG', 'PROJECT'];
 
 export async function createCustomRoleAction(input: {
   name: string;
   description?: string;
   baseRole: UserRole;
   capabilities: string[];
+  scope?: CustomRoleScope;
 }): Promise<ActionResult<{ id: string }>> {
   const me = await requireAdmin();
   if (!me) return DENY;
@@ -41,14 +50,15 @@ export async function createCustomRoleAction(input: {
   if (!VALID_ROLES.includes(input.baseRole)) {
     return { ok: false, error: { code: 'VALIDATION', message: 'Некорректная базовая роль' } };
   }
+  const scope: CustomRoleScope = input.scope && VALID_SCOPES.includes(input.scope) ? input.scope : 'ORG';
   try {
     const role = await prisma.customRole.create({
       data: {
         name: name.slice(0, 80),
         description: input.description?.trim().slice(0, 500) || null,
-        scope: 'ORG',
+        scope,
         baseRole: input.baseRole,
-        capabilities: sanitizeCaps(input.capabilities),
+        capabilities: sanitizeForScope(input.capabilities, scope),
         createdById: me.id,
       },
       select: { id: true },
@@ -71,6 +81,10 @@ export async function updateCustomRoleAction(
   if (!VALID_ROLES.includes(input.baseRole)) {
     return { ok: false, error: { code: 'VALIDATION', message: 'Некорректная базовая роль' } };
   }
+  // Re-derive the cap subset from the role's STORED scope (scope is immutable
+  // after create) so a PROJECT role can't be widened to org keys via update.
+  const existing = await prisma.customRole.findFirst({ where: { id, deletedAt: null }, select: { scope: true } });
+  if (!existing) return { ok: false, error: { code: 'NOT_FOUND', message: 'Роль не найдена' } };
   try {
     const upd = await prisma.customRole.updateMany({
       where: { id, deletedAt: null },
@@ -78,7 +92,7 @@ export async function updateCustomRoleAction(
         name: name.slice(0, 80),
         description: input.description?.trim().slice(0, 500) || null,
         baseRole: input.baseRole,
-        capabilities: sanitizeCaps(input.capabilities),
+        capabilities: sanitizeForScope(input.capabilities, existing.scope),
       },
     });
     if (upd.count === 0) return { ok: false, error: { code: 'NOT_FOUND', message: 'Роль не найдена' } };
@@ -108,6 +122,10 @@ export async function deleteCustomRoleAction(id: string): Promise<ActionResult> 
   try {
     await prisma.$transaction([
       prisma.userCustomRole.deleteMany({ where: { customRoleId: id } }),
+      // PROJECT assignments are soft-delete-orphaned otherwise (FK cascades only
+      // on hard delete); loadProjectCaps's deletedAt check is the backstop, but
+      // clear them so the row count + re-add behavior stay clean.
+      prisma.projectMemberCustomRole.deleteMany({ where: { customRoleId: id } }),
       prisma.customRole.updateMany({ where: { id, deletedAt: null }, data: { deletedAt: new Date(), isActive: false } }),
     ]);
   } catch {
@@ -144,5 +162,58 @@ export async function assignCustomRoleAction(userId: string, roleId: string | nu
   }
   revalidatePath('/settings/roles');
   revalidatePath(`/settings/users/${userId}`);
+  return { ok: true };
+}
+
+/**
+ * Assign (or, with roleId=null, unassign) a PROJECT-scope custom role to a user
+ * WITHIN one project. Unlike the org assign, this is gated on canEditProject for
+ * the target project — so a project owner/LEAD (or org project.edit) can assign,
+ * matching "admin/project-lead". Hard floors: the assignee must already be a
+ * formal ProjectMember (or owner) of the project, and the role must be scope
+ * PROJECT. One role per (project, user).
+ */
+export async function assignProjectCustomRoleAction(
+  projectId: string,
+  userId: string,
+  roleId: string | null,
+  projectKey: string,
+): Promise<ActionResult> {
+  const me = await requireAuth();
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { ownerId: true, members: { select: { userId: true, role: true } } },
+  });
+  if (!project) return { ok: false, error: { code: 'NOT_FOUND', message: 'Проект не найден' } };
+  // Authz: anyone who can edit this project (owner / LEAD / org project.edit).
+  if (!canEditProject({ id: me.id, role: me.role }, project, await getEffectiveCapsForProject({ id: me.id, role: me.role }, projectId))) {
+    return DENY;
+  }
+  // Membership floor: a per-project role can only attach to someone who can
+  // already SEE the project via a formal membership (== canViewProject leg #2),
+  // never via the Bitrix/task-stake legs.
+  const isMember = project.ownerId === userId || project.members.some((m) => m.userId === userId);
+  if (!isMember) {
+    return { ok: false, error: { code: 'NOT_A_MEMBER', message: 'Сначала добавьте пользователя в проект' } };
+  }
+  try {
+    if (!roleId) {
+      await prisma.projectMemberCustomRole.deleteMany({ where: { projectId, userId } });
+    } else {
+      const role = await prisma.customRole.findFirst({
+        where: { id: roleId, deletedAt: null, scope: 'PROJECT' },
+        select: { id: true },
+      });
+      if (!role) return { ok: false, error: { code: 'NOT_FOUND', message: 'Роль не найдена' } };
+      await prisma.projectMemberCustomRole.upsert({
+        where: { projectId_userId: { projectId, userId } },
+        create: { projectId, userId, customRoleId: roleId },
+        update: { customRoleId: roleId, assignedAt: new Date() },
+      });
+    }
+  } catch {
+    return { ok: false, error: { code: 'INTERNAL', message: 'Не удалось назначить роль' } };
+  }
+  revalidatePath(`/projects/${projectKey}/settings`);
   return { ok: true };
 }

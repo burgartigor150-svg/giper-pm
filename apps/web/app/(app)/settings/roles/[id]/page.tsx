@@ -35,6 +35,7 @@ export default async function EditCustomRolePage({ params }: { params: Promise<{
               description: role.description,
               baseRole: role.baseRole,
               capabilities: role.capabilities,
+              scope: role.scope,
             }}
           />
         </CardContent>
