@@ -97,12 +97,13 @@ export function canManageAssignments(
  * A user sees a project iff ANY of these is true:
  *   - they are the project owner (covers freshly-created projects)
  *   - they are a ProjectMember (internal team-role assignment)
- *   - they are mirrored in the Bitrix sonet_group for this project
- *     (`isBitrixMemberForCurrentUser`) — primary signal for Bitrix-
- *     mirrored projects
  *   - they have a task stake in the project
- *     (`hasTaskForCurrentUser`) — backup signal that covers manually-
- *     created projects and Bitrix-sync lag
+ *     (`hasTaskForCurrentUser`) — creator/assignee/reviewer/co-assignee/watcher
+ *
+ * Bitrix sonet_group membership is intentionally NOT a leg: workgroups
+ * can be large and a synced member often holds no task there, so it
+ * buried the projects that actually matter. Mirrored membership without
+ * a real stake grants nothing. Kept in lockstep with listProjectsForUser.
  *
  * Admin-grade access (audit log, user management, global settings)
  * goes through `canSeeSettings` and friends — not here.
@@ -110,7 +111,6 @@ export function canManageAssignments(
 export function canViewProject(user: SessionUser, project: ProjectForPerm): boolean {
   if (project.ownerId === user.id) return true;
   if (project.members?.some((m) => m.userId === user.id)) return true;
-  if (project.isBitrixMemberForCurrentUser) return true;
   if (project.hasTaskForCurrentUser) return true;
   return false;
 }

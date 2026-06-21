@@ -7,10 +7,12 @@ export type ListFilter = {
   /**
    * Visibility scope:
    *
-   *   'mine' (default for everyone) — projects the caller is on:
-   *     Bitrix sonet_group member OR has a task stake (creator /
-   *     assignee / reviewer / co-assignee / watcher). Strict —
-   *     applied to ADMIN/PM too. Empty workgroups are hidden.
+   *   'mine' (default for everyone) — projects the caller has a real
+   *     stake in: they own it, are an explicit project member, or have
+   *     a task stake (creator / assignee / reviewer / co-assignee /
+   *     watcher). Strict — applied to ADMIN/PM too. Projects where the
+   *     user has no involvement (e.g. a Bitrix workgroup they were
+   *     synced into but hold no task) are hidden.
    *
    *   'all' (ADMIN/PM only) — the entire org. Used by the project
    *     directory / admin tooling, NOT the default list view.
@@ -36,28 +38,25 @@ export async function listProjectsForUser(user: SessionUser, filter: ListFilter 
   if (wantAll) {
     // No visibility filter — admin/PM browsing the whole org.
   } else {
-    // Visibility = (Bitrix sonet_group member) OR (task stake).
+    // Visibility = owner OR explicit project member OR task stake.
     //
-    // Bitrix-mirrored projects carry their membership in
-    // ProjectBitrixMember (synced from sonet_group.users.get). The
-    // moment Bitrix adds someone to the workgroup, we want them to
-    // see the project — even before any task is assigned. That's the
-    // "никто не должен видеть проект если не состоит в Битриксе"
-    // requirement.
+    // We DELIBERATELY do NOT show a project just because the user is a
+    // synced Bitrix workgroup member (ProjectBitrixMember). Bitrix
+    // workgroups can be large and a member often holds no task there —
+    // surfacing every such project buried the ones that actually matter.
+    // A user sees a project only where they have a real stake:
     //
-    // Task stake is the second leg: a user creator/assignee/
-    // reviewer/co-assignee/watcher on any task in the project also
-    // sees it. This covers manually-created (non-Bitrix) projects
-    // and edge cases where Bitrix membership sync is lagging behind
-    // a task assignment.
+    //   • owner            — they created/own it (never lose a fresh project)
+    //   • member           — explicitly added (ProjectMember; manual projects)
+    //   • task stake        — creator/assignee/reviewer/co-assignee/watcher
+    //                         on any task in the project
     //
     // Strict for everyone, including ADMIN/PM — no role bypass.
-    // Admin-grade access (audit log, settings) is gated separately.
+    // Admin-grade access (audit log, settings) is gated separately, and
+    // org-wide browse is the explicit `scope='all'` opt-in above.
     where.OR = [
-      // Bitrix-group membership: either directly resolved (userId)
-      // or matched against a Bitrix id we already know is theirs.
-      { bitrixMembers: { some: { userId: user.id } } },
-      // Task stake.
+      { ownerId: user.id },
+      { members: { some: { userId: user.id } } },
       {
         tasks: {
           some: {
