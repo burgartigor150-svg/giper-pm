@@ -369,13 +369,24 @@ describe('getProject', () => {
     expect((await getProject(p.key, sessionUser(bxUser))).id).toBe(p.id);
   });
 
-  it('Bitrix-mirror member (no task yet) opens the empty project page', async () => {
+  it('Bitrix-mirror member with no task CANNOT open the project (membership is not a leg)', async () => {
     const owner = await makeUser();
     const me = await makeUser({ role: 'MEMBER' });
     const p = await makeProject({ ownerId: owner.id, key: 'GBM' });
     await prisma.projectBitrixMember.create({
       data: { projectId: p.id, bitrixUserId: 'BX-501', userId: me.id },
     });
+    await expectDomain(getProject(p.key, sessionUser(me)), 'INSUFFICIENT_PERMISSIONS');
+  });
+
+  it('Bitrix-mirror member WITH a task stake can open the project', async () => {
+    const owner = await makeUser();
+    const me = await makeUser({ role: 'MEMBER' });
+    const p = await makeProject({ ownerId: owner.id, key: 'GBM2' });
+    await prisma.projectBitrixMember.create({
+      data: { projectId: p.id, bitrixUserId: 'BX-502', userId: me.id },
+    });
+    await makeTask({ projectId: p.id, creatorId: owner.id, assigneeId: me.id });
     expect((await getProject(p.key, sessionUser(me))).id).toBe(p.id);
   });
 
