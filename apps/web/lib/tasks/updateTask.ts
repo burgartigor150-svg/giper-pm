@@ -2,6 +2,7 @@ import { prisma } from '@giper/db';
 import type { UpdateTaskInput } from '@giper/shared';
 import { DomainError } from '../errors';
 import { canEditTask, canEditTaskInternal, type SessionUser } from '../permissions';
+import { getEffectiveCapsForProject } from '../capabilities';
 import { auditTask } from '../audit';
 
 /**
@@ -26,6 +27,7 @@ export async function updateTask(taskId: string, input: UpdateTaskInput, user: S
       estimateHours: true,
       dueDate: true,
       tags: true,
+      projectId: true,
       creatorId: true,
       assigneeId: true,
       externalSource: true,
@@ -36,12 +38,13 @@ export async function updateTask(taskId: string, input: UpdateTaskInput, user: S
   });
   if (!task) throw new DomainError('NOT_FOUND', 404);
 
+  const caps = await getEffectiveCapsForProject(user, task.projectId);
   const touchesMirrorBound = MIRROR_BOUND_FIELDS.some(
     (k) => input[k as keyof UpdateTaskInput] !== undefined,
   );
   const allowed = touchesMirrorBound
-    ? canEditTask(user, task)
-    : canEditTaskInternal(user, task);
+    ? canEditTask(user, task, caps)
+    : canEditTaskInternal(user, task, caps);
   if (!allowed) throw new DomainError('INSUFFICIENT_PERMISSIONS', 403);
 
   const before = {

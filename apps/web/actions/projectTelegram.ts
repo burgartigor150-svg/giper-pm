@@ -5,6 +5,7 @@ import { Redis } from 'ioredis';
 import { prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
 import { canManageAssignments } from '@/lib/permissions';
+import { getEffectiveCapsForProject } from '@/lib/capabilities';
 
 let _redis: Redis | null = null;
 function redis(): Redis {
@@ -46,7 +47,13 @@ export async function generateProjectTelegramLinkCodeAction(projectKey: string):
   const me = await requireAuth();
   const project = await loadProjectForPerm(projectKey);
   if (!project) throw new Error('Проект не найден');
-  if (!canManageAssignments({ id: me.id, role: me.role }, project)) {
+  if (
+    !canManageAssignments(
+      { id: me.id, role: me.role },
+      project,
+      await getEffectiveCapsForProject({ id: me.id, role: me.role }, project.id),
+    )
+  ) {
     throw new Error('Недостаточно прав (нужны права PM / лида проекта)');
   }
 
@@ -118,7 +125,13 @@ export async function unlinkProjectTelegramChatAction(
   const me = await requireAuth();
   const project = await loadProjectForPerm(projectKey);
   if (!project) return { ok: false, message: 'Проект не найден' };
-  if (!canManageAssignments({ id: me.id, role: me.role }, project)) {
+  if (
+    !canManageAssignments(
+      { id: me.id, role: me.role },
+      project,
+      await getEffectiveCapsForProject({ id: me.id, role: me.role }, project.id),
+    )
+  ) {
     return { ok: false, message: 'Недостаточно прав' };
   }
   const row = await prisma.projectTelegramChat.findFirst({

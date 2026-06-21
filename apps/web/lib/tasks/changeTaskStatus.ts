@@ -1,6 +1,7 @@
 import { prisma, type TaskStatus } from '@giper/db';
 import { DomainError } from '../errors';
 import { canEditTask, type SessionUser } from '../permissions';
+import { getEffectiveCapsForProject } from '../capabilities';
 import { auditTask } from '../audit';
 
 /**
@@ -23,6 +24,7 @@ export async function changeTaskStatus(
       status: true,
       startedAt: true,
       completedAt: true,
+      projectId: true,
       creatorId: true,
       assigneeId: true,
       reviewerId: true,
@@ -33,7 +35,8 @@ export async function changeTaskStatus(
     },
   });
   if (!task) throw new DomainError('NOT_FOUND', 404);
-  if (!canEditTask(user, task)) throw new DomainError('INSUFFICIENT_PERMISSIONS', 403);
+  const caps = await getEffectiveCapsForProject(user, task.projectId);
+  if (!canEditTask(user, task, caps)) throw new DomainError('INSUFFICIENT_PERMISSIONS', 403);
 
   if (task.status === newStatus) return task;
 

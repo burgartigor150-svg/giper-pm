@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
 import { canEditProject, canEditTaskInternal } from '@/lib/permissions';
+import { getEffectiveCapsForProject } from '@/lib/capabilities';
 
 type ActionResult<T = unknown> =
   | { ok: true; data?: T }
@@ -40,7 +41,13 @@ export async function createSprintAction(
     select: { id: true, ownerId: true, members: { select: { userId: true, role: true } } },
   });
   if (!project) return { ok: false, error: { code: 'NOT_FOUND', message: 'Проект не найден' } };
-  if (!canEditProject({ id: me.id, role: me.role }, project)) {
+  if (
+    !canEditProject(
+      { id: me.id, role: me.role },
+      project,
+      await getEffectiveCapsForProject({ id: me.id, role: me.role }, project.id),
+    )
+  ) {
     return { ok: false, error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' } };
   }
   if (input.name.trim().length < 2) {
@@ -69,7 +76,13 @@ export async function updateSprintAction(
   const me = await requireAuth();
   const s = await loadProjectForSprint(sprintId);
   if (!s) return { ok: false, error: { code: 'NOT_FOUND', message: 'Спринт не найден' } };
-  if (!canEditProject({ id: me.id, role: me.role }, s.project)) {
+  if (
+    !canEditProject(
+      { id: me.id, role: me.role },
+      s.project,
+      await getEffectiveCapsForProject({ id: me.id, role: me.role }, s.projectId),
+    )
+  ) {
     return { ok: false, error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' } };
   }
   if (input.name.trim().length < 2) {
@@ -97,7 +110,13 @@ export async function startSprintAction(sprintId: string): Promise<ActionResult>
   const me = await requireAuth();
   const s = await loadProjectForSprint(sprintId);
   if (!s) return { ok: false, error: { code: 'NOT_FOUND', message: 'Спринт не найден' } };
-  if (!canEditProject({ id: me.id, role: me.role }, s.project)) {
+  if (
+    !canEditProject(
+      { id: me.id, role: me.role },
+      s.project,
+      await getEffectiveCapsForProject({ id: me.id, role: me.role }, s.projectId),
+    )
+  ) {
     return { ok: false, error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' } };
   }
   await prisma.$transaction([
@@ -120,7 +139,13 @@ export async function closeSprintAction(sprintId: string): Promise<ActionResult<
   const me = await requireAuth();
   const s = await loadProjectForSprint(sprintId);
   if (!s) return { ok: false, error: { code: 'NOT_FOUND', message: 'Спринт не найден' } };
-  if (!canEditProject({ id: me.id, role: me.role }, s.project)) {
+  if (
+    !canEditProject(
+      { id: me.id, role: me.role },
+      s.project,
+      await getEffectiveCapsForProject({ id: me.id, role: me.role }, s.projectId),
+    )
+  ) {
     return { ok: false, error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' } };
   }
 
@@ -152,7 +177,13 @@ export async function deleteSprintAction(sprintId: string): Promise<ActionResult
   const me = await requireAuth();
   const s = await loadProjectForSprint(sprintId);
   if (!s) return { ok: true };
-  if (!canEditProject({ id: me.id, role: me.role }, s.project)) {
+  if (
+    !canEditProject(
+      { id: me.id, role: me.role },
+      s.project,
+      await getEffectiveCapsForProject({ id: me.id, role: me.role }, s.projectId),
+    )
+  ) {
     return { ok: false, error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' } };
   }
   try {
@@ -184,7 +215,13 @@ export async function assignTaskToSprintAction(
     },
   });
   if (!task) return { ok: false, error: { code: 'NOT_FOUND', message: 'Задача не найдена' } };
-  if (!canEditTaskInternal({ id: me.id, role: me.role }, task)) {
+  if (
+    !canEditTaskInternal(
+      { id: me.id, role: me.role },
+      task,
+      await getEffectiveCapsForProject({ id: me.id, role: me.role }, task.projectId),
+    )
+  ) {
     return { ok: false, error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' } };
   }
   if (sprintId) {

@@ -5,6 +5,7 @@ import { Redis } from 'ioredis';
 import { prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
 import { canManageAssignments } from '@/lib/permissions';
+import { getEffectiveCapsForProject } from '@/lib/capabilities';
 import { createTask } from '@/lib/tasks/createTask';
 import { expandRussianName } from '@giper/integrations';
 import type { ApplyOverrides } from '@/actions/aiHarvest';
@@ -71,7 +72,14 @@ async function loadMeetingForUser(meetingId: string, userId: string, role: strin
     role === 'ADMIN' ||
     meeting.createdById === userId ||
     (meeting.project &&
-      canManageAssignments({ id: userId, role: role as 'ADMIN' | 'PM' | 'MEMBER' | 'VIEWER' }, meeting.project));
+      canManageAssignments(
+        { id: userId, role: role as 'ADMIN' | 'PM' | 'MEMBER' | 'VIEWER' },
+        meeting.project,
+        await getEffectiveCapsForProject(
+          { id: userId, role: role as 'ADMIN' | 'PM' | 'MEMBER' | 'VIEWER' },
+          meeting.project.id,
+        ),
+      ));
   if (!allowed) return null;
   return meeting;
 }

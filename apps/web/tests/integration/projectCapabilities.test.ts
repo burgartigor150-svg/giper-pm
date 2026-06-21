@@ -33,7 +33,11 @@ import {
 import { canEditProject } from '@/lib/permissions';
 import { getProjectMemberAssignment } from '@/lib/customRoles';
 import { updateProjectMemberRole } from '@/lib/projects';
-import { makeUser, makeProject, addMember } from './helpers/factories';
+import { changeTaskStatus } from '@/lib/tasks/changeTaskStatus';
+import { updateTask } from '@/lib/tasks/updateTask';
+import { deleteTask } from '@/lib/tasks/deleteTask';
+import { assignTask } from '@/lib/tasks/assignTask';
+import { makeUser, makeProject, addMember, makeTask } from './helpers/factories';
 
 async function asAdmin() {
   const admin = await makeUser({ role: 'ADMIN' });
@@ -202,5 +206,91 @@ describe('per-project caps — assignment authz & floor', () => {
     // Clear.
     await assignProjectCustomRoleAction(p.id, member.id, null, p.key);
     expect(await getProjectMemberAssignment(p.id, member.id)).toBeNull();
+  });
+});
+
+/**
+ * Slice 5c (Tier B) — the deep task-lib helpers now honor per-project caps.
+ * These previously gated on role only (denying any custom-role holder). Each
+ * test grants the cap to `rep` and checks the action succeeds, while a SEPARATE
+ * ungranted member is still denied (distinct caps-cache args, so no reliance on
+ * cache() invalidation semantics), plus cross-project isolation.
+ */
+describe('per-project caps — task-lib helpers (slice 5c)', () => {
+  it('changeTaskStatus: per-project task.editAny moves a card; ungranted denied; isolated to project', async () => {
+    const admin = await asAdmin();
+    const p = await makeProject({ ownerId: admin.id, key: 'T5CA' });
+    const q = await makeProject({ ownerId: admin.id, key: 'T5CB' });
+    const rep = await makeUser({ role: 'MEMBER' });
+    const other = await makeUser({ role: 'MEMBER' });
+    await addMember(p.id, rep.id, 'CONTRIBUTOR');
+    await addMember(p.id, other.id, 'CONTRIBUTOR');
+    await addMember(q.id, rep.id, 'CONTRIBUTOR');
+    const taskP = await makeTask({ projectId: p.id, creatorId: admin.id, status: 'TODO' });
+    const taskP2 = await makeTask({ projectId: p.id, creatorId: admin.id, status: 'TODO' });
+    const taskQ = await makeTask({ projectId: q.id, creatorId: admin.id, status: 'TODO' });
+
+    const roleId = await makeProjectRole(['task.editAny']);
+    mockMe.id = admin.id; mockMe.role = 'ADMIN';
+    await assignProjectCustomRoleAction(p.id, rep.id, roleId, p.key);
+
+    // Granted rep moves the card in P.
+    const moved = await changeTaskStatus(taskP.id, 'IN_PROGRESS', { id: rep.id, role: 'MEMBER' });
+    expect(moved.status).toBe('IN_PROGRESS');
+    // Ungranted member (also a contributor, not creator/assignee) is denied.
+    await expect(
+      changeTaskStatus(taskP2.id, 'IN_PROGRESS', { id: other.id, role: 'MEMBER' }),
+    ).rejects.toThrow();
+    // rep has no role in Q → cross-project isolation, denied.
+    await expect(
+      changeTaskStatus(taskQ.id, 'IN_PROGRESS', { id: rep.id, role: 'MEMBER' }),
+    ).rejects.toThrow();
+  });
+
+  it('deleteTask: per-project task.delete authorizes a non-owner; ungranted denied', async () => {
+    const admin = await asAdmin();
+    const p = await makeProject({ ownerId: admin.id, key: 'T5CD' });
+    const rep = await makeUser({ role: 'MEMBER' });
+    const other = await makeUser({ role: 'MEMBER' });
+    await addMember(p.id, rep.id, 'CONTRIBUTOR');
+    await addMember(p.id, other.id, 'CONTRIBUTOR');
+    const task = await makeTask({ projectId: p.id, creatorId: admin.id });
+    const task2 = await makeTask({ projectId: p.id, creatorId: admin.id });
+
+    const roleId = await makeProjectRole(['task.delete']);
+    mockMe.id = admin.id; mockMe.role = 'ADMIN';
+    await assignProjectCustomRoleAction(p.id, rep.id, roleId, p.key);
+
+    await expect(deleteTask(task2.id, { id: other.id, role: 'MEMBER' })).rejects.toThrow();
+    await deleteTask(task.id, { id: rep.id, role: 'MEMBER' });
+    expect(await prisma.task.findUnique({ where: { id: task.id } })).toBeNull();
+  });
+
+  it('assignTask (task.staff) + updateTask (task.editAny) honored per-project; ungranted denied', async () => {
+    const admin = await asAdmin();
+    const p = await makeProject({ ownerId: admin.id, key: 'T5CS' });
+    const rep = await makeUser({ role: 'MEMBER' });
+    const other = await makeUser({ role: 'MEMBER' });
+    const victim = await makeUser({ role: 'MEMBER' });
+    await addMember(p.id, rep.id, 'CONTRIBUTOR');
+    await addMember(p.id, other.id, 'CONTRIBUTOR');
+    const task = await makeTask({ projectId: p.id, creatorId: admin.id });
+    const task2 = await makeTask({ projectId: p.id, creatorId: admin.id });
+
+    const roleId = await makeProjectRole(['task.staff', 'task.editAny']);
+    mockMe.id = admin.id; mockMe.role = 'ADMIN';
+    await assignProjectCustomRoleAction(p.id, rep.id, roleId, p.key);
+
+    // Ungranted member cannot staff or edit.
+    await expect(assignTask(task2.id, victim.id, { id: other.id, role: 'MEMBER' })).rejects.toThrow();
+    await expect(
+      updateTask(task2.id, { priority: 'HIGH' }, { id: other.id, role: 'MEMBER' }),
+    ).rejects.toThrow();
+
+    // Granted rep can.
+    const assigned = await assignTask(task.id, victim.id, { id: rep.id, role: 'MEMBER' });
+    expect(assigned.assigneeId).toBe(victim.id);
+    const updated = await updateTask(task.id, { priority: 'HIGH' }, { id: rep.id, role: 'MEMBER' });
+    expect(updated.priority).toBe('HIGH');
   });
 });

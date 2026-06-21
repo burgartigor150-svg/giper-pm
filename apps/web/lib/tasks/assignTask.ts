@@ -1,6 +1,7 @@
 import { prisma } from '@giper/db';
 import { DomainError } from '../errors';
 import { canManageAssignments, type SessionUser } from '../permissions';
+import { getEffectiveCapsForProject } from '../capabilities';
 import { auditTask } from '../audit';
 
 export async function assignTask(
@@ -13,6 +14,7 @@ export async function assignTask(
     select: {
       id: true,
       assigneeId: true,
+      projectId: true,
       creatorId: true,
       externalSource: true,
       project: {
@@ -25,8 +27,10 @@ export async function assignTask(
   });
   if (!task) throw new DomainError('NOT_FOUND', 404);
   // Resource management belongs to PM/lead/owner — regular contributors
-  // can edit their own tasks but not reassign work.
-  if (!canManageAssignments(user, task.project)) {
+  // can edit their own tasks but not reassign work. A per-project role
+  // carrying task.staff lifts this within its own project only.
+  const caps = await getEffectiveCapsForProject(user, task.projectId);
+  if (!canManageAssignments(user, task.project, caps)) {
     throw new DomainError('INSUFFICIENT_PERMISSIONS', 403);
   }
 

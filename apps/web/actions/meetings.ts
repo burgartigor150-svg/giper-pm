@@ -12,6 +12,7 @@ import {
 } from '@giper/integrations';
 import { requireAuth } from '@/lib/auth';
 import { canManageAssignments, canSeeSettings } from '@/lib/permissions';
+import { getEffectiveCapsForProject } from '@/lib/capabilities';
 
 let _redis: Redis | null = null;
 function redis(): Redis {
@@ -54,7 +55,13 @@ export async function createMeetingAction({
       select: { id: true, ownerId: true, members: { select: { userId: true, role: true } } },
     });
     if (!p) return { ok: false, message: 'Проект не найден' };
-    if (!canManageAssignments({ id: me.id, role: me.role }, p)) {
+    if (
+      !canManageAssignments(
+        { id: me.id, role: me.role },
+        p,
+        await getEffectiveCapsForProject({ id: me.id, role: me.role }, p.id),
+      )
+    ) {
       return { ok: false, message: 'Нет прав на этот проект' };
     }
     projectId = p.id;
@@ -359,7 +366,7 @@ export async function joinMeetingAction({
       createdById: true,
       channelId: true,
       project: {
-        select: { ownerId: true, members: { select: { userId: true, role: true } } },
+        select: { id: true, ownerId: true, members: { select: { userId: true, role: true } } },
       },
     },
   });
@@ -394,7 +401,11 @@ export async function joinMeetingAction({
     channelAllowed ||
     invited ||
     (meeting.project &&
-      canManageAssignments({ id: me.id, role: me.role }, meeting.project));
+      canManageAssignments(
+        { id: me.id, role: me.role },
+        meeting.project,
+        await getEffectiveCapsForProject({ id: me.id, role: me.role }, meeting.project.id),
+      ));
   if (!allowed) return { ok: false, message: 'Нет прав на эту встречу' };
 
   // Identity must be UNIQUE per session, not per user. The page
@@ -625,7 +636,7 @@ export async function endMeetingAction({
       livekitEgressId: true,
       createdById: true,
       channelId: true,
-      project: { select: { ownerId: true, members: { select: { userId: true, role: true } } } },
+      project: { select: { id: true, ownerId: true, members: { select: { userId: true, role: true } } } },
     },
   });
   if (!meeting) return { ok: false, message: 'Встреча не найдена' };
@@ -633,7 +644,11 @@ export async function endMeetingAction({
     me.role === 'ADMIN' ||
     meeting.createdById === me.id ||
     (meeting.project &&
-      canManageAssignments({ id: me.id, role: me.role }, meeting.project));
+      canManageAssignments(
+        { id: me.id, role: me.role },
+        meeting.project,
+        await getEffectiveCapsForProject({ id: me.id, role: me.role }, meeting.project.id),
+      ));
   if (!allowed) return { ok: false, message: 'Нет прав' };
 
   if (meeting.livekitEgressId) {
@@ -746,7 +761,13 @@ export async function attachProjectAndRerunAiAction({
   if (!project) return { ok: false, message: 'Проект не найден' };
   // The user must be able to manage that project — otherwise they
   // could dump a stranger's meeting into someone else's workspace.
-  if (!canManageAssignments({ id: me.id, role: me.role }, project)) {
+  if (
+    !canManageAssignments(
+      { id: me.id, role: me.role },
+      project,
+      await getEffectiveCapsForProject({ id: me.id, role: me.role }, project.id),
+    )
+  ) {
     return { ok: false, message: 'Нет прав на этот проект' };
   }
 
@@ -783,7 +804,7 @@ export async function retranscribeMeetingAction({
       status: true,
       recordingKey: true,
       createdById: true,
-      project: { select: { ownerId: true, members: { select: { userId: true, role: true } } } },
+      project: { select: { id: true, ownerId: true, members: { select: { userId: true, role: true } } } },
     },
   });
   if (!meeting) return { ok: false, message: 'Встреча не найдена' };
@@ -792,7 +813,11 @@ export async function retranscribeMeetingAction({
     me.role === 'ADMIN' ||
     meeting.createdById === me.id ||
     (meeting.project &&
-      canManageAssignments({ id: me.id, role: me.role }, meeting.project));
+      canManageAssignments(
+        { id: me.id, role: me.role },
+        meeting.project,
+        await getEffectiveCapsForProject({ id: me.id, role: me.role }, meeting.project.id),
+      ));
   if (!allowed) return { ok: false, message: 'Нет прав' };
 
   // Wipe the existing transcript so the worker runs WhisperX again
@@ -838,7 +863,7 @@ export async function setMeetingSpeakerMapAction(input: {
     select: {
       id: true,
       createdById: true,
-      project: { select: { ownerId: true, members: { select: { userId: true, role: true } } } },
+      project: { select: { id: true, ownerId: true, members: { select: { userId: true, role: true } } } },
       transcript: { select: { id: true } },
     },
   });
@@ -850,7 +875,11 @@ export async function setMeetingSpeakerMapAction(input: {
     me.role === 'ADMIN' ||
     meeting.createdById === me.id ||
     (meeting.project &&
-      canManageAssignments({ id: me.id, role: me.role }, meeting.project));
+      canManageAssignments(
+        { id: me.id, role: me.role },
+        meeting.project,
+        await getEffectiveCapsForProject({ id: me.id, role: me.role }, meeting.project.id),
+      ));
   if (!allowed) return { ok: false, message: 'Нет прав' };
 
   // Sanitize: keep only valid SPEAKER_xx keys, trim names, cap length.

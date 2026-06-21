@@ -1,6 +1,7 @@
 import { prisma } from '@giper/db';
 import { DomainError } from '../errors';
 import { canDeleteTask, type SessionUser } from '../permissions';
+import { getEffectiveCapsForProject } from '../capabilities';
 import { auditTask } from '../audit';
 
 export async function deleteTask(taskId: string, user: SessionUser) {
@@ -10,6 +11,7 @@ export async function deleteTask(taskId: string, user: SessionUser) {
       id: true,
       title: true,
       number: true,
+      projectId: true,
       creatorId: true,
       assigneeId: true,
       externalSource: true,
@@ -24,7 +26,8 @@ export async function deleteTask(taskId: string, user: SessionUser) {
     },
   });
   if (!task) throw new DomainError('NOT_FOUND', 404);
-  if (!canDeleteTask(user, task)) throw new DomainError('INSUFFICIENT_PERMISSIONS', 403);
+  const caps = await getEffectiveCapsForProject(user, task.projectId);
+  if (!canDeleteTask(user, task, caps)) throw new DomainError('INSUFFICIENT_PERMISSIONS', 403);
 
   if (task._count.subtasks > 0) {
     throw new DomainError('VALIDATION', 400, 'Сначала удалите подзадачи');

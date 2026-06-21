@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { prisma, Prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
 import { canEditTaskInternal } from '@/lib/permissions';
-import { getEffectiveCaps } from '@/lib/capabilities';
+import { getEffectiveCaps, getEffectiveCapsForProject } from '@/lib/capabilities';
 import { fanoutToTaskAudience } from '@/lib/notifications/createNotifications';
 
 /**
@@ -134,7 +134,13 @@ export async function assignTagToTaskAction(
   const me = await requireAuth();
   const task = await loadTaskWithProject(taskId);
   if (!task) return { ok: false, error: { code: 'NOT_FOUND', message: 'Задача не найдена' } };
-  if (!canEditTaskInternal({ id: me.id, role: me.role }, task)) {
+  if (
+    !canEditTaskInternal(
+      { id: me.id, role: me.role },
+      task,
+      await getEffectiveCapsForProject({ id: me.id, role: me.role }, task.project.id),
+    )
+  ) {
     return { ok: false, error: { code: 'FORBIDDEN', message: 'Нет прав' } };
   }
   // Make sure tag belongs to the same project — prevents tag IDs from
@@ -182,7 +188,13 @@ export async function unassignTagFromTaskAction(
   const me = await requireAuth();
   const task = await loadTaskWithProject(taskId);
   if (!task) return { ok: false, error: { code: 'NOT_FOUND', message: 'Задача не найдена' } };
-  if (!canEditTaskInternal({ id: me.id, role: me.role }, task)) {
+  if (
+    !canEditTaskInternal(
+      { id: me.id, role: me.role },
+      task,
+      await getEffectiveCapsForProject({ id: me.id, role: me.role }, task.project.id),
+    )
+  ) {
     return { ok: false, error: { code: 'FORBIDDEN', message: 'Нет прав' } };
   }
   await prisma.taskTag

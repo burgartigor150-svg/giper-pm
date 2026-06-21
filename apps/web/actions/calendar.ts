@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
 import { canEditTaskInternal } from '@/lib/permissions';
+import { getEffectiveCapsForProject } from '@/lib/capabilities';
 import { pushBitrixDeadlineBestEffort } from '@/lib/integrations/bitrix24Outbound';
 
 export type ActionResult<T = unknown> =
@@ -36,6 +37,7 @@ export async function changeTaskDueDateAction(
     select: {
       id: true,
       dueDate: true,
+      projectId: true,
       creatorId: true,
       assigneeId: true,
       externalSource: true,
@@ -59,6 +61,7 @@ export async function changeTaskDueDateAction(
         assigneeId: task.assigneeId,
         project: task.project,
       },
+      await getEffectiveCapsForProject({ id: me.id, role: me.role }, task.projectId),
     )
   ) {
     return { ok: false, error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' } };

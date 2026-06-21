@@ -5,6 +5,7 @@ import { prisma } from '@giper/db';
 import { createTaskSchema } from '@giper/shared';
 import { requireAuth } from '@/lib/auth';
 import { canCreateTask, canEditProject } from '@/lib/permissions';
+import { getEffectiveCapsForProject } from '@/lib/capabilities';
 import { createTask } from '@/lib/tasks/createTask';
 
 type ActionResult<T = unknown> =
@@ -40,7 +41,13 @@ export async function updateCardTemplatesAction(
     select: { ownerId: true, members: { select: { userId: true, role: true } } },
   });
   if (!project) return { ok: false, error: { code: 'NOT_FOUND', message: 'Проект не найден' } };
-  if (!canEditProject({ id: me.id, role: me.role }, project)) {
+  if (
+    !canEditProject(
+      { id: me.id, role: me.role },
+      project,
+      await getEffectiveCapsForProject({ id: me.id, role: me.role }, projectId),
+    )
+  ) {
     return { ok: false, error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' } };
   }
 

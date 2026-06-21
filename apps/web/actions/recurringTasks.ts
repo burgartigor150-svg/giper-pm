@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
 import { canEditProject } from '@/lib/permissions';
+import { getEffectiveCapsForProject } from '@/lib/capabilities';
 
 type ActionResult<T = unknown> =
   | { ok: true; data?: T }
@@ -50,7 +51,13 @@ export async function updateRecurringTasksAction(
     select: { ownerId: true, members: { select: { userId: true, role: true } } },
   });
   if (!project) return { ok: false, error: { code: 'NOT_FOUND', message: 'Проект не найден' } };
-  if (!canEditProject({ id: me.id, role: me.role }, project)) {
+  if (
+    !canEditProject(
+      { id: me.id, role: me.role },
+      project,
+      await getEffectiveCapsForProject({ id: me.id, role: me.role }, projectId),
+    )
+  ) {
     return { ok: false, error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' } };
   }
 
