@@ -21,6 +21,8 @@ import { StoryPointsField } from '@/components/domain/StoryPointsField';
 import { CoverField } from '@/components/domain/CoverField';
 import { SprintPicker } from '@/components/domain/SprintPicker';
 import { getSprints } from '@/lib/sprints/getSprints';
+import { VersionPicker } from '@/components/domain/VersionPicker';
+import { listVersionsForProject } from '@/lib/versions/listVersionsForProject';
 import { TaskTimeline } from '@/components/domain/TaskTimeline';
 import { LogTaskHoursForm } from '@/components/domain/LogTaskHoursForm';
 import { listTaskTimeEntries } from '@/actions/time';
@@ -84,6 +86,7 @@ export default async function TaskDetailPage({ params }: { params: Params }) {
     availableTags,
     graph,
     projectSprints,
+    projectVersions,
   ] = await Promise.all([
     getActiveTimer(me.id),
     getTaskSpentMinutes(task.id),
@@ -92,6 +95,7 @@ export default async function TaskDetailPage({ params }: { params: Params }) {
     listTagsForProject(task.project.id),
     getTaskGraph(task.id),
     getSprints(task.project.id),
+    listVersionsForProject(task.project.id),
   ]);
   // Assignee/creator are always notified — the explicit watch toggle is
   // disabled with a tooltip in that case.
@@ -603,6 +607,18 @@ export default async function TaskDetailPage({ params }: { params: Params }) {
                   taskId={task.id}
                   currentSprintId={task.sprintId}
                   sprints={projectSprints.map((s) => ({ id: s.id, name: s.name, status: s.status }))}
+                  canEdit={canEdit}
+                />
+              </CardContent>
+            </Card>
+          ) : null}
+          {projectVersions.length > 0 || task.versionId ? (
+            <Card>
+              <CardContent className="py-3">
+                <VersionPicker
+                  taskId={task.id}
+                  currentVersionId={task.versionId}
+                  versions={projectVersions.map((v) => ({ id: v.id, name: v.name, status: v.status }))}
                   canEdit={canEdit}
                 />
               </CardContent>

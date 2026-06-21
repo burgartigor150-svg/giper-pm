@@ -21,6 +21,8 @@ export type BoardFilter = {
   dueWithin?: DueWithinFilter;
   /** When 'me', restrict to cards where the viewer is the reviewer. */
   reviewer?: 'me';
+  /** Release/version id the card must be slated for. */
+  versionId?: string;
   /**
    * Sprint scope. A sprint id restricts to that sprint's cards; `null`
    * restricts to the backlog (no sprint); undefined = no sprint filter.
@@ -169,6 +171,7 @@ export async function listTasksForBoard(
       type: filter.type,
       dueWithin: filter.dueWithin,
       reviewerMe: filter.reviewer === 'me',
+      versionId: filter.versionId,
     },
     { userId: user.id, statusField: 'internalStatus' },
   );

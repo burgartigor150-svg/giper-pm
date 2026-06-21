@@ -25,6 +25,7 @@ import {
   resolveDefaultFilterQuery,
   hasExplicitFilterState,
 } from '@/lib/savedFilters/listSavedFiltersForView';
+import { listVersionsForProject } from '@/lib/versions/listVersionsForProject';
 import { SortHeader } from '@/components/domain/SortHeader';
 import { Pagination } from '@/components/domain/Pagination';
 import { TaskStatusBadge } from '@/components/domain/TaskStatusBadge';
@@ -62,7 +63,7 @@ export default async function ProjectTasksListPage({
 
   // Parse filters from URL with safe defaults
   const filterRaw: Record<string, unknown> = {};
-  for (const k of ['status', 'priority', 'assigneeId', 'q', 'type', 'dueWithin', 'reviewer', 'page', 'sort', 'dir']) {
+  for (const k of ['status', 'priority', 'assigneeId', 'q', 'type', 'dueWithin', 'reviewer', 'versionId', 'page', 'sort', 'dir']) {
     const v = sp[k];
     if (typeof v === 'string') filterRaw[k] = v;
   }
@@ -78,11 +79,12 @@ export default async function ProjectTasksListPage({
     ? parsed.data
     : taskListFilterSchema.parse({});
 
-  const [result, availableTags, presets, projCaps] = await Promise.all([
+  const [result, availableTags, presets, projCaps, versions] = await Promise.all([
     listTasksForProject(projectKey, filter, { id: me.id, role: me.role }),
     listTagsForProject(project.id),
     listSavedFiltersForView(project.id, 'LIST', me.id),
     getEffectiveCapsForProject({ id: me.id, role: me.role }, project.id),
+    listVersionsForProject(project.id),
   ]);
   const canShare = canEditProject(
     { id: me.id, role: me.role },
@@ -156,6 +158,8 @@ export default async function ProjectTasksListPage({
           type={filter.type}
           dueWithin={filter.dueWithin}
           reviewer={filter.reviewer}
+          versionId={filter.versionId}
+          versions={versions.map((v) => ({ id: v.id, name: v.name }))}
           members={members}
           availableTags={availableTags}
           activeTagIds={filter.tagIds ?? []}

@@ -437,6 +437,8 @@ model Project {
   webhooks        Webhook[]
   /// Scrum sprints (time-boxed iterations) for this project.
   sprints         Sprint[]
+  /// Releases / versions (Jira fixVersion) for grouping cards by what ships.
+  versions        Version[]
   /// CRM deals linked to this project (org-level sales → delivery handoff).
   deals           Deal[]          @relation("DealProject")
   /// Per-project custom-role assignments. Reserved for v2 — no writer in v1.
@@ -554,6 +556,35 @@ model Sprint {
   updatedAt   DateTime     @updatedAt
   tasks       Task[]
   snapshots   SprintSnapshot[]
+
+  @@index([projectId, status])
+}
+
+enum VersionStatus {
+  PLANNED   // upcoming release, still collecting work
+  RELEASED  // shipped
+  ARCHIVED  // shelved / superseded
+}
+
+/// Release / version (Jira fixVersion): a named target a project's cards are
+/// slated for. Additive + inert — until a version exists no card is versioned
+/// and every query is byte-identical to today. Cards link via Task.versionId
+/// (SetNull on delete), so deleting a version never deletes its cards.
+model Version {
+  id          String        @id @default(cuid())
+  projectId   String
+  project     Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name        String
+  description String?       @db.Text
+  status      VersionStatus @default(PLANNED)
+  /// Planned or actual release date (nullable).
+  releaseDate DateTime?
+  /// Stamped when status moves to RELEASED.
+  releasedAt  DateTime?
+  createdById String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  tasks       Task[]
 
   @@index([projectId, status])
 }
@@ -1237,6 +1268,11 @@ model Task {
   sprintId      String?
   sprint        Sprint?        @relation(fields: [sprintId], references: [id], onDelete: SetNull)
 
+  /// Release/version the card is slated for (Jira fixVersion). Nullable = none.
+  /// SetNull on version delete → card keeps existing, just unversioned.
+  versionId     String?
+  version       Version?       @relation(fields: [versionId], references: [id], onDelete: SetNull)
+
   /// Card cover. Either an uploaded image (S3 object key,
   /// served via /api/covers/[taskId]) or a solid colour (hex). At most one
   /// is set; both null = no cover (card renders as before).
@@ -1267,6 +1303,7 @@ model Task {
   @@index([projectId, status])
   @@index([projectId, internalStatus])
   @@index([sprintId, internalStatus])
+  @@index([versionId])
   @@index([dueDate])
   @@index([columnId, swimlaneId])
 }

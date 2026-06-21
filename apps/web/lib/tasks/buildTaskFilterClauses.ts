@@ -18,6 +18,8 @@ export type TaskFilterDims = {
   dueWithin?: DueWithinFilter;
   /** When true, restrict to tasks where the viewer is the assigned reviewer. */
   reviewerMe?: boolean;
+  /** Release/version id the task must be slated for. */
+  versionId?: string;
 };
 
 /**
@@ -59,6 +61,8 @@ export function buildTaskFilterClauses(
   }
 
   if (dims.type) and.push({ type: dims.type });
+
+  if (dims.versionId) and.push({ versionId: dims.versionId });
 
   if (dims.reviewerMe) and.push({ reviewerId: ctx.userId });
 

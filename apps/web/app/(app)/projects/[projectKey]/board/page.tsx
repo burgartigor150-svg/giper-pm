@@ -18,6 +18,7 @@ import {
   resolveDefaultFilterQuery,
   hasExplicitFilterState,
 } from '@/lib/savedFilters/listSavedFiltersForView';
+import { listVersionsForProject } from '@/lib/versions/listVersionsForProject';
 import { getCardTemplates } from '@/lib/board/getCardTemplates';
 import { canCreateTask, canEditProject } from '@/lib/permissions';
 import { getEffectiveCapsForProject } from '@/lib/capabilities';
@@ -55,6 +56,7 @@ export default async function ProjectBoardPage({
   const dueParsed = dueRaw ? dueWithinSchema.safeParse(dueRaw) : null;
   const dueWithin = dueParsed?.success ? dueParsed.data : undefined;
   const reviewer = sp.reviewer === 'me' ? 'me' : undefined;
+  const versionId = typeof sp.versionId === 'string' && sp.versionId ? sp.versionId : undefined;
   // tagIds may arrive as a single string or an array depending on the
   // form encoding. Normalize and trim before sending to the query.
   const rawTagIds = sp.tagIds ?? sp.tagId; // accept either spelling
@@ -68,7 +70,7 @@ export default async function ProjectBoardPage({
   try {
     result = await listTasksForBoard(
       projectKey,
-      { assigneeId, priority, q, onlyMine, tagIds, type, dueWithin, reviewer },
+      { assigneeId, priority, q, onlyMine, tagIds, type, dueWithin, reviewer, versionId },
       { id: me.id, role: me.role },
     );
   } catch (e) {
@@ -92,9 +94,10 @@ export default async function ProjectBoardPage({
   const availableTags = await listTagsForProject(project.id);
 
   // Saved filter presets + whether the viewer may publish/prune shared presets.
-  const [presets, projCaps] = await Promise.all([
+  const [presets, projCaps, versions] = await Promise.all([
     listSavedFiltersForView(project.id, 'BOARD', me.id),
     getEffectiveCapsForProject({ id: me.id, role: me.role }, project.id),
+    listVersionsForProject(project.id),
   ]);
   const canShare = canEditProject(
     { id: me.id, role: me.role },
@@ -148,6 +151,8 @@ export default async function ProjectBoardPage({
           type={type}
           dueWithin={dueWithin}
           reviewer={reviewer}
+          versionId={versionId}
+          versions={versions.map((v) => ({ id: v.id, name: v.name }))}
           availableTags={availableTags}
           activeTagIds={tagIds ?? []}
         />

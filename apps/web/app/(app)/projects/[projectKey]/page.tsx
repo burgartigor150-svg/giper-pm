@@ -85,6 +85,9 @@ export default async function ProjectOverviewPage({
           <Link href={`/projects/${project.key}/sprints`}>
             <Button variant="outline" size="sm">Спринты</Button>
           </Link>
+          <Link href={`/projects/${project.key}/releases`}>
+            <Button variant="outline" size="sm">Релизы</Button>
+          </Link>
           <Link href={`/projects/${project.key}/docs`}>
             <Button variant="outline" size="sm">Документы</Button>
           </Link>

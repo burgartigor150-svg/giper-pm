@@ -108,6 +108,8 @@ export const taskListFilterSchema = z.object({
   dueWithin: dueWithinSchema.optional(),
   /** "me" restricts to tasks where the viewer is the assigned reviewer. */
   reviewer: z.literal('me').optional(),
+  /** Release/version id the task must be slated for. */
+  versionId: z.string().optional(),
   q: z.string().trim().max(200).optional(),
   /** Tag IDs the task must have (AND-semantics). */
   tagIds: z.array(z.string()).optional(),
