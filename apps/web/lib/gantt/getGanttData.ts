@@ -102,7 +102,8 @@ export async function getGanttData(projectKey: string, user: SessionUser) {
   const ids = rows.map((r) => r.id);
   const depRows = ids.length
     ? await prisma.taskDependency.findMany({
-        where: { fromTaskId: { in: ids }, toTaskId: { in: ids } },
+        // Gantt arrows show the schedule-blocking structure only.
+        where: { fromTaskId: { in: ids }, toTaskId: { in: ids }, linkType: 'BLOCKS' },
         select: { fromTaskId: true, toTaskId: true },
       })
     : [];

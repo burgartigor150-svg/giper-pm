@@ -143,9 +143,11 @@ export async function getTaskGraph(taskId: string): Promise<{
     frontier = next;
   }
 
-  // BLOCKS edges (1 hop both directions).
+  // BLOCKS edges (1 hop both directions). The relations graph is specifically
+  // the blocking structure — RELATES_TO / DUPLICATES are shown in the sidebar
+  // links panel, not here.
   const blocks = await prisma.taskDependency.findMany({
-    where: { fromTaskId: root.id },
+    where: { fromTaskId: root.id, linkType: 'BLOCKS' },
     select: { toTask: { select: TASK_SELECT } },
   });
   for (const b of blocks) {
@@ -155,7 +157,7 @@ export async function getTaskGraph(taskId: string): Promise<{
     edges.push({ source: root.id, target: b.toTask.id, kind: 'blocks' });
   }
   const blockedBy = await prisma.taskDependency.findMany({
-    where: { toTaskId: root.id },
+    where: { toTaskId: root.id, linkType: 'BLOCKS' },
     select: { fromTask: { select: TASK_SELECT } },
   });
   for (const b of blockedBy) {

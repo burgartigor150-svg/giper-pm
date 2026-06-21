@@ -325,6 +325,7 @@ async function countOpenBlockers(ids: string[]): Promise<Map<string, number>> {
   const rows = await prisma.taskDependency.findMany({
     where: {
       toTaskId: { in: ids },
+      linkType: 'BLOCKS', // only true blockers gate the card; relates/duplicates don't
       fromTask: { status: { notIn: ['DONE', 'CANCELED'] } },
     },
     select: { toTaskId: true },

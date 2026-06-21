@@ -5,29 +5,36 @@ import { prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
 import { canEditTaskInternal } from '@/lib/permissions';
 import { getEffectiveCapsForProject } from '@/lib/capabilities';
+import type { TaskLinkType } from '@giper/db';
 
 type ActionResult = { ok: true } | { ok: false; error: { code: string; message: string } };
 
+const LINK_TYPES: readonly TaskLinkType[] = ['BLOCKS', 'RELATES_TO', 'DUPLICATES'];
+
 /**
- * Add a "from blocks to" dependency edge. Both tasks must be visible to
- * the actor and `from` must be editable (it's the task that's adding a
- * blocker — same trust level as editing it). Cycles are rejected: if a
- * path already exists from `to` back to `from`, the new edge would close
- * a cycle and we refuse.
+ * Add a directed task↔task link of the given kind (default BLOCKS). Both tasks
+ * must be visible to the actor and `from` must be editable (same trust level as
+ * editing it). For BLOCKS only, cycles are rejected: if a BLOCKS path already
+ * exists from `to` back to `from`, the new edge would close a cycle and we
+ * refuse. RELATES_TO / DUPLICATES are non-blocking, so they can't form a
+ * blocking cycle and skip that check.
  *
- * Cycle detection: bounded DFS from `to` looking for `from`. Edges are
- * sparse in practice (few blockers per task), so this is cheap. We cap
- * traversal at 200 nodes for safety.
+ * Cycle detection: bounded DFS from `to` along BLOCKS edges looking for `from`.
+ * Edges are sparse in practice, so this is cheap. Capped at 200 nodes.
  */
 export async function addDependencyAction(
   fromTaskId: string,
   toTaskId: string,
   projectKey: string,
   taskNumber: number,
+  linkType: TaskLinkType = 'BLOCKS',
 ): Promise<ActionResult> {
   const me = await requireAuth();
+  if (!LINK_TYPES.includes(linkType)) {
+    return { ok: false, error: { code: 'VALIDATION', message: 'Неизвестный тип связи' } };
+  }
   if (fromTaskId === toTaskId) {
-    return { ok: false, error: { code: 'VALIDATION', message: 'Задача не может блокировать саму себя' } };
+    return { ok: false, error: { code: 'VALIDATION', message: 'Задача не может ссылаться сама на себя' } };
   }
 
   const from = await prisma.task.findUnique({
@@ -62,7 +69,7 @@ export async function addDependencyAction(
   });
   if (!to) return { ok: false, error: { code: 'NOT_FOUND', message: 'Целевая задача не найдена' } };
 
-  if (await wouldCreateCycle(fromTaskId, toTaskId)) {
+  if (linkType === 'BLOCKS' && (await wouldCreateCycle(fromTaskId, toTaskId))) {
     return {
       ok: false,
       error: { code: 'VALIDATION', message: 'Создаст цикл — A→B и B→A одновременно недопустимо' },
@@ -71,7 +78,7 @@ export async function addDependencyAction(
 
   try {
     await prisma.taskDependency.create({
-      data: { fromTaskId, toTaskId, createdById: me.id },
+      data: { fromTaskId, toTaskId, linkType, createdById: me.id },
     });
   } catch (e) {
     // Unique constraint = duplicate edge. Treat as success (idempotent).
@@ -144,7 +151,7 @@ async function wouldCreateCycle(fromId: string, toId: string): Promise<boolean> 
     visited.add(current);
     if (current === fromId) return true;
     const edges = await prisma.taskDependency.findMany({
-      where: { fromTaskId: current },
+      where: { fromTaskId: current, linkType: 'BLOCKS' },
       select: { toTaskId: true },
     });
     for (const e of edges) stack.push(e.toTaskId);

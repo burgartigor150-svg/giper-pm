@@ -58,9 +58,10 @@ export async function autoUnblockDependents(
   closedTaskId: string,
   actorId: string,
 ): Promise<void> {
-  // Outgoing edges: this task blocks N others.
+  // Outgoing edges: this task blocks N others. Only BLOCKS edges count —
+  // RELATES_TO / DUPLICATES are display-only and never gate work.
   const edges = await prisma.taskDependency.findMany({
-    where: { fromTaskId: closedTaskId },
+    where: { fromTaskId: closedTaskId, linkType: 'BLOCKS' },
     select: { toTaskId: true },
   });
   if (edges.length === 0) return;
@@ -71,6 +72,7 @@ export async function autoUnblockDependents(
     const stillBlocked = await prisma.taskDependency.count({
       where: {
         toTaskId: edge.toTaskId,
+        linkType: 'BLOCKS',
         fromTaskId: { not: closedTaskId },
         fromTask: {
           internalStatus: { notIn: ['DONE', 'CANCELED'] },
