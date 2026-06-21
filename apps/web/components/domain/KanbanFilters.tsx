@@ -37,6 +37,8 @@ type Props = {
   reviewer?: string | undefined;
   versionId?: string | undefined;
   versions?: VersionOption[];
+  componentId?: string | undefined;
+  components?: VersionOption[];
   availableTags?: TagOption[];
   activeTagIds?: string[];
 };
@@ -52,6 +54,8 @@ export function KanbanFilters({
   reviewer,
   versionId,
   versions = [],
+  componentId,
+  components = [],
   availableTags = [],
   activeTagIds = [],
 }: Props) {
@@ -207,6 +211,29 @@ export function KanbanFilters({
             {versions.map((v) => (
               <option key={v.id} value={v.id}>
                 {v.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
+
+      {components.length > 0 ? (
+        <label className="flex items-center gap-1 text-sm text-muted-foreground">
+          <span>Компонент:</span>
+          <select
+            value={componentId ?? ''}
+            onChange={(e) =>
+              pushParams((sp) => {
+                if (e.target.value) sp.set('componentId', e.target.value);
+                else sp.delete('componentId');
+              })
+            }
+            className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+          >
+            <option value="">{tList('all')}</option>
+            {components.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
               </option>
             ))}
           </select>

@@ -42,6 +42,7 @@ export async function getTask(projectKey: string, number: number, user: SessionU
       internalStatus: true,
       sprintId: true,
       versionId: true,
+      componentId: true,
       assignments: {
         orderBy: { createdAt: 'asc' },
         select: {

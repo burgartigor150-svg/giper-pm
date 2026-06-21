@@ -38,6 +38,8 @@ type Props = {
   reviewer?: string | undefined;
   versionId?: string | undefined;
   versions?: VersionOption[];
+  componentId?: string | undefined;
+  components?: VersionOption[];
   members: UserSearchHit[];
   availableTags?: TagOption[];
   activeTagIds?: string[];
@@ -68,6 +70,8 @@ export function TaskFilters({
   reviewer,
   versionId,
   versions = [],
+  componentId,
+  components = [],
   members,
   availableTags = [],
   activeTagIds = [],
@@ -285,6 +289,32 @@ export function TaskFilters({
               {versions.map((v) => (
                 <option key={v.id} value={v.id}>
                   {v.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : null}
+
+        {components.length > 0 ? (
+          <div className="flex flex-col gap-1">
+            <label htmlFor="task-filter-component" className="text-xs font-medium text-muted-foreground">
+              Компонент
+            </label>
+            <select
+              id="task-filter-component"
+              value={componentId ?? ''}
+              onChange={(e) =>
+                pushParams((sp) => {
+                  if (e.target.value) sp.set('componentId', e.target.value);
+                  else sp.delete('componentId');
+                })
+              }
+              className={selectClass}
+            >
+              <option value="">{tList('all')}</option>
+              {components.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
                 </option>
               ))}
             </select>

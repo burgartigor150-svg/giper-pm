@@ -20,6 +20,8 @@ export type TaskFilterDims = {
   reviewerMe?: boolean;
   /** Release/version id the task must be slated for. */
   versionId?: string;
+  /** Component id the task must belong to. */
+  componentId?: string;
 };
 
 /**
@@ -63,6 +65,8 @@ export function buildTaskFilterClauses(
   if (dims.type) and.push({ type: dims.type });
 
   if (dims.versionId) and.push({ versionId: dims.versionId });
+
+  if (dims.componentId) and.push({ componentId: dims.componentId });
 
   if (dims.reviewerMe) and.push({ reviewerId: ctx.userId });
 

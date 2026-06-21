@@ -23,6 +23,8 @@ export type BoardFilter = {
   reviewer?: 'me';
   /** Release/version id the card must be slated for. */
   versionId?: string;
+  /** Component id the card must belong to. */
+  componentId?: string;
   /**
    * Sprint scope. A sprint id restricts to that sprint's cards; `null`
    * restricts to the backlog (no sprint); undefined = no sprint filter.
@@ -172,6 +174,7 @@ export async function listTasksForBoard(
       dueWithin: filter.dueWithin,
       reviewerMe: filter.reviewer === 'me',
       versionId: filter.versionId,
+      componentId: filter.componentId,
     },
     { userId: user.id, statusField: 'internalStatus' },
   );
