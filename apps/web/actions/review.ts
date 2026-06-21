@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
-import { getEffectiveCaps } from '@/lib/capabilities';
+import { getEffectiveCapsForProject } from '@/lib/capabilities';
 import {
   createNotification,
   fanoutToTaskAudience,
@@ -28,6 +28,7 @@ export async function approveTaskAction(
   const task = await prisma.task.findUnique({
     where: { id: taskId },
     select: {
+      projectId: true,
       reviewerId: true,
       assigneeId: true,
       creatorId: true,
@@ -37,7 +38,7 @@ export async function approveTaskAction(
   });
   if (!task) return { ok: false, error: { code: 'NOT_FOUND', message: 'Не найдена' } };
   const allowed =
-    (await getEffectiveCaps({ id: me.id, role: me.role })).has('task.review.close') ||
+    (await getEffectiveCapsForProject({ id: me.id, role: me.role }, task.projectId)).has('task.review.close') ||
     task.reviewerId === me.id;
   if (!allowed) {
     return { ok: false, error: { code: 'FORBIDDEN', message: 'Только ревьюер может закрыть' } };
@@ -117,6 +118,7 @@ export async function rejectTaskAction(
   const task = await prisma.task.findUnique({
     where: { id: taskId },
     select: {
+      projectId: true,
       reviewerId: true,
       assigneeId: true,
       creatorId: true,
@@ -126,7 +128,7 @@ export async function rejectTaskAction(
   });
   if (!task) return { ok: false, error: { code: 'NOT_FOUND', message: 'Не найдена' } };
   const allowed =
-    (await getEffectiveCaps({ id: me.id, role: me.role })).has('task.review.close') ||
+    (await getEffectiveCapsForProject({ id: me.id, role: me.role }, task.projectId)).has('task.review.close') ||
     task.reviewerId === me.id;
   if (!allowed) {
     return { ok: false, error: { code: 'FORBIDDEN', message: 'Только ревьюер может вернуть' } };

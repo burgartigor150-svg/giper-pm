@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
 import { canEditTaskInternal } from '@/lib/permissions';
-import { getEffectiveCaps } from '@/lib/capabilities';
+import { getEffectiveCapsForProject } from '@/lib/capabilities';
 
 type ActionResult = { ok: true } | { ok: false; error: { code: string; message: string } };
 
@@ -34,6 +34,7 @@ export async function addDependencyAction(
     where: { id: fromTaskId },
     select: {
       id: true,
+      projectId: true,
       creatorId: true,
       assigneeId: true,
       externalSource: true,
@@ -48,7 +49,7 @@ export async function addDependencyAction(
   if (!from) return { ok: false, error: { code: 'NOT_FOUND', message: 'Задача не найдена' } };
   // Dependencies are an internal-only track (never round-trip to Bitrix), so
   // they're editable on mirror tasks too — internal gate, matching the UI.
-  if (!canEditTaskInternal({ id: me.id, role: me.role }, from, await getEffectiveCaps({ id: me.id, role: me.role }))) {
+  if (!canEditTaskInternal({ id: me.id, role: me.role }, from, await getEffectiveCapsForProject({ id: me.id, role: me.role }, from.projectId))) {
     return {
       ok: false,
       error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' },
@@ -100,6 +101,7 @@ export async function removeDependencyAction(
       fromTask: {
         select: {
           id: true,
+          projectId: true,
           creatorId: true,
           assigneeId: true,
           externalSource: true,
@@ -114,7 +116,7 @@ export async function removeDependencyAction(
     },
   });
   if (!dep) return { ok: false, error: { code: 'NOT_FOUND', message: 'Не найдено' } };
-  if (!canEditTaskInternal({ id: me.id, role: me.role }, dep.fromTask, await getEffectiveCaps({ id: me.id, role: me.role }))) {
+  if (!canEditTaskInternal({ id: me.id, role: me.role }, dep.fromTask, await getEffectiveCapsForProject({ id: me.id, role: me.role }, dep.fromTask.projectId))) {
     return {
       ok: false,
       error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' },
