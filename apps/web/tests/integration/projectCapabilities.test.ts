@@ -32,6 +32,7 @@ import {
 } from '@/lib/capabilities';
 import { canEditProject } from '@/lib/permissions';
 import { getProjectMemberAssignment } from '@/lib/customRoles';
+import { updateProjectMemberRole } from '@/lib/projects';
 import { makeUser, makeProject, addMember } from './helpers/factories';
 
 async function asAdmin() {
@@ -146,6 +147,25 @@ describe('per-project caps — assignment authz & floor', () => {
     const denied = await assignProjectCustomRoleAction(p.id, target.id, roleId, p.key);
     expect(denied.ok).toBe(false);
     if (!denied.ok) expect(denied.error.code).toBe('INSUFFICIENT_PERMISSIONS');
+  });
+
+  it('NO self-escalation: a member with per-project project.edit cannot promote self to LEAD', async () => {
+    const admin = await asAdmin();
+    const p = await makeProject({ ownerId: admin.id, key: 'ESC' });
+    const member = await makeUser({ role: 'MEMBER' });
+    await addMember(p.id, member.id, 'CONTRIBUTOR');
+    // Grant the member a per-project role WITH project.edit.
+    const roleId = await makeProjectRole(['project.edit']);
+    mockMe.id = admin.id; mockMe.role = 'ADMIN';
+    await assignProjectCustomRoleAction(p.id, member.id, roleId, p.key);
+
+    // The member tries to make THEMSELVES a LEAD. Member-management is org-gated,
+    // so the per-project project.edit must NOT authorize it.
+    await expect(
+      updateProjectMemberRole(p.id, member.id, 'LEAD', { id: member.id, role: 'MEMBER' }),
+    ).rejects.toThrow();
+    const row = await prisma.projectMember.findFirstOrThrow({ where: { projectId: p.id, userId: member.id } });
+    expect(row.role).toBe('CONTRIBUTOR'); // unchanged
   });
 
   it('only PROJECT-scope roles are assignable per-project (ORG role → NOT_FOUND)', async () => {

@@ -3,7 +3,12 @@ import type { AddMemberInput } from '@giper/shared';
 import { DomainError } from '../errors';
 import { isUniqueConstraintError } from '../prisma-errors';
 import { canEditProject, type SessionUser } from '../permissions';
-import { getEffectiveCapsForProject } from '../capabilities';
+// Member/role management is META — authorize on ORG caps (owner / LEAD / org
+// project.edit) ONLY, never a per-project capability. Otherwise a member granted
+// a PROJECT role with project.edit could self-promote to LEAD via
+// updateProjectMemberRole and persist past revocation. So getEffectiveCaps, NOT
+// getEffectiveCapsForProject, here.
+import { getEffectiveCaps } from '../capabilities';
 
 export async function addProjectMember(
   projectId: string,
@@ -18,7 +23,7 @@ export async function addProjectMember(
     },
   });
   if (!project) throw new DomainError('NOT_FOUND', 404);
-  if (!canEditProject(user, project, await getEffectiveCapsForProject(user, projectId))) {
+  if (!canEditProject(user, project, await getEffectiveCaps(user))) {
     throw new DomainError('INSUFFICIENT_PERMISSIONS', 403);
   }
 
@@ -60,7 +65,7 @@ export async function removeProjectMember(
     },
   });
   if (!project) throw new DomainError('NOT_FOUND', 404);
-  if (!canEditProject(user, project, await getEffectiveCapsForProject(user, projectId))) {
+  if (!canEditProject(user, project, await getEffectiveCaps(user))) {
     throw new DomainError('INSUFFICIENT_PERMISSIONS', 403);
   }
   if (project.ownerId === userIdToRemove) {
@@ -85,7 +90,7 @@ export async function updateProjectMemberRole(
     },
   });
   if (!project) throw new DomainError('NOT_FOUND', 404);
-  if (!canEditProject(user, project, await getEffectiveCapsForProject(user, projectId))) {
+  if (!canEditProject(user, project, await getEffectiveCaps(user))) {
     throw new DomainError('INSUFFICIENT_PERMISSIONS', 403);
   }
   const res = await prisma.projectMember.updateMany({

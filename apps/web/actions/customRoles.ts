@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { prisma, type UserRole, type CustomRoleScope } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
-import { isCapabilityKey, isProjectCapKey, getEffectiveCapsForProject, type CapabilityKey } from '@/lib/capabilities';
+import { isCapabilityKey, isProjectCapKey, getEffectiveCaps, type CapabilityKey } from '@/lib/capabilities';
 import { canEditProject } from '@/lib/permissions';
 
 type ActionResult<T = unknown> =
@@ -185,8 +185,10 @@ export async function assignProjectCustomRoleAction(
     select: { ownerId: true, members: { select: { userId: true, role: true } } },
   });
   if (!project) return { ok: false, error: { code: 'NOT_FOUND', message: 'Проект не найден' } };
-  // Authz: anyone who can edit this project (owner / LEAD / org project.edit).
-  if (!canEditProject({ id: me.id, role: me.role }, project, await getEffectiveCapsForProject({ id: me.id, role: me.role }, projectId))) {
+  // Authz: owner / LEAD / org project.edit ONLY (ORG caps, NOT per-project) —
+  // assigning project roles is meta-management; authorizing it via a per-project
+  // capability would let a project-role holder grant roles (self-escalation).
+  if (!canEditProject({ id: me.id, role: me.role }, project, await getEffectiveCaps({ id: me.id, role: me.role }))) {
     return DENY;
   }
   // Membership floor: a per-project role can only attach to someone who can
