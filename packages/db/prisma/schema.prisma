@@ -443,6 +443,9 @@ model Project {
   versions        Version[]
   /// Components (Jira component) — product areas for grouping cards.
   components      Component[]
+  /// Configurable-workflow transition allowlist (Jira workflow). Empty = no
+  /// restriction (any status move allowed) — inert until the project adds rows.
+  workflowTransitions WorkflowTransition[]
   /// CRM deals linked to this project (org-level sales → delivery handoff).
   deals           Deal[]          @relation("DealProject")
   /// Per-project custom-role assignments. Reserved for v2 — no writer in v1.
@@ -610,6 +613,23 @@ model Component {
   updatedAt   DateTime @updatedAt
   tasks       Task[]
 
+  @@index([projectId])
+}
+
+/// One allowed status move in a project's configurable workflow (Jira workflow).
+/// A project with ZERO rows has NO restriction (every move allowed) — this is the
+/// inert default. Once any row exists, a move from→to is allowed only if a row
+/// matches (CANCELED is always allowed as an escape hatch; enforced in code).
+/// fromStatus/toStatus reuse the TaskStatus enum (the engine stays the enum).
+model WorkflowTransition {
+  id         String     @id @default(cuid())
+  projectId  String
+  project    Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  fromStatus TaskStatus
+  toStatus   TaskStatus
+  createdAt  DateTime   @default(now())
+
+  @@unique([projectId, fromStatus, toStatus])
   @@index([projectId])
 }
 

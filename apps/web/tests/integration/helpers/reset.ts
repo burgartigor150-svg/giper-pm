@@ -28,6 +28,7 @@ const TABLES_IN_DELETE_ORDER = [
   'Sprint',
   'Version',
   'Component',
+  'WorkflowTransition',
   'Space',
   'Ticket',
   // Leaves first (no incoming FKs that matter).

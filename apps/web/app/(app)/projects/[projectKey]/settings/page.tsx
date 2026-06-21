@@ -15,6 +15,8 @@ import { SwimlanesForm } from '@/components/domain/SwimlanesForm';
 import { CustomFieldsForm } from '@/components/domain/CustomFieldsForm';
 import { ComponentsManager } from '@/components/domain/ComponentsManager';
 import { listComponentsForProject } from '@/lib/components/listComponentsForProject';
+import { WorkflowMatrixEditor } from '@/components/domain/WorkflowMatrixEditor';
+import { listWorkflowTransitions } from '@/lib/workflow/isTransitionAllowed';
 import { getBoardColumns } from '@/lib/board/getBoardColumns';
 import { getBoardSwimlanes } from '@/lib/board/getBoardSwimlanes';
 import { getCustomFields } from '@/lib/board/getCustomFields';
@@ -67,6 +69,7 @@ export default async function ProjectSettingsPage({
   const boardSwimlanes = await getBoardSwimlanes(project.id);
   const customFields = await getCustomFields(project.id);
   const components = await listComponentsForProject(project.id);
+  const workflowTransitions = await listWorkflowTransitions(project.id);
   const automations = await getAutomations(project.id);
   const cardTemplates = await getCardTemplates(project.id);
   const recurringTasks = await getRecurringTasks(project.id);
@@ -177,6 +180,15 @@ export default async function ProjectSettingsPage({
             members={project.members.map((m) => ({ id: m.user.id, name: m.user.name }))}
             canManage
           />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Рабочий процесс (переходы статусов)</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <WorkflowMatrixEditor projectKey={project.key} initial={workflowTransitions} canManage />
         </CardContent>
       </Card>
 

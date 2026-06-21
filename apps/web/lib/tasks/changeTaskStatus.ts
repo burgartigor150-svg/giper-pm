@@ -2,6 +2,7 @@ import { prisma, type TaskStatus } from '@giper/db';
 import { DomainError } from '../errors';
 import { canEditTask, type SessionUser } from '../permissions';
 import { getEffectiveCapsForProject } from '../capabilities';
+import { isTransitionAllowed } from '../workflow/isTransitionAllowed';
 import { auditTask } from '../audit';
 
 /**
@@ -55,6 +56,17 @@ export async function changeTaskStatus(
       'INSUFFICIENT_PERMISSIONS',
       403,
       'Только назначенный ревьюер может перевести задачу в DONE',
+    );
+  }
+
+  // Configurable workflow: enforce the project's transition allowlist (inert when
+  // the project has no rules). Gates the native board write + bulk + task-detail
+  // status moves so the mirror `status` can't advance on a forbidden edge.
+  if (!(await isTransitionAllowed(task.projectId, task.status, newStatus))) {
+    throw new DomainError(
+      'TRANSITION_NOT_ALLOWED',
+      409,
+      'Переход запрещён правилами рабочего процесса проекта',
     );
   }
 
