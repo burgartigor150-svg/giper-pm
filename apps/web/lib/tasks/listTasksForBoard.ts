@@ -202,6 +202,9 @@ export async function listTasksForBoard(
       coverColor: true,
       tags: true,
       externalSource: true,
+      // Hierarchy markers: is this a subtask, and how many children it has.
+      parentId: true,
+      _count: { select: { subtasks: true } },
       assignee: { select: { id: true, name: true, image: true } },
       taskTags: {
         select: {

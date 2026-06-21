@@ -156,6 +156,13 @@ describe('mapBitrixTask', () => {
     expect(m.bitrixGroupId).toBeNull();
   });
 
+  it('extracts PARENT_ID into bitrixParentId, normalizing 0/empty to null', () => {
+    expect(mapBitrixTask({ ...sample, parentId: '117000' }).bitrixParentId).toBe('117000');
+    expect(mapBitrixTask({ ...sample, parentId: '0' }).bitrixParentId).toBeNull();
+    expect(mapBitrixTask({ ...sample, parentId: null }).bitrixParentId).toBeNull();
+    expect(mapBitrixTask(sample).bitrixParentId).toBeNull();
+  });
+
   it('caps title at 200 chars', () => {
     const m = mapBitrixTask({ ...sample, title: 'a'.repeat(500) });
     expect(m.title.length).toBe(200);

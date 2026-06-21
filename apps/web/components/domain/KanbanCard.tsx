@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { AlertCircle, Ban } from 'lucide-react';
+import { AlertCircle, Ban, ListTree, CornerDownRight } from 'lucide-react';
 import { Avatar } from '@giper/ui/components/Avatar';
 import { cn } from '@giper/ui/cn';
 import type { BoardTask } from '@/lib/tasks';
@@ -117,6 +117,23 @@ export function KanbanCard({ projectKey, task, isOverlay = false }: Props) {
                 title="Story points"
               >
                 {task.storyPoints} SP
+              </span>
+            ) : null}
+            {task.parentId ? (
+              <span
+                className="inline-flex items-center text-muted-foreground"
+                title="Это подзадача"
+              >
+                <CornerDownRight className="h-3 w-3" />
+              </span>
+            ) : null}
+            {task._count.subtasks > 0 ? (
+              <span
+                className="inline-flex items-center gap-0.5 rounded bg-muted px-1 py-0.5 tabular-nums"
+                title={`Подзадач: ${task._count.subtasks}`}
+              >
+                <ListTree className="h-3 w-3" />
+                {task._count.subtasks}
               </span>
             ) : null}
           </div>

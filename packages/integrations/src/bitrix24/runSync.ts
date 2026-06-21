@@ -7,7 +7,7 @@ import {
   type SyncProjectsResult,
   type SyncProjectMembersResult,
 } from './syncProjects';
-import { syncTasks, type SyncTasksResult } from './syncTasks';
+import { syncTasks, relinkBitrixParents, type SyncTasksResult } from './syncTasks';
 
 export type RunSyncResult = {
   startedAt: Date;
@@ -200,6 +200,20 @@ export async function runBitrix24Sync(
     } else {
       projects = await syncProjects(prisma, client);
       tasks = await syncTasks(prisma, client, { since: opts.since ?? null });
+    }
+
+    // Resolve parent↔subtask links now that the whole task batch has landed
+    // (a child may have synced before its parent). Cheap pure-SQL pass;
+    // idempotent. Never fail the run on this — the next pass catches up.
+    try {
+      const linked = await relinkBitrixParents(prisma);
+      if (linked > 0) {
+        // eslint-disable-next-line no-console
+        console.log(`[bitrix:runSync] relinkBitrixParents linked ${linked} task(s)`);
+      }
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn('[bitrix:runSync] relinkBitrixParents failed:', e);
     }
 
     // Always mirror sonet_group membership after projects are
