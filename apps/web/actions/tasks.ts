@@ -36,7 +36,7 @@ import { linkTagsByName } from '@/lib/tags/linkTagsByName';
 import { extractValidMentions } from '@/lib/notifications/parseMentions';
 import { publishTaskEvent } from '@/lib/realtime/publishTask';
 import { canEditTaskInternal, canManageAssignments } from '@/lib/permissions';
-import { getEffectiveCaps } from '@/lib/capabilities';
+import { getEffectiveCapsForProject } from '@/lib/capabilities';
 
 export type ActionResult<T = unknown> =
   | { ok: true; data?: T }
@@ -666,6 +666,7 @@ export async function setReviewerAction(
     where: { id: taskId },
     select: {
       id: true,
+      projectId: true,
       reviewerId: true,
       creatorId: true,
       assigneeId: true,
@@ -684,7 +685,7 @@ export async function setReviewerAction(
   // Reviewer assignment is a resource decision — PM/lead/owner. The
   // sitting reviewer can step down on their own (clear-to-null).
   if (
-    !canManageAssignments({ id: me.id, role: me.role }, task.project, await getEffectiveCaps({ id: me.id, role: me.role })) &&
+    !canManageAssignments({ id: me.id, role: me.role }, task.project, await getEffectiveCapsForProject({ id: me.id, role: me.role }, task.projectId)) &&
     !isCurrentReviewerClearing
   ) {
     return {

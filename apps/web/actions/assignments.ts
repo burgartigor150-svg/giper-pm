@@ -11,7 +11,7 @@ import { autoUnblockDependents } from '@/lib/tasks/autoTransitions';
 import { runColumnEnterAutomations } from '@/lib/automations/runColumnEnterAutomations';
 import { dispatchWebhooks } from '@/lib/webhooks/dispatchWebhooks';
 import { canManageAssignments } from '@/lib/permissions';
-import { getEffectiveCaps } from '@/lib/capabilities';
+import { getEffectiveCapsForProject } from '@/lib/capabilities';
 
 type ActionResult<T = unknown> =
   | { ok: true; data?: T }
@@ -54,6 +54,7 @@ export async function addTaskAssignmentAction(
     where: { id: taskId },
     select: {
       id: true,
+      projectId: true,
       creatorId: true,
       assigneeId: true,
       externalSource: true,
@@ -65,7 +66,7 @@ export async function addTaskAssignmentAction(
   if (!task) return { ok: false, error: { code: 'NOT_FOUND', message: 'Не найдено' } };
   // Resource management is a PM concern. Regular contributors (incl.
   // creator/assignee) cannot put other people on a task.
-  if (!canManageAssignments({ id: me.id, role: me.role }, task.project, await getEffectiveCaps({ id: me.id, role: me.role }))) {
+  if (!canManageAssignments({ id: me.id, role: me.role }, task.project, await getEffectiveCapsForProject({ id: me.id, role: me.role }, task.projectId))) {
     return {
       ok: false,
       error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Только PM/лид может назначать соисполнителей' },
@@ -125,6 +126,7 @@ export async function removeTaskAssignmentAction(
       task: {
         select: {
           id: true,
+          projectId: true,
           creatorId: true,
           assigneeId: true,
           externalSource: true,
@@ -139,7 +141,7 @@ export async function removeTaskAssignmentAction(
     },
   });
   if (!a) return { ok: false, error: { code: 'NOT_FOUND', message: 'Не найдено' } };
-  if (!canManageAssignments({ id: me.id, role: me.role }, a.task.project, await getEffectiveCaps({ id: me.id, role: me.role }))) {
+  if (!canManageAssignments({ id: me.id, role: me.role }, a.task.project, await getEffectiveCapsForProject({ id: me.id, role: me.role }, a.task.projectId))) {
     return {
       ok: false,
       error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Только PM/лид может снимать соисполнителей' },
