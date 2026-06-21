@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation';
 import { prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
 import { canEditProject } from '@/lib/permissions';
+import { getEffectiveCapsForProject } from '@/lib/capabilities';
 import type { ActionResult } from './projects';
 
 const MAX_TITLE = 200;
@@ -21,7 +22,13 @@ async function loadProjectForEdit(projectId: string, me: Me) {
     },
   });
   if (!project) return { ok: false as const, code: 'NOT_FOUND', msg: 'Проект не найден' };
-  if (!canEditProject({ id: me.id, role: me.role }, project)) {
+  if (
+    !canEditProject(
+      { id: me.id, role: me.role },
+      project,
+      await getEffectiveCapsForProject({ id: me.id, role: me.role }, projectId),
+    )
+  ) {
     return { ok: false as const, code: 'INSUFFICIENT_PERMISSIONS', msg: 'Недостаточно прав' };
   }
   return { ok: true as const, key: project.key };

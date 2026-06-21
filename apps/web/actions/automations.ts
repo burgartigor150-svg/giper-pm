@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { prisma, Prisma, type TaskStatus } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
 import { canEditProject } from '@/lib/permissions';
+import { getEffectiveCapsForProject } from '@/lib/capabilities';
 import type { ActionResult } from './projects';
 
 const STATUSES: readonly TaskStatus[] = [
@@ -56,7 +57,13 @@ export async function updateAutomationsAction(
   if (!project) {
     return { ok: false, error: { code: 'NOT_FOUND', message: 'Проект не найден' } };
   }
-  if (!canEditProject({ id: me.id, role: me.role }, project)) {
+  if (
+    !canEditProject(
+      { id: me.id, role: me.role },
+      project,
+      await getEffectiveCapsForProject({ id: me.id, role: me.role }, projectId),
+    )
+  ) {
     return {
       ok: false,
       error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' },

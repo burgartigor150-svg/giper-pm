@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
 import { canEditProject, canSeeSettings } from '@/lib/permissions';
+import { getEffectiveCapsForProject } from '@/lib/capabilities';
 
 type ActionResult<T = unknown> =
   | { ok: true; data?: T }
@@ -95,7 +96,13 @@ export async function setProjectSpaceAction(projectKey: string, spaceId: string 
     select: { id: true, ownerId: true, members: { select: { userId: true, role: true } } },
   });
   if (!project) return { ok: false, error: { code: 'NOT_FOUND', message: 'Проект не найден' } };
-  if (!canEditProject({ id: me.id, role: me.role }, project)) {
+  if (
+    !canEditProject(
+      { id: me.id, role: me.role },
+      project,
+      await getEffectiveCapsForProject({ id: me.id, role: me.role }, project.id),
+    )
+  ) {
     return { ok: false, error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' } };
   }
   if (spaceId) {

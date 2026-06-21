@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache';
 import { prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
 import { canEditProject } from '@/lib/permissions';
+import { getEffectiveCapsForProject } from '@/lib/capabilities';
 import { isSafeWebhookUrl } from '@/lib/webhooks/ssrfGuard';
 import { WEBHOOK_EVENT_SET } from '@/lib/webhooks/events';
 
@@ -26,7 +27,14 @@ async function canEditProjectId(userId: string, role: string, projectId: string)
     select: { key: true, ownerId: true, members: { select: { userId: true, role: true } } },
   });
   if (!project) return null;
-  if (!canEditProject({ id: userId, role: role as never }, project)) return null;
+  if (
+    !canEditProject(
+      { id: userId, role: role as never },
+      project,
+      await getEffectiveCapsForProject({ id: userId, role: role as never }, projectId),
+    )
+  )
+    return null;
   return project;
 }
 

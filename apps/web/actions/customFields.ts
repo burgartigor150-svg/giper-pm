@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { prisma, Prisma, type CustomFieldType } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
 import { canEditProject } from '@/lib/permissions';
+import { getEffectiveCapsForProject } from '@/lib/capabilities';
 import type { ActionResult } from './projects';
 
 const FIELD_TYPES: readonly CustomFieldType[] = [
@@ -49,7 +50,13 @@ export async function updateCustomFieldsAction(
   if (!project) {
     return { ok: false, error: { code: 'NOT_FOUND', message: 'Проект не найден' } };
   }
-  if (!canEditProject({ id: me.id, role: me.role }, project)) {
+  if (
+    !canEditProject(
+      { id: me.id, role: me.role },
+      project,
+      await getEffectiveCapsForProject({ id: me.id, role: me.role }, projectId),
+    )
+  ) {
     return {
       ok: false,
       error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' },
@@ -174,7 +181,14 @@ export async function setCustomFieldValueAction(
   }
   const isStakeholder =
     task.assigneeId === me.id || task.creatorId === me.id || task.reviewerId === me.id;
-  if (!isStakeholder && !canEditProject({ id: me.id, role: me.role }, task.project)) {
+  if (
+    !isStakeholder &&
+    !canEditProject(
+      { id: me.id, role: me.role },
+      task.project,
+      await getEffectiveCapsForProject({ id: me.id, role: me.role }, task.projectId),
+    )
+  ) {
     return {
       ok: false,
       error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' },

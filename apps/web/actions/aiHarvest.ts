@@ -6,6 +6,7 @@ import { prisma } from '@giper/db';
 import { proposeTasks, type TaskProposal } from '@giper/integrations';
 import { requireAuth } from '@/lib/auth';
 import { canManageAssignments } from '@/lib/permissions';
+import { getEffectiveCapsForProject } from '@/lib/capabilities';
 import { createTask } from '@/lib/tasks/createTask';
 
 let _redis: Redis | null = null;
@@ -72,7 +73,14 @@ async function loadLinkForUser(linkId: string, userId: string, role: string) {
   if (!link) return null;
   const allowed =
     link.bot.userId === userId ||
-    canManageAssignments({ id: userId, role: role as 'ADMIN' | 'PM' | 'MEMBER' | 'VIEWER' }, link.project);
+    canManageAssignments(
+      { id: userId, role: role as 'ADMIN' | 'PM' | 'MEMBER' | 'VIEWER' },
+      link.project,
+      await getEffectiveCapsForProject(
+        { id: userId, role: role as 'ADMIN' | 'PM' | 'MEMBER' | 'VIEWER' },
+        link.project.id,
+      ),
+    );
   if (!allowed) return null;
   return link;
 }
