@@ -1405,16 +1405,29 @@ model ChecklistItem {
 // We only persist BLOCKS edges; "blockedBy" is the inverse relation.
 // Cycles are prevented at the action layer with a DFS check; the
 // schema unique constraint catches duplicate edges.
+/// Type of a directed task↔task link. BLOCKS is the original (and default, so
+/// existing rows stay blockers): `from` blocks `to`. RELATES_TO is a soft,
+/// non-blocking association; DUPLICATES means `from` duplicates `to`. ONLY
+/// BLOCKS participates in the board's blocked-state / auto-unblock / Gantt-arrow
+/// / cycle logic — the others are display-only relations.
+enum TaskLinkType {
+  BLOCKS
+  RELATES_TO
+  DUPLICATES
+}
+
 model TaskDependency {
-  id          String   @id @default(cuid())
+  id          String       @id @default(cuid())
   fromTaskId  String
-  fromTask    Task     @relation("BlocksFrom", fields: [fromTaskId], references: [id], onDelete: Cascade)
+  fromTask    Task         @relation("BlocksFrom", fields: [fromTaskId], references: [id], onDelete: Cascade)
   toTaskId    String
-  toTask      Task     @relation("BlocksTo", fields: [toTaskId], references: [id], onDelete: Cascade)
-  createdAt   DateTime @default(now())
+  toTask      Task         @relation("BlocksTo", fields: [toTaskId], references: [id], onDelete: Cascade)
+  /// Link kind. Defaults to BLOCKS so every pre-existing edge stays a blocker.
+  linkType    TaskLinkType @default(BLOCKS)
+  createdAt   DateTime     @default(now())
   createdById String
 
-  @@unique([fromTaskId, toTaskId])
+  @@unique([fromTaskId, toTaskId, linkType])
   @@index([toTaskId])
 }
 

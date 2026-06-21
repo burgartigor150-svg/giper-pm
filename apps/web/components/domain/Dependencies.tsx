@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Ban, Plus, X } from 'lucide-react';
 import { TaskStatusBadge } from './TaskStatusBadge';
-import type { TaskStatus } from '@giper/db';
+import type { TaskStatus, TaskLinkType } from '@giper/db';
 import {
   addDependencyAction,
   removeDependencyAction,
@@ -14,6 +14,12 @@ import { searchTasks, type TaskSearchHit } from '@/actions/tasks';
 
 type Edge = {
   id: string;
+  /**
+   * Whether the X (remove) control may show. removeDependencyAction gates on the
+   * edge's fromTask, so only OUTGOING edges (current task = fromTask) are
+   * removable from this page; incoming edges are removed from the other side.
+   */
+  removable?: boolean;
   task: {
     id: string;
     number: number;
@@ -27,20 +33,23 @@ type Props = {
   taskId: string;
   projectKey: string;
   taskNumber: number;
-  /** Tasks this one BLOCKS — outgoing edges. */
+  /** Tasks this one BLOCKS — outgoing BLOCKS edges. */
   blocks: Edge[];
-  /** Tasks that block this one — incoming edges. */
+  /** Tasks that block this one — incoming BLOCKS edges. */
   blockedBy: Edge[];
+  /** Non-blocking related tasks (RELATES_TO, either direction). */
+  relates: Edge[];
+  /** Tasks this one duplicates (outgoing DUPLICATES). */
+  duplicates: Edge[];
+  /** Tasks that duplicate this one (incoming DUPLICATES). */
+  duplicatedBy: Edge[];
   canEdit: boolean;
 };
 
 /**
- * Two-list block: incoming "Заблокирована" + outgoing "Блокирует". Both
- * lists let the user remove edges (canEdit only); the bottom of the
- * block has a search-as-you-type adder for new outgoing edges.
- *
- * Cycle prevention is server-side; the UI just surfaces the rejection
- * message inline.
+ * Task relations panel. BLOCKS drives the blocked-state machine (red box +
+ * auto-unblock); RELATES_TO and DUPLICATES are soft, display-only links. A
+ * single adder at the bottom lets the user pick the link kind.
  */
 export function Dependencies({
   taskId,
@@ -48,6 +57,9 @@ export function Dependencies({
   taskNumber,
   blocks,
   blockedBy,
+  relates,
+  duplicates,
+  duplicatedBy,
   canEdit,
 }: Props) {
   const openBlockedBy = blockedBy.filter(
@@ -71,54 +83,69 @@ export function Dependencies({
       ) : null}
 
       {blockedBy.length > openBlockedBy.length ? (
-        <DetailsSection
-          title={`Уже не блокируют (${blockedBy.length - openBlockedBy.length})`}
-        >
+        <DetailsSection title={`Уже не блокируют (${blockedBy.length - openBlockedBy.length})`}>
           <ul className="flex flex-col gap-1">
             {blockedBy
               .filter((e) => e.task.status === 'DONE' || e.task.status === 'CANCELED')
               .map((e) => (
-                <EdgeRow
-                  key={e.id}
-                  edge={e}
-                  canRemove={false}
-                  projectKey={projectKey}
-                  taskNumber={taskNumber}
-                />
+                <EdgeRow key={e.id} edge={e} canRemove={false} projectKey={projectKey} taskNumber={taskNumber} />
               ))}
           </ul>
         </DetailsSection>
       ) : null}
 
-      <div>
-        <div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Блокирует
-        </div>
-        {blocks.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Никого не блокирует.</p>
-        ) : (
-          <ul className="flex flex-col gap-1">
-            {blocks.map((e) => (
-              <EdgeRow
-                key={e.id}
-                edge={e}
-                canRemove={canEdit}
-                projectKey={projectKey}
-                taskNumber={taskNumber}
-              />
-            ))}
-          </ul>
-        )}
+      <Section title="Блокирует" edges={blocks} empty="Никого не блокирует." canEdit={canEdit} projectKey={projectKey} taskNumber={taskNumber} />
 
-        {canEdit ? (
-          <AddDependency
-            fromTaskId={taskId}
-            projectKey={projectKey}
-            taskNumber={taskNumber}
-            existingIds={new Set(blocks.map((e) => e.task.id))}
-          />
-        ) : null}
-      </div>
+      {relates.length > 0 ? (
+        <Section title="Связанные" edges={relates} canEdit={canEdit} projectKey={projectKey} taskNumber={taskNumber} />
+      ) : null}
+      {duplicates.length > 0 ? (
+        <Section title="Дублирует" edges={duplicates} canEdit={canEdit} projectKey={projectKey} taskNumber={taskNumber} />
+      ) : null}
+      {duplicatedBy.length > 0 ? (
+        <Section title="Дубликаты этой задачи" edges={duplicatedBy} canEdit={canEdit} projectKey={projectKey} taskNumber={taskNumber} />
+      ) : null}
+
+      {canEdit ? (
+        <AddLink fromTaskId={taskId} projectKey={projectKey} taskNumber={taskNumber} />
+      ) : null}
+    </div>
+  );
+}
+
+function Section({
+  title,
+  edges,
+  empty,
+  canEdit,
+  projectKey,
+  taskNumber,
+}: {
+  title: string;
+  edges: Edge[];
+  empty?: string;
+  canEdit: boolean;
+  projectKey: string;
+  taskNumber: number;
+}) {
+  return (
+    <div>
+      <div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">{title}</div>
+      {edges.length === 0 ? (
+        empty ? <p className="text-sm text-muted-foreground">{empty}</p> : null
+      ) : (
+        <ul className="flex flex-col gap-1">
+          {edges.map((e) => (
+            <EdgeRow
+              key={e.id}
+              edge={e}
+              canRemove={canEdit && (e.removable ?? false)}
+              projectKey={projectKey}
+              taskNumber={taskNumber}
+            />
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
@@ -163,7 +190,7 @@ function EdgeRow({
           type="button"
           onClick={remove}
           disabled={pending}
-          aria-label="Убрать зависимость"
+          aria-label="Убрать связь"
           className="text-muted-foreground opacity-0 transition-opacity hover:text-red-600 group-hover:opacity-100 disabled:opacity-50"
         >
           <X className="h-3.5 w-3.5" />
@@ -176,27 +203,30 @@ function EdgeRow({
 function DetailsSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <details className="text-sm">
-      <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
-        {title}
-      </summary>
+      <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">{title}</summary>
       <div className="mt-2">{children}</div>
     </details>
   );
 }
 
-function AddDependency({
+const LINK_OPTIONS: { value: TaskLinkType; label: string }[] = [
+  { value: 'BLOCKS', label: 'Блокирует' },
+  { value: 'RELATES_TO', label: 'Связана с' },
+  { value: 'DUPLICATES', label: 'Дублирует' },
+];
+
+function AddLink({
   fromTaskId,
   projectKey,
   taskNumber,
-  existingIds,
 }: {
   fromTaskId: string;
   projectKey: string;
   taskNumber: number;
-  existingIds: Set<string>;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [linkType, setLinkType] = useState<TaskLinkType>('BLOCKS');
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<TaskSearchHit[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -214,7 +244,7 @@ function AddDependency({
   function pick(taskId: string) {
     setError(null);
     startTransition(async () => {
-      const res = await addDependencyAction(fromTaskId, taskId, projectKey, taskNumber);
+      const res = await addDependencyAction(fromTaskId, taskId, projectKey, taskNumber, linkType);
       if (!res.ok) {
         setError(res.error.message);
       } else {
@@ -231,19 +261,31 @@ function AddDependency({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="mt-2 inline-flex items-center gap-1 self-start rounded-md border border-dashed border-input px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+        className="mt-1 inline-flex items-center gap-1 self-start rounded-md border border-dashed border-input px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
       >
         <Plus className="h-3 w-3" />
-        Блокер
+        Добавить связь
       </button>
     );
   }
 
-  const visible = results.filter((r) => r.id !== fromTaskId && !existingIds.has(r.id));
+  const visible = results.filter((r) => r.id !== fromTaskId);
 
   return (
-    <div className="mt-2 rounded-md border border-input bg-background p-2">
+    <div className="mt-1 rounded-md border border-input bg-background p-2">
       <div className="flex items-center gap-2">
+        <select
+          value={linkType}
+          onChange={(e) => setLinkType(e.target.value as TaskLinkType)}
+          className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+          aria-label="Тип связи"
+        >
+          {LINK_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
         <input
           autoFocus
           value={query}

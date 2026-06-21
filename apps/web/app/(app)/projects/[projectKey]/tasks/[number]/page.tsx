@@ -463,8 +463,15 @@ export default async function TaskDetailPage({ params }: { params: Params }) {
                   taskId={task.id}
                   projectKey={task.project.key}
                   taskNumber={task.number}
-                  blocks={task.blocks.map((b) => ({ id: b.id, task: b.toTask }))}
-                  blockedBy={task.blockedBy.map((b) => ({ id: b.id, task: b.fromTask }))}
+                  blocks={task.blocks.filter((b) => b.linkType === 'BLOCKS').map((b) => ({ id: b.id, task: b.toTask, removable: true }))}
+                  blockedBy={task.blockedBy.filter((b) => b.linkType === 'BLOCKS').map((b) => ({ id: b.id, task: b.fromTask }))}
+                  relates={[
+                    // outgoing RELATES_TO is removable here; incoming is removed from the other task.
+                    ...task.blocks.filter((b) => b.linkType === 'RELATES_TO').map((b) => ({ id: b.id, task: b.toTask, removable: true })),
+                    ...task.blockedBy.filter((b) => b.linkType === 'RELATES_TO').map((b) => ({ id: b.id, task: b.fromTask, removable: false })),
+                  ]}
+                  duplicates={task.blocks.filter((b) => b.linkType === 'DUPLICATES').map((b) => ({ id: b.id, task: b.toTask, removable: true }))}
+                  duplicatedBy={task.blockedBy.filter((b) => b.linkType === 'DUPLICATES').map((b) => ({ id: b.id, task: b.fromTask, removable: false }))}
                   canEdit={canEdit}
                 />
               </CardContent>

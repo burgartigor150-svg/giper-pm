@@ -76,6 +76,7 @@ export async function getTask(projectKey: string, number: number, user: SessionU
       blocks: {
         select: {
           id: true,
+          linkType: true,
           toTask: {
             select: {
               id: true,
@@ -90,6 +91,7 @@ export async function getTask(projectKey: string, number: number, user: SessionU
       blockedBy: {
         select: {
           id: true,
+          linkType: true,
           fromTask: {
             select: {
               id: true,
