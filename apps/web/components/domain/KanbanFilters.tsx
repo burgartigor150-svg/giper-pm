@@ -7,6 +7,20 @@ import { useT } from '@/lib/useT';
 import { TagPill } from './TagPill';
 
 const PRIORITIES = ['LOW', 'MEDIUM', 'HIGH', 'URGENT'] as const;
+const TYPES = ['TASK', 'BUG', 'FEATURE', 'EPIC', 'CHORE'] as const;
+const TYPE_LABELS: Record<(typeof TYPES)[number], string> = {
+  TASK: 'Задача',
+  BUG: 'Баг',
+  FEATURE: 'Фича',
+  EPIC: 'Эпик',
+  CHORE: 'Рутина',
+};
+const DUE_OPTIONS = [
+  { value: 'overdue', label: 'Просрочено' },
+  { value: 'today', label: 'Сегодня' },
+  { value: '7', label: '7 дней' },
+  { value: '30', label: '30 дней' },
+] as const;
 
 type Member = { id: string; name: string };
 type TagOption = { id: string; name: string; color: string };
@@ -17,6 +31,9 @@ type Props = {
   priority: string | undefined;
   q: string | undefined;
   onlyMine: boolean;
+  type?: string | undefined;
+  dueWithin?: string | undefined;
+  reviewer?: string | undefined;
   availableTags?: TagOption[];
   activeTagIds?: string[];
 };
@@ -27,6 +44,9 @@ export function KanbanFilters({
   priority,
   q,
   onlyMine,
+  type,
+  dueWithin,
+  reviewer,
   availableTags = [],
   activeTagIds = [],
 }: Props) {
@@ -109,6 +129,48 @@ export function KanbanFilters({
         </select>
       </label>
 
+      <label className="flex items-center gap-1 text-sm text-muted-foreground">
+        <span>Тип:</span>
+        <select
+          value={type ?? ''}
+          onChange={(e) =>
+            pushParams((sp) => {
+              if (e.target.value) sp.set('type', e.target.value);
+              else sp.delete('type');
+            })
+          }
+          className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+        >
+          <option value="">{tList('all')}</option>
+          {TYPES.map((tp) => (
+            <option key={tp} value={tp}>
+              {TYPE_LABELS[tp]}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label className="flex items-center gap-1 text-sm text-muted-foreground">
+        <span>Срок:</span>
+        <select
+          value={dueWithin ?? ''}
+          onChange={(e) =>
+            pushParams((sp) => {
+              if (e.target.value) sp.set('dueWithin', e.target.value);
+              else sp.delete('dueWithin');
+            })
+          }
+          className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+        >
+          <option value="">{tList('all')}</option>
+          {DUE_OPTIONS.map((d) => (
+            <option key={d.value} value={d.value}>
+              {d.label}
+            </option>
+          ))}
+        </select>
+      </label>
+
       <label className="flex items-center gap-2 text-sm text-muted-foreground">
         <input
           type="checkbox"
@@ -121,6 +183,20 @@ export function KanbanFilters({
           }
         />
         {tCommon('onlyMine')}
+      </label>
+
+      <label className="flex items-center gap-2 text-sm text-muted-foreground">
+        <input
+          type="checkbox"
+          checked={reviewer === 'me'}
+          onChange={(e) =>
+            pushParams((sp) => {
+              if (e.target.checked) sp.set('reviewer', 'me');
+              else sp.delete('reviewer');
+            })
+          }
+        />
+        На моём ревью
       </label>
 
       {availableTags.length > 0 ? (

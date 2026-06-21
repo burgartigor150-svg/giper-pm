@@ -8,3 +8,4 @@ export * from './listTasksForProject';
 export * from './getTask';
 export * from './listRecentTasks';
 export * from './listTasksForBoard';
+export * from './buildTaskFilterClauses';

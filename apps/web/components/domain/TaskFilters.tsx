@@ -10,6 +10,20 @@ import { TagPill } from './TagPill';
 
 const STATUSES = ['BACKLOG', 'TODO', 'IN_PROGRESS', 'REVIEW', 'BLOCKED', 'DONE', 'CANCELED'] as const;
 const PRIORITIES = ['LOW', 'MEDIUM', 'HIGH', 'URGENT'] as const;
+const TYPES = ['TASK', 'BUG', 'FEATURE', 'EPIC', 'CHORE'] as const;
+const TYPE_LABELS: Record<(typeof TYPES)[number], string> = {
+  TASK: 'Задача',
+  BUG: 'Баг',
+  FEATURE: 'Фича',
+  EPIC: 'Эпик',
+  CHORE: 'Рутина',
+};
+const DUE_OPTIONS = [
+  { value: 'overdue', label: 'Просрочено' },
+  { value: 'today', label: 'Сегодня' },
+  { value: '7', label: 'В течение 7 дней' },
+  { value: '30', label: 'В течение 30 дней' },
+] as const;
 
 type TagOption = { id: string; name: string; color: string };
 
@@ -18,6 +32,9 @@ type Props = {
   priority: string | undefined;
   assigneeId: string | undefined;
   q: string | undefined;
+  type?: string | undefined;
+  dueWithin?: string | undefined;
+  reviewer?: string | undefined;
   members: UserSearchHit[];
   availableTags?: TagOption[];
   activeTagIds?: string[];
@@ -43,6 +60,9 @@ export function TaskFilters({
   priority,
   assigneeId,
   q,
+  type,
+  dueWithin,
+  reviewer,
   members,
   availableTags = [],
   activeTagIds = [],
@@ -190,6 +210,70 @@ export function TaskFilters({
               </option>
             ))}
           </select>
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <label htmlFor="task-filter-type" className="text-xs font-medium text-muted-foreground">
+            Тип
+          </label>
+          <select
+            id="task-filter-type"
+            value={type ?? ''}
+            onChange={(e) =>
+              pushParams((sp) => {
+                if (e.target.value) sp.set('type', e.target.value);
+                else sp.delete('type');
+              })
+            }
+            className={selectClass}
+          >
+            <option value="">{tList('all')}</option>
+            {TYPES.map((tp) => (
+              <option key={tp} value={tp}>
+                {TYPE_LABELS[tp]}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <label htmlFor="task-filter-due" className="text-xs font-medium text-muted-foreground">
+            Срок
+          </label>
+          <select
+            id="task-filter-due"
+            value={dueWithin ?? ''}
+            onChange={(e) =>
+              pushParams((sp) => {
+                if (e.target.value) sp.set('dueWithin', e.target.value);
+                else sp.delete('dueWithin');
+              })
+            }
+            className={selectClass}
+          >
+            <option value="">{tList('all')}</option>
+            {DUE_OPTIONS.map((d) => (
+              <option key={d.value} value={d.value}>
+                {d.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="flex items-end">
+          <label className="flex h-10 items-center gap-2 text-sm text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={reviewer === 'me'}
+              onChange={(e) =>
+                pushParams((sp) => {
+                  if (e.target.checked) sp.set('reviewer', 'me');
+                  else sp.delete('reviewer');
+                })
+              }
+            />
+            На моём ревью
+          </label>
         </div>
       </div>
 

@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import { Avatar } from '@giper/ui/components/Avatar';
 import { Button } from '@giper/ui/components/Button';
 import { Card } from '@giper/ui/components/Card';
@@ -7,11 +7,18 @@ import { taskListFilterSchema } from '@giper/shared';
 import { requireAuth } from '@/lib/auth';
 import { getProject } from '@/lib/projects';
 import { listTasksForProject } from '@/lib/tasks';
-import { canCreateTask } from '@/lib/permissions';
+import { canCreateTask, canEditProject } from '@/lib/permissions';
+import { getEffectiveCapsForProject } from '@/lib/capabilities';
 import { DomainError } from '@/lib/errors';
 import { getT } from '@/lib/i18n';
 import { TaskFilters } from '@/components/domain/TaskFilters';
+import { SavedFilterBar } from '@/components/domain/SavedFilterBar';
 import { listTagsForProject } from '@/actions/tags';
+import {
+  listSavedFiltersForView,
+  resolveDefaultFilterQuery,
+  hasExplicitFilterState,
+} from '@/lib/savedFilters/listSavedFiltersForView';
 import { SortHeader } from '@/components/domain/SortHeader';
 import { Pagination } from '@/components/domain/Pagination';
 import { TaskStatusBadge } from '@/components/domain/TaskStatusBadge';
@@ -30,6 +37,13 @@ export default async function ProjectTasksListPage({
   const t = await getT('tasks.list');
   const tTable = await getT('tasks.list.table');
 
+  // Default-preset auto-apply: with no explicit filter state, redirect to the
+  // viewer's default list preset (if any). Guarded against empty-query loops.
+  if (!hasExplicitFilterState(sp)) {
+    const def = await resolveDefaultFilterQuery(projectKey, 'LIST', me.id);
+    if (def && def.length > 0) redirect(`/projects/${projectKey}/list?${def}`);
+  }
+
   let project;
   try {
     project = await getProject(projectKey, { id: me.id, role: me.role });
@@ -42,7 +56,7 @@ export default async function ProjectTasksListPage({
 
   // Parse filters from URL with safe defaults
   const filterRaw: Record<string, unknown> = {};
-  for (const k of ['status', 'priority', 'assigneeId', 'q', 'page', 'sort', 'dir']) {
+  for (const k of ['status', 'priority', 'assigneeId', 'q', 'type', 'dueWithin', 'reviewer', 'page', 'sort', 'dir']) {
     const v = sp[k];
     if (typeof v === 'string') filterRaw[k] = v;
   }
@@ -58,10 +72,17 @@ export default async function ProjectTasksListPage({
     ? parsed.data
     : taskListFilterSchema.parse({});
 
-  const [result, availableTags] = await Promise.all([
+  const [result, availableTags, presets, projCaps] = await Promise.all([
     listTasksForProject(projectKey, filter, { id: me.id, role: me.role }),
     listTagsForProject(project.id),
+    listSavedFiltersForView(project.id, 'LIST', me.id),
+    getEffectiveCapsForProject({ id: me.id, role: me.role }, project.id),
   ]);
+  const canShare = canEditProject(
+    { id: me.id, role: me.role },
+    { ownerId: project.ownerId, members: project.members },
+    projCaps,
+  );
 
   // Members for assignee dropdown
   const members = [
@@ -104,12 +125,21 @@ export default async function ProjectTasksListPage({
         ) : null}
       </div>
 
-      <Card className="p-4">
+      <Card className="space-y-3 p-4">
+        <SavedFilterBar
+          projectKey={project.key}
+          scope="LIST"
+          presets={presets}
+          canShare={canShare}
+        />
         <TaskFilters
           status={filter.status}
           priority={filter.priority}
           assigneeId={filter.assigneeId}
           q={filter.q}
+          type={filter.type}
+          dueWithin={filter.dueWithin}
+          reviewer={filter.reviewer}
           members={members}
           availableTags={availableTags}
           activeTagIds={filter.tagIds ?? []}

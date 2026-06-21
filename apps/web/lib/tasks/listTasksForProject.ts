@@ -2,6 +2,7 @@ import { prisma, type Prisma } from '@giper/db';
 import { TASKS_PAGE_SIZE, type TaskListFilter } from '@giper/shared';
 import { DomainError } from '../errors';
 import { canViewProject, type SessionUser } from '../permissions';
+import { buildTaskFilterClauses } from './buildTaskFilterClauses';
 
 export async function listTasksForProject(
   projectKey: string,
@@ -57,26 +58,25 @@ export async function listTasksForProject(
   };
 
   const where: Prisma.TaskWhereInput = { projectId: project.id };
-  const andClauses: Prisma.TaskWhereInput[] = [];
   if (filter.status) where.status = filter.status;
   if (filter.priority) where.priority = filter.priority;
   if (filter.assigneeId) where.assigneeId = filter.assigneeId;
-  if (filter.q) {
-    andClauses.push({
-      OR: [
-        { title: { contains: filter.q, mode: 'insensitive' } },
-        { description: { contains: filter.q, mode: 'insensitive' } },
-      ],
-    });
-  }
-  if (filter.tagIds && filter.tagIds.length > 0) {
-    // AND: task must carry every selected tag.
-    for (const tagId of filter.tagIds) {
-      andClauses.push({ taskTags: { some: { tagId } } });
-    }
-  }
-  if (visibilityClause) andClauses.push(visibilityClause);
-  if (andClauses.length > 0) where.AND = andClauses;
+  // q / tags / type / dueWithin / reviewer come from the shared builder as
+  // pure NARROWING AND-clauses — the per-stake visibilityClause below is
+  // appended to the same array and is never reassigned/clobbered. The list
+  // shows the Bitrix-mirror `status` track, so the overdue guard reads that.
+  const andClauses = buildTaskFilterClauses(
+    {
+      q: filter.q,
+      tagIds: filter.tagIds,
+      type: filter.type,
+      dueWithin: filter.dueWithin,
+      reviewerMe: filter.reviewer === 'me',
+    },
+    { userId: user.id, statusField: 'status' },
+  );
+  andClauses.push(visibilityClause);
+  where.AND = andClauses;
 
   const orderBy: Prisma.TaskOrderByWithRelationInput =
     filter.sort === 'assignee'

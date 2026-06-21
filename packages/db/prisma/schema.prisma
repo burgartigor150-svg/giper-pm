@@ -99,6 +99,8 @@ model User {
   groupMemberships  UserGroupMember[]
   /// Personal API tokens for the public REST API (act-as this user).
   apiTokens         ApiToken[]
+  /// Saved board/list filter presets owned by this user.
+  savedFilters      SavedFilter[]        @relation("SavedFilterOwner")
 
   // Tags assigned by this user (audit trail of tag activity).
   tagAssignments    TaskTag[]            @relation("TaskTagAssigner")
@@ -439,6 +441,8 @@ model Project {
   deals           Deal[]          @relation("DealProject")
   /// Per-project custom-role assignments. Reserved for v2 — no writer in v1.
   memberCustomRoles ProjectMemberCustomRole[]
+  /// Saved board/list filter presets scoped to this project.
+  savedFilters    SavedFilter[]
   /// Space (folder) this project belongs to. Nullable = ungrouped.
   spaceId         String?
   space           Space?          @relation(fields: [spaceId], references: [id], onDelete: SetNull)
@@ -840,6 +844,46 @@ model ProjectMemberCustomRole {
 
   @@unique([projectId, userId])
   @@index([customRoleId])
+}
+
+/// Which view a saved filter targets — board and list have different filter
+/// dimensions (board has onlyMine/sprint, list has status/sort/dir).
+enum SavedFilterScope {
+  BOARD
+  LIST
+}
+
+/// Named, persisted board/list filter preset. Additive + inert: until a user
+/// creates one, every board/list query is byte-identical to today. `query`
+/// stores the SAME URL-search-param shape the existing filter bars produce
+/// (e.g. "priority=HIGH&q=foo&dueWithin=7&type=BUG&reviewer=me"), so applying a
+/// preset is "replay these params" — it never touches the per-stake OR access
+/// clause in listTasksForBoard / listTasksForProject.
+model SavedFilter {
+  id        String           @id @default(cuid())
+  /// Owner. A preset is private to its owner unless isShared=true.
+  userId    String
+  user      User             @relation("SavedFilterOwner", fields: [userId], references: [id], onDelete: Cascade)
+  /// Project the preset belongs to (presets are project-scoped).
+  projectId String
+  project   Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  /// Which surface this preset targets.
+  scope     SavedFilterScope
+  name      String
+  /// Serialized URL query string (params only, no leading "?").
+  query     String
+  /// When true, every viewer of the project sees this preset (read-only).
+  isShared  Boolean          @default(false)
+  /// When true, this is the owner's default preset for (scope) in this project,
+  /// auto-applied on load when no explicit params are present. Single-default
+  /// per (userId, projectId, scope) is enforced in the action layer (CI uses
+  /// prisma db push → cannot express a partial unique index).
+  isDefault Boolean          @default(false)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  @@index([userId, projectId, scope])
+  @@index([projectId, isShared])
 }
 
 /// A Telegram group or channel whose messages PM wants to turn into tasks.

@@ -94,10 +94,20 @@ export const addCommentSchema = z.object({
   visibility: commentVisibilitySchema.optional().default('EXTERNAL'),
 });
 
+/** Relative due-date window for the "due within" filter. */
+export const dueWithinSchema = z.enum(['overdue', 'today', '7', '30']);
+export type DueWithinInput = z.infer<typeof dueWithinSchema>;
+
 export const taskListFilterSchema = z.object({
   status: taskStatusSchema.optional(),
   priority: taskPrioritySchema.optional(),
   assigneeId: z.string().optional(),
+  /** Task type filter (TASK/BUG/FEATURE/EPIC/CHORE). */
+  type: taskTypeSchema.optional(),
+  /** Relative due-date window — still-open tasks due in the window. */
+  dueWithin: dueWithinSchema.optional(),
+  /** "me" restricts to tasks where the viewer is the assigned reviewer. */
+  reviewer: z.literal('me').optional(),
   q: z.string().trim().max(200).optional(),
   /** Tag IDs the task must have (AND-semantics). */
   tagIds: z.array(z.string()).optional(),

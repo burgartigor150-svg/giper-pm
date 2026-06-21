@@ -284,13 +284,13 @@ describe('per-project caps — task-lib helpers (slice 5c)', () => {
     // Ungranted member cannot staff or edit.
     await expect(assignTask(task2.id, victim.id, { id: other.id, role: 'MEMBER' })).rejects.toThrow();
     await expect(
-      updateTask(task2.id, { priority: 'HIGH' }, { id: other.id, role: 'MEMBER' }),
+      updateTask(task2.id, { priority: 'HIGH', tags: [] }, { id: other.id, role: 'MEMBER' }),
     ).rejects.toThrow();
 
     // Granted rep can.
     const assigned = await assignTask(task.id, victim.id, { id: rep.id, role: 'MEMBER' });
     expect(assigned.assigneeId).toBe(victim.id);
-    const updated = await updateTask(task.id, { priority: 'HIGH' }, { id: rep.id, role: 'MEMBER' });
+    const updated = await updateTask(task.id, { priority: 'HIGH', tags: [] }, { id: rep.id, role: 'MEMBER' });
     expect(updated.priority).toBe('HIGH');
   });
 });
