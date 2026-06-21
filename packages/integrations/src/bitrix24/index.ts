@@ -15,6 +15,8 @@ export type { SyncFilesResult } from './syncFiles';
 export { syncTaskComments } from './syncComments';
 export type { SyncCommentsResult } from './syncComments';
 export { getBitrixBotUserId, BITRIX_BOT_EMAIL } from './botUser';
+export { backfillAdminAttributedComments } from './backfillAdminAuthors';
+export type { BackfillAuthorsResult } from './backfillAdminAuthors';
 export { syncTaskHistory } from './syncHistory';
 export type { SyncHistoryResult } from './syncHistory';
 export { syncTaskChat } from './syncChat';
