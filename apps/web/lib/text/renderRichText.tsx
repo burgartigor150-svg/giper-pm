@@ -37,12 +37,13 @@ export function renderRichText(
   if (!input) return null;
 
   // Pattern alternation:
-  //   1. [URL=link]label[/URL]
-  //   2. [URL]link[/URL]
-  //   3. bare http(s)://…
-  //   4. @<cuid>  — id-style mention (rendered iff present in map)
+  //   1. [label](url)  — markdown link (what convertBitrixMarkup emits)
+  //   2. [URL=link]label[/URL]
+  //   3. [URL]link[/URL]
+  //   4. bare http(s)://…
+  //   5. @<cuid>  — id-style mention (rendered iff present in map)
   const re =
-    /\[URL=([^\]]+?)\]([\s\S]*?)\[\/URL\]|\[URL\]([\s\S]*?)\[\/URL\]|(https?:\/\/[^\s<>"']+)|@([a-z0-9]{24,})\b/gi;
+    /\[([^\]]*)\]\(([^)\s]+)\)|\[URL=([^\]]+?)\]([\s\S]*?)\[\/URL\]|\[URL\]([\s\S]*?)\[\/URL\]|(https?:\/\/[^\s<>"']+)|@([a-z0-9]{24,})\b/gi;
 
   const out: ReactNode[] = [];
   let lastIndex = 0;
@@ -53,8 +54,29 @@ export function renderRichText(
     if (match.index > lastIndex) {
       out.push(input.slice(lastIndex, match.index));
     }
-    const [, urlA, labelA, urlB, bareUrl, mentionId] = match;
-    if (mentionId) {
+    const [, mdLabel, mdUrl, urlA, labelA, urlB, bareUrl, mentionId] = match;
+    if (mdUrl !== undefined) {
+      // Markdown link. A relative/invalid href (e.g. a leftover Bitrix action
+      // path) can't be sanitized → render just the label so we never show raw
+      // "[text](…)" markup to the user.
+      const href = sanitizeHref(mdUrl);
+      const label = (mdLabel ?? '').trim();
+      if (href) {
+        out.push(
+          <a
+            key={`md${key++}`}
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-blue-600 underline underline-offset-2 hover:text-blue-700 break-all"
+          >
+            {label || href}
+          </a>,
+        );
+      } else if (label) {
+        out.push(label);
+      }
+    } else if (mentionId) {
       const u = options.mentions?.get(mentionId);
       if (u) {
         out.push(

@@ -123,6 +123,49 @@ export function stripBitrixHtml(s: string): string {
   return convertBitrixMarkup(s).slice(0, 50_000);
 }
 
+/**
+ * Bitrix portal timezone. The mirrored portal (since-b24-ru) is Russian, so
+ * `[TIMESTAMP=…]` epoch values render in Moscow time to match what users see
+ * in Bitrix itself. If we ever mirror a portal in another zone this should
+ * move to config, but a single hardcoded zone is correct for the only portal
+ * we sync today.
+ */
+const BITRIX_PORTAL_TZ = 'Europe/Moscow';
+
+/** True for http(s)/protocol-relative URLs; false for Bitrix-internal paths. */
+function isAbsoluteUrl(u: string): boolean {
+  return /^(https?:)?\/\//i.test(u) || /^https?:/i.test(u);
+}
+
+/**
+ * Format a Bitrix `[TIMESTAMP=<unix> FORMAT=<fmt>]` tag. Bitrix puts the epoch
+ * in the attribute and renders it client-side, so a naive tag-strip loses the
+ * value entirely (the deadline/date becomes a stray ", "). We re-render it:
+ * *_TIME_* formats → HH:MM, everything else → DD.MM.YYYY.
+ */
+function formatBitrixTimestamp(unix: string, fmt: string | undefined): string {
+  const secs = Number(unix);
+  if (!Number.isFinite(secs) || secs <= 0) return '';
+  const d = new Date(secs * 1000);
+  if (Number.isNaN(d.getTime())) return '';
+  const isTime = /TIME/i.test(fmt ?? '');
+  try {
+    return new Intl.DateTimeFormat(
+      'ru-RU',
+      isTime
+        ? { timeZone: BITRIX_PORTAL_TZ, hour: '2-digit', minute: '2-digit' }
+        : {
+            timeZone: BITRIX_PORTAL_TZ,
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+          },
+    ).format(d);
+  } catch {
+    return '';
+  }
+}
+
 export function convertBitrixMarkup(s: string): string {
   let out = s;
 
@@ -135,12 +178,33 @@ export function convertBitrixMarkup(s: string): string {
     (_m, name) => `@${name.trim()}`,
   );
 
-  // [URL=https://...]label[/URL] → [label](url) ; bare [URL]url[/URL] → url
+  // [TIMESTAMP=<unix> FORMAT=<fmt>] → readable date/time. MUST run before the
+  // [URL] pass below, because system messages nest these inside the link label
+  // (e.g. "… на [URL=…][TIMESTAMP …], [TIMESTAMP …][/URL]"). Without this the
+  // catch-all strips the tag and the date vanishes.
+  out = out.replace(
+    /\[TIMESTAMP=(\d+)(?:\s+FORMAT=([A-Z0-9_]+))?\]/gi,
+    (_m, unix, fmt) => formatBitrixTimestamp(unix, fmt),
+  );
+
+  // [URL=link]label[/URL]. Bitrix system/action messages link to RELATIVE
+  // portal paths (/workgroups/…/?chatAction=…) that are meaningless outside
+  // Bitrix — drop the link wrapper, keep just the (now formatted) label.
+  // Only ABSOLUTE http(s) links become markdown links (the renderer resolves
+  // those). Bare [URL]url[/URL] → url for absolute, dropped for relative.
   out = out.replace(
     /\[URL=([^\]]+)\]([\s\S]*?)\[\/URL\]/gi,
-    (_m, url, label) => `[${label.trim()}](${url.trim()})`,
+    (_m, url, label) => {
+      const u = String(url).trim();
+      const l = String(label).trim();
+      if (!isAbsoluteUrl(u)) return l;
+      return `[${l}](${u})`;
+    },
   );
-  out = out.replace(/\[URL\]([\s\S]*?)\[\/URL\]/gi, (_m, url) => url.trim());
+  out = out.replace(/\[URL\]([\s\S]*?)\[\/URL\]/gi, (_m, url) => {
+    const u = String(url).trim();
+    return isAbsoluteUrl(u) ? u : '';
+  });
 
   // Inline emphasis.
   out = out.replace(/\[B\]([\s\S]*?)\[\/B\]/gi, (_m, t) => `**${t}**`);

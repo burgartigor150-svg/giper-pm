@@ -45,7 +45,20 @@ export async function backfillAdminAttributedComments(
         externalSource: 'bitrix24',
         externalId: { not: null },
         id: { gt: cursor },
-        comments: { some: { externalSource: 'bitrix24', author: { role: 'ADMIN' } } },
+        comments: {
+          some: {
+            externalSource: 'bitrix24',
+            OR: [
+              // Author mis-attribution: still pinned on a real admin.
+              { author: { role: 'ADMIN' } },
+              // Mangled body: leftover relative Bitrix action-link (`](/…`)
+              // or an un-parsed `[TIMESTAMP …]` tag. Re-syncing re-runs the
+              // fixed converter so the date comes back and the junk link goes.
+              { body: { contains: '](/' } },
+              { body: { contains: '[TIMESTAMP' } },
+            ],
+          },
+        },
       },
       select: { id: true, externalId: true, bitrixChatId: true },
       orderBy: { id: 'asc' },
