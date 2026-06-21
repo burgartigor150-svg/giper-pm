@@ -15,7 +15,13 @@ import { auditTask } from '../audit';
  */
 const MIRROR_BOUND_FIELDS: (keyof UpdateTaskInput)[] = ['title', 'description'];
 
-export async function updateTask(taskId: string, input: UpdateTaskInput, user: SessionUser) {
+export async function updateTask(
+  taskId: string,
+  // Partial so callers (e.g. bulk edit) can set a single field like priority
+  // without supplying tags. Every field is already applied only when !== undefined.
+  input: Partial<UpdateTaskInput>,
+  user: SessionUser,
+) {
   const task = await prisma.task.findUnique({
     where: { id: taskId },
     select: {

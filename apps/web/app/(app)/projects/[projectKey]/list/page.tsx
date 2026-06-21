@@ -13,6 +13,12 @@ import { DomainError } from '@/lib/errors';
 import { getT } from '@/lib/i18n';
 import { TaskFilters } from '@/components/domain/TaskFilters';
 import { SavedFilterBar } from '@/components/domain/SavedFilterBar';
+import {
+  TaskSelectionProvider,
+  TaskRowCheckbox,
+  TaskHeaderCheckbox,
+  BulkTaskActionBar,
+} from '@/components/domain/TaskBulkActions';
 import { listTagsForProject } from '@/actions/tags';
 import {
   listSavedFiltersForView,
@@ -99,6 +105,16 @@ export default async function ProjectTasksListPage({
     { ownerId: project.ownerId, members: project.members },
   );
 
+  // Bulk-edit affordance: shown to any non-VIEWER (read-only users get no
+  // checkboxes). The server action enforces authorization per task regardless,
+  // so this gate is purely UI de-clutter.
+  const canBulk = me.role !== 'VIEWER';
+  const pageTaskIds = result.items.map((t) => t.id);
+  // Reset bulk selection whenever the page or filters change: keying the
+  // provider on the URL params remounts it (fresh empty Set), so a batch can
+  // never include rows from a previous page the user can no longer see/deselect.
+  const selectionKey = JSON.stringify(sp);
+
   // aria-sort wants "ascending" | "descending" | "none" — derive once
   // per header so JSX stays compact below.
   const ariaSortFor = (field: string): 'ascending' | 'descending' | 'none' => {
@@ -146,6 +162,7 @@ export default async function ProjectTasksListPage({
         />
       </Card>
 
+      <TaskSelectionProvider key={selectionKey}>
       <Card className="overflow-hidden">
         {result.items.length === 0 ? (
           <div className="p-6 text-sm text-muted-foreground">{t('empty')}</div>
@@ -154,6 +171,11 @@ export default async function ProjectTasksListPage({
           <table className="w-full min-w-[800px] text-sm">
             <thead className="border-b border-border bg-muted/50 text-left">
               <tr>
+                {canBulk ? (
+                  <th className="px-4 py-3 w-px">
+                    <TaskHeaderCheckbox taskIds={pageTaskIds} />
+                  </th>
+                ) : null}
                 <th className="px-4 py-3" aria-sort={ariaSortFor('number')}>
                   <SortHeader field="number" label={tTable('number')} currentField={filter.sort} currentDir={filter.dir} />
                 </th>
@@ -184,6 +206,11 @@ export default async function ProjectTasksListPage({
                   key={task.id}
                   className="border-b border-border last:border-b-0 transition-colors duration-150 hover:bg-muted/50 focus-within:bg-muted/50"
                 >
+                  {canBulk ? (
+                    <td className="px-4 py-3">
+                      <TaskRowCheckbox taskId={task.id} />
+                    </td>
+                  ) : null}
                   <td className="px-4 py-3 font-mono text-xs tabular-nums text-muted-foreground">
                     <Link
                       href={`/projects/${project.key}/tasks/${task.number}`}
@@ -241,6 +268,10 @@ export default async function ProjectTasksListPage({
         )}
         <Pagination page={result.page} pageCount={result.pageCount} />
       </Card>
+      {canBulk ? (
+        <BulkTaskActionBar members={members.map((m) => ({ id: m.id, name: m.name }))} />
+      ) : null}
+      </TaskSelectionProvider>
     </div>
   );
 }
