@@ -14,6 +14,7 @@ export async function listTasksForProject(
     select: {
       id: true,
       ownerId: true,
+      externalSource: true,
       members: { select: { userId: true, role: true } },
     },
   });

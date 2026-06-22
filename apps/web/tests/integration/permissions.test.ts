@@ -33,7 +33,8 @@ const u = (role: UserRole, id = `u-${role}`): SessionUser => ({ id, role });
 const project = (
   ownerId: string,
   members: { userId: string; role: MemberRole }[] = [],
-): ProjectForPerm => ({ ownerId, members });
+  externalSource: string | null = null,
+): ProjectForPerm => ({ ownerId, members, externalSource });
 
 const task = (over: Partial<TaskForPerm> & { project: ProjectForPerm }): TaskForPerm => ({
   creatorId: over.creatorId ?? 'u-creator',
@@ -224,18 +225,18 @@ describe('canEditTask', () => {
 
 describe('canViewTask', () => {
   // Per-stake for regular members: a user must personally be on the task
-  // (creator, assignee, reviewer, co-assignee, or watcher). Leadership —
-  // ADMIN (org), project owner, project LEAD — DOES bypass and sees every
-  // task in the project (canViewAllProjectTasks), so they get the full
-  // picture of a mirrored Bitrix workgroup. A plain MEMBER with no stake
-  // still sees nothing.
-  it('non-stake ADMIN can view (leadership bypass)', () => {
+  // (creator, assignee, reviewer, co-assignee, or watcher). Project leadership
+  // bypasses: the project OWNER, or a genuine LEAD of a NATIVE project, sees
+  // every task (canViewAllProjectTasks). Global ADMIN role and auto-mirrored
+  // Bitrix LEAD memberships do NOT — an admin/auto-lead who merely holds one
+  // task in a project sees only their own tasks there.
+  it('non-stake ADMIN cannot view (role is not a blanket bypass)', () => {
     expect(
       canViewTask(u('ADMIN', 'a'), task({ project: project('owner-1') })),
-    ).toBe(true);
+    ).toBe(false);
   });
 
-  it('non-stake project owner can view (leadership bypass)', () => {
+  it('non-stake project owner can view (owner bypass)', () => {
     expect(
       canViewTask(
         u('MEMBER', 'owner-1'),
@@ -244,14 +245,24 @@ describe('canViewTask', () => {
     ).toBe(true);
   });
 
-  it('non-stake LEAD can view (leadership bypass)', () => {
-    const p = project('owner-1', [{ userId: 'lead-1', role: 'LEAD' }]);
+  it('non-stake LEAD of a NATIVE project can view (leadership bypass)', () => {
+    const p = project('owner-1', [{ userId: 'lead-1', role: 'LEAD' }]); // native (externalSource null)
     expect(
       canViewTask(
         u('MEMBER', 'lead-1'),
         task({ creatorId: 'someone-else', project: p }),
       ),
     ).toBe(true);
+  });
+
+  it('non-stake LEAD of a BITRIX-MIRROR project cannot view (auto-mirrored lead)', () => {
+    const p = project('owner-1', [{ userId: 'lead-1', role: 'LEAD' }], 'bitrix24');
+    expect(
+      canViewTask(
+        u('MEMBER', 'lead-1'),
+        task({ creatorId: 'someone-else', project: p }),
+      ),
+    ).toBe(false);
   });
 
   it('non-member MEMBER cannot view', () => {

@@ -94,6 +94,7 @@ export async function listTasksForBoard(
       key: true,
       name: true,
       ownerId: true,
+      externalSource: true,
       wipLimits: true,
       members: {
         select: {

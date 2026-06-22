@@ -27,6 +27,14 @@ export type ProjectForPerm = {
   ownerId: string;
   members?: { userId: string; role: MemberRole }[];
   /**
+   * External mirror source ('bitrix24') or null/undefined for native projects.
+   * Used by {@link canViewAllProjectTasks}: a LEAD membership grants
+   * see-all-tasks only on NATIVE projects, because Bitrix-mirror projects
+   * auto-add the workgroup owner as a LEAD member (not a real lead signal).
+   * When omitted, the LEAD bypass is treated as off (safe default).
+   */
+  externalSource?: string | null;
+  /**
    * Optional precomputed signal that *this user* has at least one task
    * (as creator/assignee/reviewer/co-assignee/watcher) in the project.
    * Catches manually-created projects + edge cases where Bitrix
@@ -123,9 +131,18 @@ export function canViewProject(user: SessionUser, project: ProjectForPerm): bool
  * mirrored workgroup; regular members stay per-stake.
  */
 export function canViewAllProjectTasks(user: SessionUser, project: ProjectForPerm): boolean {
-  if (user.role === 'ADMIN') return true;
+  // The project OWNER always sees every task in the project.
   if (project.ownerId === user.id) return true;
-  return !!project.members?.some((m) => m.userId === user.id && m.role === 'LEAD');
+  // A genuine project LEAD too — but ONLY on native projects. Bitrix-mirror
+  // projects auto-add the upstream workgroup owner as a LEAD member, which is
+  // NOT a real "I lead this" signal. Global ADMIN role is deliberately NOT a
+  // blanket bypass either: an admin who merely holds one task in a project
+  // should see only their own tasks there, not all of it. Org-wide visibility
+  // is the explicit scope='all' opt-in, not the default board/list.
+  return (
+    project.externalSource === null &&
+    !!project.members?.some((m) => m.userId === user.id && m.role === 'LEAD')
+  );
 }
 
 // ---- Task ---------------------------------------------------------------
@@ -174,10 +191,10 @@ export function canEditTaskInternal(user: SessionUser, task: TaskForPerm, caps?:
 
 /**
  * View task. Per-stake for regular members: a user must personally be on the
- * task (creator, assignee, reviewer, co-assignee, watcher). Leadership (ADMIN,
- * project owner, project LEAD) additionally sees every task in the project —
- * see {@link canViewAllProjectTasks} — so they get the full picture of a
- * mirrored Bitrix workgroup instead of only the tasks they're personally on.
+ * task (creator, assignee, reviewer, co-assignee, watcher). Project leadership —
+ * the project OWNER, or a genuine LEAD of a NATIVE project — additionally sees
+ * every task in the project (see {@link canViewAllProjectTasks}). Global ADMIN
+ * role and auto-mirrored Bitrix LEAD memberships do NOT grant this.
  */
 export function canViewTask(user: SessionUser, task: TaskForPerm): boolean {
   if (canViewAllProjectTasks(user, task.project)) return true;

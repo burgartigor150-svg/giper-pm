@@ -216,6 +216,7 @@ export async function getTask(projectKey: string, number: number, user: SessionU
     watchers: task.watchers.map((w) => ({ userId: w.userId })),
     project: {
       ownerId: task.project.ownerId,
+      externalSource: task.project.externalSource,
       members: task.project.members,
       hasTaskForCurrentUser:
         task.creatorId === user.id ||
