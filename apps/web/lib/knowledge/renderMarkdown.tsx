@@ -18,6 +18,57 @@ import type { ReactNode } from 'react';
 let keySeq = 0;
 const k = () => `kb-${keySeq++}`;
 
+// ---- heading slugs (shared by renderer + table of contents) ---------------
+
+/** Stable, anchor-safe slug for a heading's text (keeps unicode letters). */
+export function slugifyBase(text: string): string {
+  const s = text
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // link → label
+    .replace(/[*_`~]/g, '') // strip emphasis markers
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, '-')
+    .replace(/^-+|-+$/g, '');
+  return s || 'section';
+}
+
+/** Returns a per-document slugger that disambiguates duplicate headings. */
+export function makeSlugger(): (text: string) => string {
+  const seen = new Map<string, number>();
+  return (text: string) => {
+    const base = slugifyBase(text);
+    const n = seen.get(base) ?? 0;
+    seen.set(base, n + 1);
+    return n === 0 ? base : `${base}-${n + 1}`;
+  };
+}
+
+export type KbHeading = { level: number; text: string; slug: string };
+
+/**
+ * Extract headings for the table of contents. Mirrors the block parser's
+ * fenced-code skipping + slugging so anchors line up with rendered ids.
+ */
+export function extractHeadings(src: string | null | undefined): KbHeading[] {
+  if (!src) return [];
+  const slug = makeSlugger();
+  const out: KbHeading[] = [];
+  let inFence = false;
+  for (const raw of src.replace(/\r\n/g, '\n').split('\n')) {
+    if (raw.startsWith('```')) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue;
+    const h = HEADING_RE.exec(raw);
+    if (h) {
+      const text = (h[2] ?? '').trim();
+      out.push({ level: (h[1] ?? '#').length, text, slug: slug(text) });
+    }
+  }
+  return out;
+}
+
 // ---- inline ---------------------------------------------------------------
 
 const INLINE_RE =
@@ -102,6 +153,7 @@ export function renderMarkdown(src: string | null | undefined): ReactNode {
   if (!src || !src.trim()) return null;
   const lines = src.replace(/\r\n/g, '\n').split('\n');
   const at = (idx: number): string => lines[idx] ?? '';
+  const slug = makeSlugger();
   const blocks: ReactNode[] = [];
   let i = 0;
 
@@ -135,10 +187,11 @@ export function renderMarkdown(src: string | null | undefined): ReactNode {
     const h = HEADING_RE.exec(line);
     if (h) {
       const level = (h[1] ?? '#').length;
+      const text = h[2] ?? '';
       const Tag = `h${level}` as keyof JSX.IntrinsicElements;
       blocks.push(
-        <Tag key={k()} className={HEADING_CLASS[level]}>
-          {renderInline(h[2] ?? '')}
+        <Tag key={k()} id={slug(text)} className={`scroll-mt-20 ${HEADING_CLASS[level]}`}>
+          {renderInline(text)}
         </Tag>,
       );
       i++;

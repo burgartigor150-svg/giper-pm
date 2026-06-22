@@ -22,6 +22,7 @@ export type KbTreeNode = {
   icon: string | null;
   parentId: string | null;
   order: number;
+  status: 'DRAFT' | 'PUBLISHED';
 };
 
 /** Flat list of a space's articles (id/title/parent/order) for the tree. */
@@ -29,8 +30,32 @@ export async function getSpaceArticles(spaceId: string): Promise<KbTreeNode[]> {
   return prisma.knowledgeArticle.findMany({
     where: { spaceId },
     orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
-    select: { id: true, title: true, icon: true, parentId: true, order: true },
+    select: { id: true, title: true, icon: true, parentId: true, order: true, status: true },
   });
+}
+
+/** One space with description/colour + article count, for the space page. */
+export async function getSpace(id: string) {
+  return prisma.knowledgeSpace.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      name: true,
+      description: true,
+      icon: true,
+      color: true,
+      archivedAt: true,
+      _count: { select: { articles: true } },
+    },
+  });
+}
+
+export async function isSpaceFavorite(userId: string, spaceId: string): Promise<boolean> {
+  const row = await prisma.knowledgeFavorite.findUnique({
+    where: { userId_spaceId: { userId, spaceId } },
+    select: { id: true },
+  });
+  return !!row;
 }
 
 export type KbSidebarNode = KbTreeNode & { spaceId: string };
@@ -43,8 +68,31 @@ export async function getAllArticlesForSidebar(): Promise<KbSidebarNode[]> {
   return prisma.knowledgeArticle.findMany({
     where: { space: { archivedAt: null } },
     orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
-    select: { id: true, title: true, icon: true, parentId: true, order: true, spaceId: true },
+    select: { id: true, title: true, icon: true, parentId: true, order: true, status: true, spaceId: true },
   });
+}
+
+/** Ids of the spaces/articles the user has starred — drives the sidebar. */
+export async function getFavoriteIds(
+  userId: string,
+): Promise<{ spaceIds: string[]; articleIds: string[] }> {
+  const rows = await prisma.knowledgeFavorite.findMany({
+    where: { userId },
+    select: { spaceId: true, articleId: true },
+  });
+  return {
+    spaceIds: rows.map((r) => r.spaceId).filter((x): x is string => !!x),
+    articleIds: rows.map((r) => r.articleId).filter((x): x is string => !!x),
+  };
+}
+
+/** Whether the user has starred a specific article (article-page star state). */
+export async function isArticleFavorite(userId: string, articleId: string): Promise<boolean> {
+  const row = await prisma.knowledgeFavorite.findUnique({
+    where: { userId_articleId: { userId, articleId } },
+    select: { id: true },
+  });
+  return !!row;
 }
 
 /** Full article for the reading/editing pane. */
@@ -57,6 +105,7 @@ export async function getArticle(id: string) {
       title: true,
       content: true,
       icon: true,
+      status: true,
       parentId: true,
       updatedAt: true,
       space: { select: { id: true, name: true, icon: true } },
@@ -90,6 +139,8 @@ export async function searchKnowledge(q: string, limit = 20) {
   if (term.length < 2) return [];
   return prisma.knowledgeArticle.findMany({
     where: {
+      // Drafts are hidden from search (TEAMLY behaviour); only published.
+      status: 'PUBLISHED',
       OR: [
         { title: { contains: term, mode: 'insensitive' } },
         { content: { contains: term, mode: 'insensitive' } },

@@ -3,26 +3,37 @@
 import { useMemo, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
-import { ChevronDown, ChevronRight, FileText, Plus } from 'lucide-react';
+import { ChevronDown, ChevronRight, FileText, Plus, Star } from 'lucide-react';
 import { createArticleAction, createSpaceAction } from '@/actions/knowledge';
 
 type Space = { id: string; name: string; icon: string | null };
-type Node = { id: string; title: string; icon: string | null; parentId: string | null; order: number; spaceId: string };
+type Node = {
+  id: string;
+  title: string;
+  icon: string | null;
+  parentId: string | null;
+  order: number;
+  spaceId: string;
+  status: 'DRAFT' | 'PUBLISHED';
+};
 
 /**
- * Knowledge Base navigation: spaces, each with a nested, expandable article
- * tree. Editors get inline "+ article" / "+ space" actions. Persistent across
- * article navigation (rendered in the KB layout). Active article is derived
- * from the URL so the layout doesn't have to thread the child route param.
+ * Knowledge Base navigation: a Избранное shortcut list, then spaces — each an
+ * expandable, nested article tree. Editors get inline "+ article" / "+ space"
+ * actions. Active article is derived from the URL.
  */
 export function KbSidebar({
   spaces,
   articles,
+  favoriteArticleIds,
+  favoriteSpaceIds,
   canManageSpaces,
   canEdit,
 }: {
   spaces: Space[];
   articles: Node[];
+  favoriteArticleIds: string[];
+  favoriteSpaceIds: string[];
   canManageSpaces: boolean;
   canEdit: boolean;
 }) {
@@ -32,7 +43,6 @@ export function KbSidebar({
   const [pending, startTransition] = useTransition();
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
-  // children map: parentKey ("space:<id>" or "art:<id>") → ordered nodes
   const childrenOf = useMemo(() => {
     const map = new Map<string, Node[]>();
     for (const a of articles) {
@@ -45,7 +55,16 @@ export function KbSidebar({
     return map;
   }, [articles]);
 
-  const toggle = (k: string) => setCollapsed((s) => ({ ...s, [k]: !s[k] }));
+  const favSpaces = useMemo(() => {
+    const set = new Set(favoriteSpaceIds);
+    return spaces.filter((s) => set.has(s.id));
+  }, [spaces, favoriteSpaceIds]);
+  const favArticles = useMemo(() => {
+    const set = new Set(favoriteArticleIds);
+    return articles.filter((a) => set.has(a.id));
+  }, [articles, favoriteArticleIds]);
+
+  const toggle = (key: string) => setCollapsed((s) => ({ ...s, [key]: !s[key] }));
 
   function newArticle(spaceId: string, parentId: string | null) {
     startTransition(async () => {
@@ -74,6 +93,7 @@ export function KbSidebar({
           const ck = `art:${n.id}`;
           const kids = childrenOf.get(ck);
           const open = !collapsed[ck];
+          const isDraft = n.status === 'DRAFT';
           return (
             <li key={n.id}>
               <div
@@ -89,9 +109,13 @@ export function KbSidebar({
                 ) : (
                   <span className="inline-block w-3.5" />
                 )}
-                <Link href={`/knowledge/${n.id}`} className="flex min-w-0 flex-1 items-center gap-1.5 truncate">
+                <Link
+                  href={`/knowledge/${n.id}`}
+                  className={`flex min-w-0 flex-1 items-center gap-1.5 truncate ${isDraft ? 'text-muted-foreground' : ''}`}
+                >
                   <span className="shrink-0">{n.icon ?? <FileText className="h-3.5 w-3.5 text-muted-foreground" />}</span>
                   <span className="truncate">{n.title}</span>
+                  {isDraft ? <span className="shrink-0 rounded bg-amber-100 px-1 text-[10px] text-amber-700 dark:bg-amber-900/40 dark:text-amber-400">черновик</span> : null}
                 </Link>
                 {canEdit ? (
                   <button
@@ -118,10 +142,40 @@ export function KbSidebar({
     <nav className="flex h-full flex-col gap-1 overflow-y-auto p-2 text-sm">
       <Link
         href="/knowledge"
-        className={`mb-1 rounded px-2 py-1 font-semibold ${activeId === null ? 'bg-muted' : 'hover:bg-muted'}`}
+        className={`mb-1 rounded px-2 py-1 font-semibold ${activeId === null && pathname === '/knowledge' ? 'bg-muted' : 'hover:bg-muted'}`}
       >
         База знаний
       </Link>
+
+      {favSpaces.length > 0 || favArticles.length > 0 ? (
+        <div className="mb-1">
+          <p className="flex items-center gap-1 px-2 py-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            <Star className="h-3 w-3 text-amber-500" fill="currentColor" /> Избранное
+          </p>
+          <ul>
+            {favSpaces.map((sp) => (
+              <li key={`fs-${sp.id}`}>
+                <Link href={`/knowledge/space/${sp.id}`} className="flex items-center gap-1.5 truncate rounded px-2 py-1 hover:bg-muted">
+                  <span className="shrink-0">{sp.icon ?? '📚'}</span>
+                  <span className="truncate">{sp.name}</span>
+                </Link>
+              </li>
+            ))}
+            {favArticles.map((a) => (
+              <li key={`fa-${a.id}`}>
+                <Link
+                  href={`/knowledge/${a.id}`}
+                  className={`flex items-center gap-1.5 truncate rounded px-2 py-1 hover:bg-muted ${activeId === a.id ? 'bg-muted font-medium' : ''}`}
+                >
+                  <span className="shrink-0">{a.icon ?? <FileText className="h-3.5 w-3.5 text-muted-foreground" />}</span>
+                  <span className="truncate">{a.title}</span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
       {spaces.length === 0 ? (
         <p className="px-2 py-4 text-xs text-muted-foreground">Пространств пока нет.</p>
       ) : null}
@@ -135,9 +189,12 @@ export function KbSidebar({
                 {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
               </button>
               <span className="shrink-0">{sp.icon ?? '📚'}</span>
-              <span className="min-w-0 flex-1 truncate text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              <Link
+                href={`/knowledge/space/${sp.id}`}
+                className="min-w-0 flex-1 truncate text-xs font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground"
+              >
                 {sp.name}
-              </span>
+              </Link>
               {canEdit ? (
                 <button
                   type="button"

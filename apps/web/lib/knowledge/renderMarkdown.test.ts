@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { createElement, Fragment } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { renderMarkdown } from './renderMarkdown';
+import { renderMarkdown, extractHeadings, slugifyBase } from './renderMarkdown';
 
 /** Render the markdown node tree to a static HTML string for assertions. */
 function html(md: string): string {
@@ -80,5 +80,37 @@ describe('renderMarkdown', () => {
     const out = html('hello <script>alert(1)</script>');
     expect(out).not.toContain('<script>');
     expect(out).toContain('&lt;script&gt;');
+  });
+
+  test('renders heading anchor ids that match slugs', () => {
+    const out = html('## Привет Мир');
+    const slug = slugifyBase('Привет Мир');
+    expect(slug).toBe('привет-мир');
+    expect(out).toContain(`id="${slug}"`);
+  });
+});
+
+describe('extractHeadings', () => {
+  test('returns level, text and slug in document order', () => {
+    const hs = extractHeadings('# A\nsome text\n## B\n### C');
+    expect(hs.map((h) => h.level)).toEqual([1, 2, 3]);
+    expect(hs.map((h) => h.text)).toEqual(['A', 'B', 'C']);
+    expect(hs[0]?.slug).toBe('a');
+  });
+
+  test('disambiguates duplicate headings', () => {
+    const hs = extractHeadings('# Раздел\n# Раздел');
+    expect(hs[0]?.slug).toBe('раздел');
+    expect(hs[1]?.slug).toBe('раздел-2');
+  });
+
+  test('skips headings inside fenced code blocks', () => {
+    const hs = extractHeadings('# Real\n```\n# not a heading\n```\n## Also real');
+    expect(hs.map((h) => h.text)).toEqual(['Real', 'Also real']);
+  });
+
+  test('returns empty for empty input', () => {
+    expect(extractHeadings('')).toEqual([]);
+    expect(extractHeadings(null)).toEqual([]);
   });
 });

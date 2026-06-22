@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { prisma } from '@giper/db';
+import { prisma, Prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
 
 type ActionResult<T = unknown> =
@@ -163,4 +163,65 @@ export async function deleteArticleAction(id: string): Promise<ActionResult> {
   await prisma.knowledgeArticle.delete({ where: { id } });
   revalidatePath('/knowledge');
   return { ok: true };
+}
+
+/** Toggle DRAFT ⇄ PUBLISHED. */
+export async function setArticleStatusAction(
+  id: string,
+  status: 'DRAFT' | 'PUBLISHED',
+): Promise<ActionResult> {
+  const me = await requireAuth();
+  if (!canEditArticles(me.role)) {
+    return { ok: false, error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' } };
+  }
+  await prisma.knowledgeArticle.update({ where: { id }, data: { status, updatedById: me.id } });
+  revalidatePath('/knowledge');
+  return { ok: true };
+}
+
+// ---- Favorites ------------------------------------------------------------
+// Any authenticated user may star (read-level personalisation, no role gate).
+
+export async function toggleFavoriteArticleAction(
+  articleId: string,
+): Promise<ActionResult<{ favorited: boolean }>> {
+  const me = await requireAuth();
+  // Atomic toggle: deleteMany reports how many rows it removed, so we avoid the
+  // find-then-create race (concurrent toggles from two tabs would otherwise hit
+  // the userId_articleId unique → P2002). Creating is guarded for the same race.
+  const removed = await prisma.knowledgeFavorite.deleteMany({
+    where: { userId: me.id, articleId },
+  });
+  if (removed.count > 0) {
+    revalidatePath('/knowledge');
+    return { ok: true, data: { favorited: false } };
+  }
+  try {
+    await prisma.knowledgeFavorite.create({ data: { userId: me.id, articleId } });
+  } catch (e) {
+    if (!(e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002')) throw e;
+    // Already favorited by a concurrent request — idempotent success.
+  }
+  revalidatePath('/knowledge');
+  return { ok: true, data: { favorited: true } };
+}
+
+export async function toggleFavoriteSpaceAction(
+  spaceId: string,
+): Promise<ActionResult<{ favorited: boolean }>> {
+  const me = await requireAuth();
+  const removed = await prisma.knowledgeFavorite.deleteMany({
+    where: { userId: me.id, spaceId },
+  });
+  if (removed.count > 0) {
+    revalidatePath('/knowledge');
+    return { ok: true, data: { favorited: false } };
+  }
+  try {
+    await prisma.knowledgeFavorite.create({ data: { userId: me.id, spaceId } });
+  } catch (e) {
+    if (!(e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002')) throw e;
+  }
+  revalidatePath('/knowledge');
+  return { ok: true, data: { favorited: true } };
 }

@@ -5,8 +5,11 @@ import { requireAuth } from '@/lib/auth';
 import {
   getArticle,
   getArticleBreadcrumbs,
+  isArticleFavorite,
 } from '@/lib/knowledge/getKnowledge';
+import { extractHeadings } from '@/lib/knowledge/renderMarkdown';
 import { KbArticleEditor } from '@/components/domain/knowledge/KbArticleEditor';
+import { KbToc } from '@/components/domain/knowledge/KbToc';
 
 export default async function KnowledgeArticlePage({
   params,
@@ -18,39 +21,51 @@ export default async function KnowledgeArticlePage({
   const article = await getArticle(articleId);
   if (!article) notFound();
 
-  const crumbs = await getArticleBreadcrumbs(articleId);
+  const [crumbs, favorite] = await Promise.all([
+    getArticleBreadcrumbs(articleId),
+    isArticleFavorite(me.id, articleId),
+  ]);
   const canEdit = me.role !== 'VIEWER';
+  const headings = extractHeadings(article.content);
 
   return (
-    <div className="flex flex-col gap-5">
-      <nav className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
-        <Link href="/knowledge" className="hover:text-foreground">
-          {article.space.icon ?? '📚'} {article.space.name}
-        </Link>
-        {crumbs.map((c, idx) => {
-          const isLast = idx === crumbs.length - 1;
-          return (
-            <span key={c.id} className="flex items-center gap-1">
-              <ChevronRight className="h-3 w-3" />
-              {isLast ? (
-                <span className="text-foreground">{c.title}</span>
-              ) : (
-                <Link href={`/knowledge/${c.id}`} className="hover:text-foreground">
-                  {c.title}
-                </Link>
-              )}
-            </span>
-          );
-        })}
-      </nav>
+    <div className="flex gap-8">
+      <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-1 flex-col gap-5">
+        <nav className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+          <Link href="/knowledge" className="hover:text-foreground">
+            {article.space.icon ?? '📚'} {article.space.name}
+          </Link>
+          {crumbs.map((c, idx) => {
+            const isLast = idx === crumbs.length - 1;
+            return (
+              <span key={c.id} className="flex items-center gap-1">
+                <ChevronRight className="h-3 w-3" />
+                {isLast ? (
+                  <span className="text-foreground">{c.title}</span>
+                ) : (
+                  <Link href={`/knowledge/${c.id}`} className="hover:text-foreground">
+                    {c.title}
+                  </Link>
+                )}
+              </span>
+            );
+          })}
+        </nav>
 
-      <KbArticleEditor
-        id={article.id}
-        spaceId={article.spaceId}
-        initialTitle={article.title}
-        initialContent={article.content}
-        canEdit={canEdit}
-      />
+        <KbArticleEditor
+          key={article.id}
+          id={article.id}
+          spaceId={article.spaceId}
+          initialTitle={article.title}
+          initialContent={article.content}
+          initialIcon={article.icon}
+          initialStatus={article.status}
+          initialFavorite={favorite}
+          canEdit={canEdit}
+        />
+      </div>
+
+      <KbToc key={article.id} headings={headings} />
     </div>
   );
 }

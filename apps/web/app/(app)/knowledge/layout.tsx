@@ -2,6 +2,7 @@ import { requireAuth } from '@/lib/auth';
 import {
   listKnowledgeSpaces,
   getAllArticlesForSidebar,
+  getFavoriteIds,
 } from '@/lib/knowledge/getKnowledge';
 import { KbSidebar } from '@/components/domain/knowledge/KbSidebar';
 
@@ -16,9 +17,10 @@ export default async function KnowledgeLayout({
   children: React.ReactNode;
 }) {
   const me = await requireAuth();
-  const [spaces, articles] = await Promise.all([
+  const [spaces, articles, favorites] = await Promise.all([
     listKnowledgeSpaces(),
     getAllArticlesForSidebar(),
+    getFavoriteIds(me.id),
   ]);
 
   const canManageSpaces = me.role === 'ADMIN' || me.role === 'PM';
@@ -30,6 +32,8 @@ export default async function KnowledgeLayout({
         <KbSidebar
           spaces={spaces.map((s) => ({ id: s.id, name: s.name, icon: s.icon }))}
           articles={articles}
+          favoriteArticleIds={favorites.articleIds}
+          favoriteSpaceIds={favorites.spaceIds}
           canManageSpaces={canManageSpaces}
           canEdit={canEdit}
         />
