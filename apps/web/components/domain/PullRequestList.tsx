@@ -3,6 +3,7 @@ import type { PullRequestState } from '@giper/db';
 
 type PR = {
   id: string;
+  provider: string;
   repo: string;
   number: number;
   title: string;
@@ -13,6 +14,13 @@ type PR = {
   authorLogin: string | null;
   mergedAt: Date | null;
 };
+
+/** GitLab calls them MRs and uses !N; GitHub PRs and #N. */
+function providerMeta(provider: string): { kind: string; sep: string } {
+  return provider === 'gitlab'
+    ? { kind: 'MR', sep: '!' }
+    : { kind: 'PR', sep: '#' };
+}
 
 const STATE_META: Record<
   PullRequestState,
@@ -62,6 +70,7 @@ export function PullRequestList({ items }: { items: PR[] }) {
       {items.map((pr) => {
         const meta = STATE_META[pr.state];
         const Icon = meta.Icon;
+        const pm = providerMeta(pr.provider);
         return (
           <li
             key={pr.id}
@@ -76,9 +85,12 @@ export function PullRequestList({ items }: { items: PR[] }) {
                 className="font-medium hover:underline"
                 title={pr.title}
               >
-                {pr.repo}#{pr.number} — {pr.title}
+                {pr.repo}{pm.sep}{pr.number} — {pr.title}
               </a>
               <div className="mt-0.5 flex flex-wrap items-baseline gap-x-2 text-[11px] opacity-80">
+                <span className="rounded bg-black/10 px-1 font-medium uppercase tracking-wide">
+                  {pm.kind} · {pr.provider}
+                </span>
                 <span className="font-medium uppercase tracking-wide">{meta.label}</span>
                 {pr.headRef ? (
                   <span>

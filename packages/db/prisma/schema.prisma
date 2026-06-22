@@ -1501,13 +1501,17 @@ model TaskPullRequest {
   id        String          @id @default(cuid())
   taskId    String
   task      Task            @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  // "owner/repo" — what GitHub calls full_name.
+  // Source forge: "github" (PR) or "gitlab" (MR). Drives the label/icon
+  // on the task page. Defaults to github so existing rows stay correct.
+  provider  String          @default("github")
+  // GitHub: "owner/repo" (full_name). GitLab: "group/project"
+  // (path_with_namespace).
   repo      String
-  // PR number within the repo, e.g. 42.
+  // PR/MR number within the repo. GitHub PR number; GitLab MR iid.
   number    Int
   title     String
   state     PullRequestState @default(OPEN)
-  // GitHub PR URL — clickable on the task page.
+  // PR/MR URL — clickable on the task page.
   url       String
   // Branches: head = source, base = target.
   headRef   String?
@@ -1620,6 +1624,7 @@ enum CommentSource {
   TELEGRAM
   EMAIL
   GITHUB        // авто-комментарий от коммита/PR
+  GITLAB        // авто-комментарий от коммита/MR
   SLACK
 }
 
