@@ -1,7 +1,7 @@
 import { prisma, type Prisma } from '@giper/db';
 import { TASKS_PAGE_SIZE, type TaskListFilter } from '@giper/shared';
 import { DomainError } from '../errors';
-import { canViewProject, type SessionUser } from '../permissions';
+import { canViewProject, canViewAllProjectTasks, type SessionUser } from '../permissions';
 import { buildTaskFilterClauses } from './buildTaskFilterClauses';
 
 export async function listTasksForProject(
@@ -42,20 +42,21 @@ export async function listTasksForProject(
     throw new DomainError('INSUFFICIENT_PERMISSIONS', 403);
   }
 
-  // Strictly per-stake — even project owner / LEAD don't get a global
-  // bypass within their own project. The reason: in Bitrix mirror
-  // groups, an upstream task can land in a project you "lead" without
-  // your name actually appearing on it. We want to mirror Bitrix's
-  // truth, not paint everything yours.
-  const visibilityClause: Prisma.TaskWhereInput = {
-    OR: [
-      { creatorId: user.id },
-      { assigneeId: user.id },
-      { reviewerId: user.id },
-      { assignments: { some: { userId: user.id } } },
-      { watchers: { some: { userId: user.id } } },
-    ],
-  };
+  // Per-stake for regular members. Leadership (ADMIN / project owner / project
+  // LEAD) sees every task in the project — the full mirror of the Bitrix
+  // workgroup — so their clause is empty (match-all) and only the narrowing
+  // AND-filters above apply.
+  const visibilityClause: Prisma.TaskWhereInput = canViewAllProjectTasks(user, project)
+    ? {}
+    : {
+        OR: [
+          { creatorId: user.id },
+          { assigneeId: user.id },
+          { reviewerId: user.id },
+          { assignments: { some: { userId: user.id } } },
+          { watchers: { some: { userId: user.id } } },
+        ],
+      };
 
   const where: Prisma.TaskWhereInput = { projectId: project.id };
   if (filter.status) where.status = filter.status;

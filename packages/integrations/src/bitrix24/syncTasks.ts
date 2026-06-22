@@ -29,6 +29,20 @@ export type SyncTasksOptions = {
    * unreliable across portals; two narrow calls are safer and still fast.
    */
   forBitrixUserId?: string | null;
+  /**
+   * When set, fetch every task in these Bitrix workgroups (GROUP_ID IN …),
+   * regardless of who's a member. Used by the global-coverage / backfill
+   * passes so cross-team tasks with no synced member still land in their
+   * mirrored project. Ignored when forBitrixUserId is set.
+   */
+  groupIds?: string[];
+  /**
+   * Skip per-task enrichment (attachments, comments, history, chat) and only
+   * upsert the task rows. The bulk backfill uses this — enriching thousands
+   * of tasks in one pass would blow the Bitrix API budget; the incremental
+   * passes fill enrichment in afterwards as tasks change.
+   */
+  skipEnrichment?: boolean;
 };
 
 /**
@@ -107,6 +121,12 @@ export async function syncTasks(
   };
   if (opts.since) baseFilter['>=CHANGED_DATE'] = opts.since.toISOString();
   if (opts.forBitrixUserId) baseFilter.MEMBER = opts.forBitrixUserId;
+  // Workgroup-scoped pass: GROUP_ID accepts an array (acts as IN). Mutually
+  // exclusive with MEMBER in practice — group coverage doesn't care who's on
+  // the task. Skip when the list is empty (would match nothing meaningful).
+  if (!opts.forBitrixUserId && opts.groupIds && opts.groupIds.length > 0) {
+    baseFilter.GROUP_ID = opts.groupIds;
+  }
 
   const filters: Record<string, unknown>[] = [baseFilter];
   const seenIds = new Set<string>();
@@ -157,7 +177,7 @@ export async function syncTasks(
             ensurePersonal,
             stats,
           );
-          if (localTaskId) {
+          if (localTaskId && !opts.skipEnrichment) {
             // Files live on the camelCase response as `ufTaskWebdavFiles`.
             const fileIds = (raw.ufTaskWebdavFiles ?? []).map(String).filter(Boolean);
             await syncTaskAttachments(

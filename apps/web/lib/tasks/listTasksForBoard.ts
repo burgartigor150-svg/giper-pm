@@ -1,6 +1,6 @@
 import { prisma, type Prisma, type TaskStatus } from '@giper/db';
 import { DomainError } from '../errors';
-import { canViewProject, type SessionUser } from '../permissions';
+import { canViewProject, canViewAllProjectTasks, type SessionUser } from '../permissions';
 import { getTasksSpentMinutes } from '../time/getTaskSpent';
 import {
   buildTaskFilterClauses,
@@ -136,17 +136,18 @@ export async function listTasksForBoard(
     internalStatus: { not: 'CANCELED' },
   };
 
-  // Strictly per-stake. Project owner / LEAD no longer get every
-  // task — for Bitrix-mirror groups that would surface upstream tasks
-  // they're not part of. Everyone (ADMIN, PM, owner, LEAD, MEMBER)
-  // sees only tasks they personally are on.
-  where.OR = [
-    { creatorId: user.id },
-    { assigneeId: user.id },
-    { reviewerId: user.id },
-    { assignments: { some: { userId: user.id } } },
-    { watchers: { some: { userId: user.id } } },
-  ];
+  // Per-stake for regular members: they see only tasks they personally are
+  // on. Leadership (ADMIN / project owner / project LEAD) sees every task in
+  // the project — the full mirror of the Bitrix workgroup — via the bypass.
+  if (!canViewAllProjectTasks(user, project)) {
+    where.OR = [
+      { creatorId: user.id },
+      { assigneeId: user.id },
+      { reviewerId: user.id },
+      { assignments: { some: { userId: user.id } } },
+      { watchers: { some: { userId: user.id } } },
+    ];
+  }
 
   // onlyMine wins over explicit assigneeId
   if (filter.onlyMine) {

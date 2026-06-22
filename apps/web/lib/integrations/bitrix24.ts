@@ -37,9 +37,34 @@ export function getBitrix24Client(): Bitrix24Client {
  * the same per-user iteration described above.
  */
 export async function runBitrix24SyncNow(
-  opts: { force?: boolean; mineOnly?: boolean } = {},
+  opts: {
+    force?: boolean;
+    mineOnly?: boolean;
+    /**
+     * One-off historical backfill: pull every active task portal-wide (or in
+     * `groupIds`) as task rows only (no enrichment), so cross-team tasks that
+     * never had a synced member finally land in their mirrored project. Fast
+     * because enrichment is skipped; the regular incremental passes fill in
+     * comments/files/history afterwards.
+     */
+    backfill?: boolean;
+    /** Restrict the global/backfill pass to these Bitrix workgroup ids. */
+    groupIds?: string[];
+  } = {},
 ) {
   const client = getBitrix24Client();
+
+  if (opts.backfill) {
+    // Task-only, full-history (since=null) global pull. Idempotent — safe to
+    // re-run / chunk by groupIds if it approaches the request time budget.
+    return runBitrix24Sync(prisma, client, {
+      since: null,
+      tasksOnlyGlobal: true,
+      skipEnrichment: true,
+      groupIds: opts.groupIds,
+    });
+  }
+
   const last = await lastSuccessfulSyncStart(prisma);
   const since = opts.force
     ? null
@@ -88,6 +113,18 @@ export async function runBitrix24SyncNow(
     });
     addInto(agg, r);
   }
+
+  // Global coverage pass (incremental): every active task changed since the
+  // watermark, across the whole portal, mapped onto already-mirrored
+  // projects regardless of member. This is what guarantees a task created in
+  // Bitrix lands here even when nobody on it is a synced active user — the
+  // per-user passes above only see tasks their user is a member of.
+  const globalRun = await runBitrix24Sync(prisma, client, {
+    since,
+    tasksOnlyGlobal: true,
+  });
+  addInto(agg, globalRun);
+
   // Carry the bootstrap users summary so callers see them counted.
   agg.users = bootstrap.users;
   agg.finishedAt = new Date();
