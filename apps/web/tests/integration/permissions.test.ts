@@ -223,34 +223,35 @@ describe('canEditTask', () => {
 });
 
 describe('canViewTask', () => {
-  // Strict per-stake: a user must personally be on the task (creator,
-  // assignee, reviewer, co-assignee, or watcher). Role does NOT bypass
-  // — admins/PMs don't get to peek at unrelated tasks. Project-level
-  // shortcuts (owner/LEAD) are intentionally NOT applied either, so a
-  // Bitrix-mirror project doesn't leak every group task to the lead.
-  it('non-stake ADMIN cannot view', () => {
+  // Per-stake for regular members: a user must personally be on the task
+  // (creator, assignee, reviewer, co-assignee, or watcher). Leadership —
+  // ADMIN (org), project owner, project LEAD — DOES bypass and sees every
+  // task in the project (canViewAllProjectTasks), so they get the full
+  // picture of a mirrored Bitrix workgroup. A plain MEMBER with no stake
+  // still sees nothing.
+  it('non-stake ADMIN can view (leadership bypass)', () => {
     expect(
       canViewTask(u('ADMIN', 'a'), task({ project: project('owner-1') })),
-    ).toBe(false);
+    ).toBe(true);
   });
 
-  it('non-stake project owner cannot view (per-stake is the rule)', () => {
+  it('non-stake project owner can view (leadership bypass)', () => {
     expect(
       canViewTask(
         u('MEMBER', 'owner-1'),
         task({ creatorId: 'someone-else', project: project('owner-1') }),
       ),
-    ).toBe(false);
+    ).toBe(true);
   });
 
-  it('non-stake LEAD cannot view', () => {
+  it('non-stake LEAD can view (leadership bypass)', () => {
     const p = project('owner-1', [{ userId: 'lead-1', role: 'LEAD' }]);
     expect(
       canViewTask(
         u('MEMBER', 'lead-1'),
         task({ creatorId: 'someone-else', project: p }),
       ),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it('non-member MEMBER cannot view', () => {
