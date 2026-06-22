@@ -502,16 +502,16 @@ export default async function TaskDetailPage({ params }: { params: Params }) {
             </Card>
           ) : null}
 
-          {task.pullRequests.length > 0 ? (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Pull-requests</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <PullRequestList items={task.pullRequests} />
-              </CardContent>
-            </Card>
-          ) : null}
+          {/* Always shown so the GitHub/GitLab integration is discoverable —
+              PullRequestList renders an inline hint when nothing is linked yet. */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Pull / Merge requests</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <PullRequestList items={task.pullRequests} taskRef={`${task.project.key}-${task.number}`} />
+            </CardContent>
+          </Card>
 
           {task.attachments.length > 0 || canEdit ? (
             <Card>
