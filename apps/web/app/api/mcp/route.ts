@@ -9,6 +9,7 @@ import { getTask } from '@/lib/tasks/getTask';
 import { createTask } from '@/lib/tasks/createTask';
 import { addComment } from '@/lib/tasks/addComment';
 import { changeTaskStatus } from '@/lib/tasks/changeTaskStatus';
+import { setInternalStatus } from '@/lib/tasks/setInternalStatus';
 
 /**
  * Model Context Protocol (MCP) server for giper-pm over Streamable HTTP.
@@ -106,7 +107,21 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'set_status',
-    description: `Сменить статус задачи. Допустимые: ${STATUSES.join(', ')}. (Зеркальные из Bitrix задачи менять нельзя — вернётся ошибка прав.)`,
+    description: `Сменить ЗЕРКАЛЬНЫЙ статус задачи (как в источнике). Допустимые: ${STATUSES.join(', ')}. Для зеркальных из Bitrix задач нельзя — используйте set_internal_status.`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        projectKey: { type: 'string' },
+        number: { type: 'integer' },
+        status: { type: 'string', enum: STATUSES },
+      },
+      required: ['projectKey', 'number', 'status'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'set_internal_status',
+    description: `Сменить ВНУТРЕННИЙ (командной доски) статус задачи. Работает и на зеркальных из Bitrix задачах. Допустимые: ${STATUSES.join(', ')}. Учитывает правила рабочего процесса проекта.`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -228,6 +243,13 @@ async function runTool(name: string, args: Args, user: SessionUser): Promise<str
       const t = await getTask(key, num(args, 'number'), user);
       await changeTaskStatus(t.id, status, user);
       return `Статус ${key}-${t.number} → ${status}`;
+    }
+    case 'set_internal_status': {
+      const key = str(args, 'projectKey');
+      const status = str(args, 'status');
+      const t = await getTask(key, num(args, 'number'), user);
+      await setInternalStatus(t.id, status, user);
+      return `Внутренний статус ${key}-${t.number} → ${status}`;
     }
     default:
       throw new DomainError('VALIDATION', 400, `Неизвестный инструмент: ${name}`);
