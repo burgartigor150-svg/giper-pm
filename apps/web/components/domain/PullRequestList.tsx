@@ -56,12 +56,26 @@ const STATE_META: Record<
  * `KEY-N` reference, GitHub pings us and we upsert. Manual linking is
  * not supported in v1 — the GH-side reference is the source of truth.
  */
-export function PullRequestList({ items }: { items: PR[] }) {
+export function PullRequestList({
+  items,
+  taskRef,
+}: {
+  items: PR[];
+  /** This task's KEY-N reference, shown in the empty-state hint. */
+  taskRef?: string;
+}) {
   if (items.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
-        Связанных PR нет. Упомяните номер задачи в названии PR или ветке —
-        связь появится автоматически.
+        Связанных PR/MR пока нет. Упомяните код задачи
+        {taskRef ? (
+          <>
+            {' '}
+            <code className="rounded bg-muted px-1">{taskRef}</code>
+          </>
+        ) : null}{' '}
+        в сообщении коммита, имени ветки или заголовке PR/MR (GitHub или
+        GitLab) — связь появится здесь автоматически.
       </p>
     );
   }
