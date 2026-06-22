@@ -1408,6 +1408,7 @@ model Task {
   blocks        TaskDependency[] @relation("BlocksFrom")
   blockedBy     TaskDependency[] @relation("BlocksTo")
   pullRequests  TaskPullRequest[]
+  designs       TaskDesign[]
   assignments   TaskAssignment[]
   // Native tag system (separate from the legacy `tags String[]` mirror
   // of Bitrix24 TAGS payloads above).
@@ -1586,6 +1587,33 @@ model TaskPullRequest {
   @@unique([repo, number, taskId])
   @@index([taskId])
   @@index([repo, number])
+}
+
+/// A Figma design linked to a task. Mirrors TaskPullRequest's shape — a task
+/// can have several. v1 stores the link + parsed file/node for embedding;
+/// thumbnailUrl is filled later by the Figma API (token) slice.
+model TaskDesign {
+  id           String   @id @default(cuid())
+  taskId       String
+  task         Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  provider     String   @default("figma")
+  /// Canonical Figma URL (file or a specific node/frame).
+  url          String
+  /// Figma file key parsed from the URL.
+  fileKey      String
+  /// Optional node/frame id (…?node-id=1-23 → "1:23"). Null = whole file.
+  nodeId       String?
+  /// Display title — from the URL slug, refined later via the Figma API.
+  title        String
+  /// Frame/file thumbnail — populated by the Figma API slice (null until then).
+  thumbnailUrl String?
+  addedById    String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([taskId, url])
+  @@index([taskId])
+  @@index([fileKey])
 }
 
 /// In-app GitHub/GitLab repository connection for a project. The admin pastes
