@@ -53,7 +53,12 @@ export default async function ProjectOverviewPage({
 
   const [recent, budgetReport] = await Promise.all([
     listRecentTasksForProject(
-      { id: project.id, ownerId: project.ownerId, members: project.members },
+      {
+        id: project.id,
+        ownerId: project.ownerId,
+        externalSource: project.externalSource,
+        members: project.members,
+      },
       { id: user.id, role: user.role },
       5,
     ),

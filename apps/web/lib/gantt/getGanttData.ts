@@ -32,6 +32,7 @@ export async function getGanttData(projectKey: string, user: SessionUser) {
       key: true,
       name: true,
       ownerId: true,
+      externalSource: true,
       members: { select: { userId: true, role: true } },
     },
   });
