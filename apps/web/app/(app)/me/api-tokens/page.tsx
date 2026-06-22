@@ -46,6 +46,12 @@ export default async function ApiTokensPage() {
             {`claude mcp add --transport http giper ${mcpUrl} \\
   --header "Authorization: Bearer ВАШ_ТОКЕН"`}
           </pre>
+          <p className="text-muted-foreground">
+            Веб-коннектор claude.ai: «Add custom connector» → URL{' '}
+            <code>{mcpUrl}</code>, поля Advanced оставь пустыми — Claude сам
+            проведёт вход (OAuth, через твою сессию giper-pm). Токен выше нужен
+            только для Claude Code/Desktop.
+          </p>
           <p className="text-xs text-muted-foreground">
             Инструменты: list_projects, list_tasks, get_task, create_task,
             add_comment, set_status, set_internal_status.

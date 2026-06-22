@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma, type TaskStatus } from '@giper/db';
-import { resolveApiToken } from '@/lib/api/resolveApiToken';
+import { resolveBearerUser, baseUrl } from '@/lib/oauth/core';
 import type { SessionUser } from '@/lib/permissions';
 import { DomainError } from '@/lib/errors';
 import { listProjectsForUser } from '@/lib/projects';
@@ -322,11 +322,18 @@ async function handleOne(msg: RpcReq, user: SessionUser): Promise<object | null>
 }
 
 export async function POST(req: Request) {
-  const user = await resolveApiToken(req);
+  const user = await resolveBearerUser(req);
   if (!user) {
+    // RFC 9728: point the client at our protected-resource metadata so OAuth
+    // (claude.ai custom connectors) can discover the authorization server.
     return NextResponse.json(
-      rpcError(null, -32001, 'unauthorized: нужен Authorization: Bearer gpm_…'),
-      { status: 401 },
+      rpcError(null, -32001, 'unauthorized: нужен Authorization: Bearer (OAuth или gpm_ токен)'),
+      {
+        status: 401,
+        headers: {
+          'WWW-Authenticate': `Bearer resource_metadata="${baseUrl()}/.well-known/oauth-protected-resource"`,
+        },
+      },
     );
   }
 
