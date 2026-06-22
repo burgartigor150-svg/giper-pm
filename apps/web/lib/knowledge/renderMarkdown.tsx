@@ -1,0 +1,264 @@
+import type { ReactNode } from 'react';
+
+/**
+ * Lightweight, dependency-free Markdown → React renderer for Knowledge Base
+ * articles. Deliberately small (no remark/react-markdown) so the KB slice
+ * ships without lockfile churn. Supports the TEAMLY-style essentials:
+ *
+ *   # … ###### headings        **bold**  *italic*  `code`
+ *   - / * / + bullet lists     1. ordered lists     - [ ] / - [x] task lists
+ *   > blockquotes              ``` fenced code ```   --- horizontal rule
+ *   | a | b | tables           [text](url) links     bare URLs
+ *
+ * Block parsing is line-based; inline parsing is a single tokenizing pass.
+ * Nested lists are rendered flat in v1 (indentation collapses) — good enough
+ * for reading; the editor stays plain Markdown.
+ */
+
+let keySeq = 0;
+const k = () => `kb-${keySeq++}`;
+
+// ---- inline ---------------------------------------------------------------
+
+const INLINE_RE =
+  /(`[^`]+`)|(\[[^\]]+\]\([^)\s]+\))|(\*\*[^*]+\*\*)|(\*[^*\n]+\*|_[^_\n]+_)|(https?:\/\/[^\s)]+)/g;
+
+function renderInline(text: string): ReactNode[] {
+  const out: ReactNode[] = [];
+  let last = 0;
+  let m: RegExpExecArray | null;
+  INLINE_RE.lastIndex = 0;
+  while ((m = INLINE_RE.exec(text)) !== null) {
+    if (m.index > last) out.push(text.slice(last, m.index));
+    const code = m[1];
+    const link = m[2];
+    const bold = m[3];
+    const em = m[4];
+    const url = m[5];
+    if (code) {
+      out.push(
+        <code key={k()} className="rounded bg-muted px-1 py-0.5 font-mono text-[0.85em]">
+          {code.slice(1, -1)}
+        </code>,
+      );
+    } else if (link) {
+      const sep = link.indexOf('](');
+      const label = link.slice(1, sep);
+      const href = link.slice(sep + 2, -1);
+      out.push(
+        <a key={k()} href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline hover:no-underline dark:text-blue-400">
+          {label}
+        </a>,
+      );
+    } else if (bold) {
+      out.push(<strong key={k()}>{bold.slice(2, -2)}</strong>);
+    } else if (em) {
+      out.push(<em key={k()}>{em.slice(1, -1)}</em>);
+    } else if (url) {
+      out.push(
+        <a key={k()} href={url} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline hover:no-underline dark:text-blue-400">
+          {url}
+        </a>,
+      );
+    }
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return out;
+}
+
+// ---- block helpers --------------------------------------------------------
+
+const HEADING_RE = /^(#{1,6})\s+(.*)$/;
+const HR_RE = /^\s*([-*_])\1{2,}\s*$/;
+const LIST_RE = /^\s*([-*+]|\d+\.)\s+(.*)$/;
+const TASK_RE = /^\s*[-*+]\s+\[([ xX])\]\s+(.*)$/;
+
+const HEADING_CLASS: Record<number, string> = {
+  1: 'mt-6 mb-3 text-2xl font-bold',
+  2: 'mt-5 mb-2 text-xl font-bold',
+  3: 'mt-4 mb-2 text-lg font-semibold',
+  4: 'mt-3 mb-1 text-base font-semibold',
+  5: 'mt-3 mb-1 text-sm font-semibold',
+  6: 'mt-3 mb-1 text-sm font-semibold uppercase tracking-wide text-muted-foreground',
+};
+
+function isTableSeparator(line: string): boolean {
+  return /\|/.test(line) && /^[\s|:-]+$/.test(line) && /-/.test(line);
+}
+
+function splitRow(line: string): string[] {
+  return line
+    .trim()
+    .replace(/^\|/, '')
+    .replace(/\|$/, '')
+    .split('|')
+    .map((c) => c.trim());
+}
+
+// ---- main -----------------------------------------------------------------
+
+export function renderMarkdown(src: string | null | undefined): ReactNode {
+  if (!src || !src.trim()) return null;
+  const lines = src.replace(/\r\n/g, '\n').split('\n');
+  const at = (idx: number): string => lines[idx] ?? '';
+  const blocks: ReactNode[] = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = at(i);
+
+    // blank
+    if (!line.trim()) {
+      i++;
+      continue;
+    }
+
+    // fenced code block
+    if (line.startsWith('```')) {
+      const buf: string[] = [];
+      i++;
+      while (i < lines.length && !at(i).startsWith('```')) {
+        buf.push(at(i));
+        i++;
+      }
+      i++; // closing fence
+      blocks.push(
+        <pre key={k()} className="my-3 overflow-x-auto rounded-md bg-muted p-3 text-[0.85em]">
+          <code className="font-mono">{buf.join('\n')}</code>
+        </pre>,
+      );
+      continue;
+    }
+
+    // heading
+    const h = HEADING_RE.exec(line);
+    if (h) {
+      const level = (h[1] ?? '#').length;
+      const Tag = `h${level}` as keyof JSX.IntrinsicElements;
+      blocks.push(
+        <Tag key={k()} className={HEADING_CLASS[level]}>
+          {renderInline(h[2] ?? '')}
+        </Tag>,
+      );
+      i++;
+      continue;
+    }
+
+    // horizontal rule
+    if (HR_RE.test(line)) {
+      blocks.push(<hr key={k()} className="my-4 border-neutral-200 dark:border-neutral-800" />);
+      i++;
+      continue;
+    }
+
+    // table: header row + separator row
+    if (line.includes('|') && i + 1 < lines.length && isTableSeparator(at(i + 1))) {
+      const header = splitRow(line);
+      i += 2; // skip header + separator
+      const rows: string[][] = [];
+      while (i < lines.length && at(i).includes('|') && at(i).trim()) {
+        rows.push(splitRow(at(i)));
+        i++;
+      }
+      blocks.push(
+        <div key={k()} className="my-3 overflow-x-auto">
+          <table className="w-full border-collapse text-sm">
+            <thead>
+              <tr>
+                {header.map((cell) => (
+                  <th key={k()} className="border border-neutral-300 bg-muted px-2 py-1 text-left font-semibold dark:border-neutral-700">
+                    {renderInline(cell)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={k()}>
+                  {header.map((_, ci) => (
+                    <td key={k()} className="border border-neutral-300 px-2 py-1 align-top dark:border-neutral-700">
+                      {renderInline(row[ci] ?? '')}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>,
+      );
+      continue;
+    }
+
+    // blockquote
+    if (line.startsWith('>')) {
+      const buf: string[] = [];
+      while (i < lines.length && at(i).startsWith('>')) {
+        buf.push(at(i).replace(/^>\s?/, ''));
+        i++;
+      }
+      blocks.push(
+        <blockquote key={k()} className="my-3 border-l-4 border-neutral-300 pl-3 text-muted-foreground dark:border-neutral-700">
+          {renderInline(buf.join(' '))}
+        </blockquote>,
+      );
+      continue;
+    }
+
+    // lists (task / unordered / ordered) — consecutive list lines
+    if (LIST_RE.test(line)) {
+      const ordered = /^\s*\d+\.\s/.test(line);
+      const items: ReactNode[] = [];
+      let hasTask = false;
+      while (i < lines.length && LIST_RE.test(at(i))) {
+        const cur = at(i);
+        const task = TASK_RE.exec(cur);
+        if (task) {
+          hasTask = true;
+          const checked = (task[1] ?? '').toLowerCase() === 'x';
+          items.push(
+            <li key={k()} className="flex items-start gap-2">
+              <input type="checkbox" checked={checked} readOnly className="mt-1" />
+              <span className={checked ? 'text-muted-foreground line-through' : ''}>{renderInline(task[2] ?? '')}</span>
+            </li>,
+          );
+        } else {
+          const item = LIST_RE.exec(cur);
+          items.push(<li key={k()}>{renderInline(item?.[2] ?? '')}</li>);
+        }
+        i++;
+      }
+      if (hasTask) {
+        blocks.push(<ul key={k()} className="my-2 space-y-1">{items}</ul>);
+      } else if (ordered) {
+        blocks.push(<ol key={k()} className="my-2 list-decimal space-y-1 pl-6">{items}</ol>);
+      } else {
+        blocks.push(<ul key={k()} className="my-2 list-disc space-y-1 pl-6">{items}</ul>);
+      }
+      continue;
+    }
+
+    // paragraph — gather until blank or a block starter
+    const buf: string[] = [];
+    while (
+      i < lines.length &&
+      at(i).trim() &&
+      !at(i).startsWith('```') &&
+      !at(i).startsWith('>') &&
+      !HEADING_RE.test(at(i)) &&
+      !HR_RE.test(at(i)) &&
+      !LIST_RE.test(at(i)) &&
+      !(at(i).includes('|') && i + 1 < lines.length && isTableSeparator(at(i + 1)))
+    ) {
+      buf.push(at(i));
+      i++;
+    }
+    blocks.push(
+      <p key={k()} className="my-2 leading-relaxed">
+        {renderInline(buf.join('\n'))}
+      </p>,
+    );
+  }
+
+  return <>{blocks}</>;
+}
