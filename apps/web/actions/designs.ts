@@ -7,6 +7,7 @@ import { canEditTaskInternal } from '@/lib/permissions';
 import { isUniqueConstraintError } from '@/lib/prisma-errors';
 import { parseFigmaUrl } from '@/lib/figma/parseFigmaUrl';
 import { refreshDesignThumbnail } from '@/lib/figma/refreshDesignThumbnail';
+import { syncFigmaCommentsForTask } from '@/lib/figma/syncFigmaComments';
 
 type ActionResult<T = unknown> =
   | { ok: true; data?: T }
@@ -85,4 +86,24 @@ export async function removeFigmaDesignAction(
   await prisma.taskDesign.delete({ where: { id: designId } });
   revalidatePath(`/projects/${projectKey}/tasks/${taskNumber}`);
   return { ok: true };
+}
+
+/**
+ * Pull comments from this task's linked Figma files into the task timeline.
+ * Best-effort (needs a connected Figma token); deduped. Same gate as attach.
+ */
+export async function syncFigmaCommentsAction(
+  taskId: string,
+  projectKey: string,
+  taskNumber: number,
+): Promise<ActionResult<{ created: number }>> {
+  const me = await requireAuth();
+  const task = await prisma.task.findUnique({ where: { id: taskId }, select: TASK_PERM_SELECT });
+  if (!task) return { ok: false, error: { code: 'NOT_FOUND', message: 'Задача не найдена' } };
+  if (!canEditTaskInternal(me, { creatorId: task.creatorId, assigneeId: task.assigneeId, externalSource: task.externalSource, project: task.project })) {
+    return { ok: false, error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' } };
+  }
+  const { created } = await syncFigmaCommentsForTask(taskId);
+  revalidatePath(`/projects/${projectKey}/tasks/${taskNumber}`);
+  return { ok: true, data: { created } };
 }
