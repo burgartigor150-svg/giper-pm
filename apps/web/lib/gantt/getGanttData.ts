@@ -1,6 +1,6 @@
 import { prisma, type TaskStatus } from '@giper/db';
 import { DomainError } from '../errors';
-import { canViewProject, type SessionUser } from '../permissions';
+import { canViewProject, canViewAllProjectTasks, type SessionUser } from '../permissions';
 
 export type GanttTask = {
   id: string;
@@ -51,17 +51,24 @@ export async function getGanttData(projectKey: string, user: SessionUser) {
     throw new DomainError('INSUFFICIENT_PERMISSIONS', 403);
   }
 
+  // Per-stake for regular members; leadership (ADMIN / owner / LEAD) sees the
+  // whole project's tasks (full mirror of the Bitrix workgroup).
+  const seesAll = canViewAllProjectTasks(user, project);
   const rows = await prisma.task.findMany({
     where: {
       projectId: project.id,
       internalStatus: { not: 'CANCELED' },
-      OR: [
-        { creatorId: user.id },
-        { assigneeId: user.id },
-        { reviewerId: user.id },
-        { assignments: { some: { userId: user.id } } },
-        { watchers: { some: { userId: user.id } } },
-      ],
+      ...(seesAll
+        ? {}
+        : {
+            OR: [
+              { creatorId: user.id },
+              { assigneeId: user.id },
+              { reviewerId: user.id },
+              { assignments: { some: { userId: user.id } } },
+              { watchers: { some: { userId: user.id } } },
+            ],
+          }),
     },
     orderBy: [{ startedAt: 'asc' }, { createdAt: 'asc' }],
     select: {

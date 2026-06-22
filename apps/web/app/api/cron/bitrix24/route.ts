@@ -29,10 +29,26 @@ export async function POST(req: Request) {
     const url = new URL(req.url);
     const forceParam = url.searchParams.get('force');
     const force = forceParam === '1' || forceParam === 'true';
-    const result = await runBitrix24SyncNow({ force });
+    // ?backfill=1 runs a one-off task-only global pull (every active task in
+    // every mirrored workgroup, no enrichment) to close the historical
+    // coverage gap. ?groups=654,584 chunks it to specific workgroups so a
+    // big portal can be backfilled in bounded slices.
+    const backfillParam = url.searchParams.get('backfill');
+    const backfill = backfillParam === '1' || backfillParam === 'true';
+    const groupsParam = url.searchParams.get('groups');
+    const groupIds = groupsParam
+      ? groupsParam
+          .split(',')
+          .map((s) => s.trim())
+          // Workgroup ids are numeric — drop anything else so a malformed
+          // ?groups= can't reach the Bitrix filter as junk.
+          .filter((s) => /^\d+$/.test(s))
+      : undefined;
+    const result = await runBitrix24SyncNow({ force, backfill, groupIds });
     return NextResponse.json({
       ok: result.ok,
       force,
+      backfill,
       durationMs: result.durationMs,
       users: result.users,
       projects: result.projects,

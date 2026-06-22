@@ -54,6 +54,18 @@ export type RunSyncOptions = {
    * the orchestrator and passed in here.
    */
   activeDepartmentIds?: string[];
+  /**
+   * Tasks-only global coverage pass: skip user/project/member sync and pull
+   * tasks across the whole portal (no MEMBER scope), mapping each onto its
+   * already-mirrored project. Closes the gap where a task in a mirrored
+   * project had no synced member and so was never fetched by the per-user
+   * passes. Optionally scoped to `groupIds`.
+   */
+  tasksOnlyGlobal?: boolean;
+  /** Forwarded to syncTasks — restrict the global pass to these workgroups. */
+  groupIds?: string[];
+  /** Forwarded to syncTasks — skip per-task enrichment (bulk backfill). */
+  skipEnrichment?: boolean;
 };
 
 /**
@@ -71,78 +83,87 @@ export async function runBitrix24Sync(
 ): Promise<RunSyncResult> {
   const startedAt = new Date();
 
-  const integration = await ensureIntegrationRow(prisma);
+  // The tasks-only global / backfill pass is a SUB-pass of the orchestrator
+  // (runBitrix24SyncNow). It must NOT take the distributed lock or write its
+  // own sync-log row: otherwise a long backfill that times out would pin a
+  // RUNNING log and block the regular cron for STALE_RUN_MS, and the
+  // per-tick global pass would spam a log row every run. It runs lock-free
+  // and log-free; its stats are aggregated by the caller.
+  let log: { id: string } | null = null;
+  if (!opts.tasksOnlyGlobal) {
+    const integration = await ensureIntegrationRow(prisma);
 
-  // Supervisor: sweep RUNNING logs older than STALE_RUN_MS to FAILED.
-  // Without this a Vercel timeout or container kill leaves the log
-  // pinned at RUNNING and blocks every subsequent trigger via the lock
-  // below.
-  const staleCutoff = new Date(Date.now() - STALE_RUN_MS);
-  await prisma.integrationSyncLog.updateMany({
-    where: {
-      integrationId: integration.id,
-      status: 'RUNNING',
-      startedAt: { lt: staleCutoff },
-    },
-    data: {
-      status: 'FAILED',
-      finishedAt: new Date(),
-      errors: { fatal: 'stale RUNNING swept by supervisor (>25min)' },
-    },
-  });
+    // Supervisor: sweep RUNNING logs older than STALE_RUN_MS to FAILED.
+    // Without this a Vercel timeout or container kill leaves the log
+    // pinned at RUNNING and blocks every subsequent trigger via the lock
+    // below.
+    const staleCutoff = new Date(Date.now() - STALE_RUN_MS);
+    await prisma.integrationSyncLog.updateMany({
+      where: {
+        integrationId: integration.id,
+        status: 'RUNNING',
+        startedAt: { lt: staleCutoff },
+      },
+      data: {
+        status: 'FAILED',
+        finishedAt: new Date(),
+        errors: { fatal: 'stale RUNNING swept by supervisor (>25min)' },
+      },
+    });
 
-  // Distributed lock: refuse to start a new run while a recent one is
-  // still RUNNING. Two parallel syncs hammering the same Bitrix webhook
-  // is the fastest path to QUERY_LIMIT_EXCEEDED — much worse than
-  // simply skipping this trigger.
-  const inflight = await prisma.integrationSyncLog.findFirst({
-    where: {
-      integrationId: integration.id,
-      status: 'RUNNING',
-      startedAt: { gte: staleCutoff },
-    },
-    select: { id: true, startedAt: true },
-  });
-  if (inflight) {
-    const skippedFinished = new Date();
-    return {
-      startedAt,
-      finishedAt: skippedFinished,
-      durationMs: 0,
-      users: { totalSeen: 0, matched: 0, updated: 0, created: 0 },
-      projects: { totalSeen: 0, created: 0, updated: 0, skipped: 0 },
-      members: {
-        projectsScanned: 0,
-        membershipsTotal: 0,
-        membershipsAdded: 0,
-        membershipsRemoved: 0,
+    // Distributed lock: refuse to start a new run while a recent one is
+    // still RUNNING. Two parallel syncs hammering the same Bitrix webhook
+    // is the fastest path to QUERY_LIMIT_EXCEEDED — much worse than
+    // simply skipping this trigger.
+    const inflight = await prisma.integrationSyncLog.findFirst({
+      where: {
+        integrationId: integration.id,
+        status: 'RUNNING',
+        startedAt: { gte: staleCutoff },
       },
-      tasks: {
-        totalSeen: 0,
-        created: 0,
-        updated: 0,
-        skippedNoProject: 0,
-        errors: 0,
-        files: { totalSeen: 0, created: 0, updated: 0, deleted: 0, errors: 0 },
-        comments: { totalSeen: 0, created: 0, updated: 0, deleted: 0, errors: 0 },
-        history: { totalSeen: 0, created: 0, updated: 0, errors: 0 },
-        chat: { totalSeen: 0, created: 0, updated: 0, errors: 0 },
+      select: { id: true, startedAt: true },
+    });
+    if (inflight) {
+      const skippedFinished = new Date();
+      return {
+        startedAt,
+        finishedAt: skippedFinished,
+        durationMs: 0,
+        users: { totalSeen: 0, matched: 0, updated: 0, created: 0 },
+        projects: { totalSeen: 0, created: 0, updated: 0, skipped: 0 },
+        members: {
+          projectsScanned: 0,
+          membershipsTotal: 0,
+          membershipsAdded: 0,
+          membershipsRemoved: 0,
+        },
+        tasks: {
+          totalSeen: 0,
+          created: 0,
+          updated: 0,
+          skippedNoProject: 0,
+          errors: 0,
+          files: { totalSeen: 0, created: 0, updated: 0, deleted: 0, errors: 0 },
+          comments: { totalSeen: 0, created: 0, updated: 0, deleted: 0, errors: 0 },
+          history: { totalSeen: 0, created: 0, updated: 0, errors: 0 },
+          chat: { totalSeen: 0, created: 0, updated: 0, errors: 0 },
+        },
+        ok: true,
+        skipped: true,
+        error: `skipped: previous sync started ${inflight.startedAt.toISOString()} still RUNNING`,
+      };
+    }
+
+    // Persist a sync log row up front so callers can monitor in-progress runs.
+    log = await prisma.integrationSyncLog.create({
+      data: {
+        integrationId: integration.id,
+        direction: 'IN',
+        status: 'RUNNING',
+        startedAt,
       },
-      ok: true,
-      skipped: true,
-      error: `skipped: previous sync started ${inflight.startedAt.toISOString()} still RUNNING`,
-    };
+    });
   }
-
-  // Persist a sync log row up front so callers can monitor in-progress runs.
-  const log = await prisma.integrationSyncLog.create({
-    data: {
-      integrationId: integration.id,
-      direction: 'IN',
-      status: 'RUNNING',
-      startedAt,
-    },
-  });
 
   let users: SyncUsersResult = { totalSeen: 0, matched: 0, updated: 0, created: 0 };
   let projects: SyncProjectsResult = {
@@ -172,34 +193,46 @@ export async function runBitrix24Sync(
   let error: string | undefined;
 
   try {
-    users = await syncUsers(prisma, client, {
-      createMissing: !!opts.createMissingUsers,
-      activeDepartmentIds: opts.activeDepartmentIds,
-    });
-
-    if (opts.forBitrixUserId) {
-      // Personal-mirror path. The user can be a member of N groups but
-      // also an accomplice/auditor on tasks in OTHER groups they're not
-      // a member of (the "collab" case). Membership-only project sync
-      // would silently drop those tasks. Instead, collect every distinct
-      // GROUP_ID this user appears in across their MEMBER-tasks, and
-      // sync exactly those workgroups.
-      const groupIds = await collectMyGroupIds(
-        client,
-        opts.forBitrixUserId,
-        opts.since ?? null,
-      );
-      projects = await syncProjects(prisma, client, {
-        forBitrixUserId: opts.forBitrixUserId,
-        extraGroupIds: groupIds,
-      });
+    if (opts.tasksOnlyGlobal) {
+      // Global coverage pass: no users/projects/members sync. Pull tasks
+      // across the whole portal (no MEMBER scope) — upsertOne maps each to
+      // whichever workgroup is already mirrored and skips the rest. Closes
+      // the gap where cross-team tasks with no synced member never synced.
       tasks = await syncTasks(prisma, client, {
         since: opts.since ?? null,
-        forBitrixUserId: opts.forBitrixUserId,
+        groupIds: opts.groupIds,
+        skipEnrichment: opts.skipEnrichment,
       });
     } else {
-      projects = await syncProjects(prisma, client);
-      tasks = await syncTasks(prisma, client, { since: opts.since ?? null });
+      users = await syncUsers(prisma, client, {
+        createMissing: !!opts.createMissingUsers,
+        activeDepartmentIds: opts.activeDepartmentIds,
+      });
+
+      if (opts.forBitrixUserId) {
+        // Personal-mirror path. The user can be a member of N groups but
+        // also an accomplice/auditor on tasks in OTHER groups they're not
+        // a member of (the "collab" case). Membership-only project sync
+        // would silently drop those tasks. Instead, collect every distinct
+        // GROUP_ID this user appears in across their MEMBER-tasks, and
+        // sync exactly those workgroups.
+        const groupIds = await collectMyGroupIds(
+          client,
+          opts.forBitrixUserId,
+          opts.since ?? null,
+        );
+        projects = await syncProjects(prisma, client, {
+          forBitrixUserId: opts.forBitrixUserId,
+          extraGroupIds: groupIds,
+        });
+        tasks = await syncTasks(prisma, client, {
+          since: opts.since ?? null,
+          forBitrixUserId: opts.forBitrixUserId,
+        });
+      } else {
+        projects = await syncProjects(prisma, client);
+        tasks = await syncTasks(prisma, client, { since: opts.since ?? null });
+      }
     }
 
     // Resolve parent↔subtask links now that the whole task batch has landed
@@ -219,15 +252,18 @@ export async function runBitrix24Sync(
     // Always mirror sonet_group membership after projects are
     // resolved. This is the source of truth for project visibility —
     // skipping it means users keep losing/gaining the wrong
-    // workgroups in the UI.
-    try {
-      members = await syncProjectBitrixMembers(prisma, client);
-    } catch (e) {
-      // Don't fail the whole run on membership sync — it's an
-      // additive sync, the next run will catch it up. But surface
-      // the error in the log.
-      // eslint-disable-next-line no-console
-      console.warn('[bitrix:runSync] syncProjectBitrixMembers failed:', e);
+    // workgroups in the UI. Skipped on the tasks-only global pass (no
+    // projects were (re)synced there).
+    if (!opts.tasksOnlyGlobal) {
+      try {
+        members = await syncProjectBitrixMembers(prisma, client);
+      } catch (e) {
+        // Don't fail the whole run on membership sync — it's an
+        // additive sync, the next run will catch it up. But surface
+        // the error in the log.
+        // eslint-disable-next-line no-console
+        console.warn('[bitrix:runSync] syncProjectBitrixMembers failed:', e);
+      }
     }
   } catch (e) {
     ok = false;
@@ -243,30 +279,33 @@ export async function runBitrix24Sync(
     tasks.comments.errors +
     tasks.history.errors +
     tasks.chat.errors;
-  await prisma.integrationSyncLog.update({
-    where: { id: log.id },
-    data: {
-      finishedAt,
-      status: ok ? (totalErrors > 0 ? 'PARTIAL' : 'SUCCESS') : 'FAILED',
-      itemsProcessed:
-        users.totalSeen +
-        projects.totalSeen +
-        tasks.totalSeen +
-        tasks.files.totalSeen +
-        tasks.comments.totalSeen,
-      errors: error
-        ? { fatal: error }
-        : totalErrors > 0
-          ? {
-              taskErrors: tasks.errors,
-              fileErrors: tasks.files.errors,
-              commentErrors: tasks.comments.errors,
-              historyErrors: tasks.history.errors,
-              chatErrors: tasks.chat.errors,
-            }
-          : undefined,
-    },
-  });
+  // No log row for the lock-free tasks-only global / backfill pass.
+  if (log) {
+    await prisma.integrationSyncLog.update({
+      where: { id: log.id },
+      data: {
+        finishedAt,
+        status: ok ? (totalErrors > 0 ? 'PARTIAL' : 'SUCCESS') : 'FAILED',
+        itemsProcessed:
+          users.totalSeen +
+          projects.totalSeen +
+          tasks.totalSeen +
+          tasks.files.totalSeen +
+          tasks.comments.totalSeen,
+        errors: error
+          ? { fatal: error }
+          : totalErrors > 0
+            ? {
+                taskErrors: tasks.errors,
+                fileErrors: tasks.files.errors,
+                commentErrors: tasks.comments.errors,
+                historyErrors: tasks.history.errors,
+                chatErrors: tasks.chat.errors,
+              }
+            : undefined,
+      },
+    });
+  }
 
   return { startedAt, finishedAt, durationMs, users, projects, members, tasks, ok, error };
 }

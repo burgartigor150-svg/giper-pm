@@ -115,6 +115,19 @@ export function canViewProject(user: SessionUser, project: ProjectForPerm): bool
   return false;
 }
 
+/**
+ * Leadership task visibility: ADMIN (org), the project owner, or a project
+ * LEAD see EVERY task in the project — including Bitrix-mirror tasks they
+ * personally aren't on. This is the deliberate exception to the per-stake
+ * default (see {@link canViewTask}) so leadership gets the full picture of a
+ * mirrored workgroup; regular members stay per-stake.
+ */
+export function canViewAllProjectTasks(user: SessionUser, project: ProjectForPerm): boolean {
+  if (user.role === 'ADMIN') return true;
+  if (project.ownerId === user.id) return true;
+  return !!project.members?.some((m) => m.userId === user.id && m.role === 'LEAD');
+}
+
 // ---- Task ---------------------------------------------------------------
 
 /** Create task: any project viewer, plus ADMIN/PM globally. VIEWER role excluded. */
@@ -160,13 +173,14 @@ export function canEditTaskInternal(user: SessionUser, task: TaskForPerm, caps?:
 }
 
 /**
- * View task. Strictly per-stake: a user must personally be on the task
- * (creator, assignee, reviewer, co-assignee, watcher). Project-level
- * shortcuts (owner / LEAD) are intentionally NOT here — for Bitrix-
- * mirror groups they would make a PM see every task they didn't
- * actually participate in upstream.
+ * View task. Per-stake for regular members: a user must personally be on the
+ * task (creator, assignee, reviewer, co-assignee, watcher). Leadership (ADMIN,
+ * project owner, project LEAD) additionally sees every task in the project —
+ * see {@link canViewAllProjectTasks} — so they get the full picture of a
+ * mirrored Bitrix workgroup instead of only the tasks they're personally on.
  */
 export function canViewTask(user: SessionUser, task: TaskForPerm): boolean {
+  if (canViewAllProjectTasks(user, task.project)) return true;
   if (task.creatorId === user.id) return true;
   if (task.assigneeId === user.id) return true;
   if (task.reviewerId === user.id) return true;
