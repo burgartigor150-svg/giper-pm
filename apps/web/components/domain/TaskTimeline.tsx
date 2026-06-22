@@ -43,7 +43,7 @@ type Props = {
   /** Bitrix-mirror? Drives which tabs are shown and the form's visibility toggle. */
   isMirror: boolean;
   /** Map of userId → name/image used by renderMentions for inline pills. */
-  mentions: Map<string, Author>;
+  mentions: Record<string, Author>;
 };
 
 type Tab = 'discussion' | 'events' | 'internal';
@@ -232,7 +232,7 @@ function CommentRow({
   mentions,
 }: {
   item: CommentItem;
-  mentions: Map<string, Author>;
+  mentions: Record<string, Author>;
 }) {
   return (
     <li
@@ -267,7 +267,7 @@ function HistoryRow({
   mentions,
 }: {
   item: CommentItem;
-  mentions: Map<string, Author>;
+  mentions: Record<string, Author>;
 }) {
   return (
     <li className="flex gap-3 text-xs text-muted-foreground">
@@ -316,7 +316,7 @@ function StatusRow({
   );
 }
 
-function renderMentions(body: string, users: Map<string, Author>): React.ReactNode {
+function renderMentions(body: string, users: Record<string, Author>): React.ReactNode {
   const re = /@([a-z0-9]{24,})\b/g;
   const out: React.ReactNode[] = [];
   let lastIndex = 0;
@@ -324,7 +324,7 @@ function renderMentions(body: string, users: Map<string, Author>): React.ReactNo
   let key = 0;
   while ((match = re.exec(body)) !== null) {
     const id = match[1] ?? '';
-    const u = users.get(id);
+    const u = users[id];
     if (!u) continue;
     if (match.index > lastIndex) {
       out.push(
