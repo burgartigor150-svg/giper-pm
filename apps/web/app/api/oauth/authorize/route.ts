@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@giper/db';
 import { auth } from '@/lib/auth';
-import { randomToken, sha256, CODE_TTL_SEC } from '@/lib/oauth/core';
+import { randomToken, sha256, CODE_TTL_SEC, baseUrl } from '@/lib/oauth/core';
 
 /**
  * OAuth Authorization Endpoint (Authorization Code + PKCE).
@@ -55,17 +55,21 @@ export async function GET(req: Request) {
   if (responseType !== 'code') return fail('unsupported_response_type');
   if (!codeChallenge || codeChallengeMethod !== 'S256') return fail('invalid_request');
 
+  // This URL on the PUBLIC origin (req.url's host is the internal container
+  // bind address behind nginx — never send the browser there).
+  const selfUrl = `${baseUrl()}${url.pathname}${url.search}`;
+
   // 2. Require a logged-in giper-pm user.
   const session = await auth();
   if (!session?.user?.id) {
-    const login = new URL('/login', url.origin);
-    login.searchParams.set('callbackUrl', req.url);
+    const login = new URL('/login', baseUrl());
+    login.searchParams.set('callbackUrl', selfUrl);
     return NextResponse.redirect(login.toString(), { status: 302 });
   }
 
   // 3. Consent screen (unless already approved=1).
   if (!approved) {
-    const approveUrl = new URL(req.url);
+    const approveUrl = new URL(selfUrl);
     approveUrl.searchParams.set('approved', '1');
     const denyUrl = new URL(redirectUri);
     denyUrl.searchParams.set('error', 'access_denied');
