@@ -8,7 +8,9 @@ import {
   isSpaceFavorite,
   listTemplatesForSpace,
 } from '@/lib/knowledge/getKnowledge';
+import { listSpaceTables } from '@/lib/knowledge/getTables';
 import { KbSpaceHeader } from '@/components/domain/knowledge/KbSpaceHeader';
+import { KbSpaceTables } from '@/components/domain/knowledge/KbSpaceTables';
 
 export default async function KnowledgeSpacePage({
   params,
@@ -20,10 +22,11 @@ export default async function KnowledgeSpacePage({
   const space = await getSpace(spaceId);
   if (!space) notFound();
 
-  const [articles, favorite, templates] = await Promise.all([
+  const [articles, favorite, templates, tables] = await Promise.all([
     getSpaceArticles(spaceId),
     isSpaceFavorite(me.id, spaceId),
     listTemplatesForSpace(spaceId),
+    listSpaceTables(spaceId),
   ]);
 
   const canManage = me.role === 'ADMIN' || me.role === 'PM';
@@ -75,6 +78,8 @@ export default async function KnowledgeSpacePage({
           })}
         </ul>
       )}
+
+      <KbSpaceTables spaceId={space.id} tables={tables} canEdit={canEdit} />
     </div>
   );
 }
