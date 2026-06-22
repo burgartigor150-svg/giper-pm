@@ -148,6 +148,26 @@ const num = (a: Args, k: string): number => {
   return n;
 };
 
+/**
+ * Resolve KEY-N → task id WITHOUT a visibility gate. Safe for write tools: each
+ * core fn (addComment/changeTaskStatus/setInternalStatus) enforces its own
+ * permission. Using getTask here would over-block — it applies the strict
+ * per-stake VIEW gate, which is narrower than who may edit/comment.
+ */
+async function resolveTaskRef(projectKey: string, number: number) {
+  const project = await prisma.project.findUnique({
+    where: { key: projectKey },
+    select: { id: true },
+  });
+  if (!project) throw new DomainError('NOT_FOUND', 404, 'Проект не найден');
+  const task = await prisma.task.findUnique({
+    where: { projectId_number: { projectId: project.id, number } },
+    select: { id: true, number: true },
+  });
+  if (!task) throw new DomainError('NOT_FOUND', 404, 'Задача не найдена');
+  return task;
+}
+
 async function runTool(name: string, args: Args, user: SessionUser): Promise<string> {
   switch (name) {
     case 'list_projects': {
@@ -230,7 +250,7 @@ async function runTool(name: string, args: Args, user: SessionUser): Promise<str
     }
     case 'add_comment': {
       const key = str(args, 'projectKey');
-      const t = await getTask(key, num(args, 'number'), user);
+      const t = await resolveTaskRef(key, num(args, 'number'));
       await addComment(t.id, str(args, 'body'), user, { visibility: 'EXTERNAL' });
       return `Комментарий добавлен к ${key}-${t.number}`;
     }
@@ -240,14 +260,14 @@ async function runTool(name: string, args: Args, user: SessionUser): Promise<str
       if (!STATUSES.includes(status)) {
         throw new DomainError('VALIDATION', 400, `Недопустимый статус: ${status}`);
       }
-      const t = await getTask(key, num(args, 'number'), user);
+      const t = await resolveTaskRef(key, num(args, 'number'));
       await changeTaskStatus(t.id, status, user);
       return `Статус ${key}-${t.number} → ${status}`;
     }
     case 'set_internal_status': {
       const key = str(args, 'projectKey');
       const status = str(args, 'status');
-      const t = await getTask(key, num(args, 'number'), user);
+      const t = await resolveTaskRef(key, num(args, 'number'));
       await setInternalStatus(t.id, status, user);
       return `Внутренний статус ${key}-${t.number} → ${status}`;
     }
