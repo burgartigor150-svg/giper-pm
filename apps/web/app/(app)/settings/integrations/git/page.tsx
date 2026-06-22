@@ -1,7 +1,9 @@
 import { headers } from 'next/headers';
 import { notFound } from 'next/navigation';
+import { prisma } from '@giper/db';
 import { Card, CardContent, CardHeader, CardTitle } from '@giper/ui/components/Card';
 import { requireAuth } from '@/lib/auth';
+import { FigmaConnectionCard } from '@/components/domain/FigmaConnectionCard';
 
 /**
  * Admin-only setup guide for the GitHub / GitLab task integrations. Both are
@@ -36,9 +38,14 @@ export default async function GitIntegrationPage() {
   const githubOk = !!process.env.GITHUB_WEBHOOK_SECRET?.trim();
   const gitlabOk = !!process.env.GITLAB_WEBHOOK_SECRET?.trim();
 
+  const figma = await prisma.figmaConnection.findFirst({
+    where: { singleton: 'figma' },
+    select: { tokenHint: true },
+  });
+
   return (
     <div className="mx-auto max-w-4xl space-y-4">
-      <h1 className="text-xl font-semibold">Git — GitHub и GitLab</h1>
+      <h1 className="text-xl font-semibold">Интеграции — Git и Figma</h1>
 
       <Card>
         <CardHeader>
@@ -93,6 +100,31 @@ export default async function GitIntegrationPage() {
           <p>
             Triggers: <code>Push events</code> + <code>Merge request events</code>
           </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            Figma <StatusBadge ok={!!figma} />
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3 text-sm">
+          <p className="text-muted-foreground">
+            Привязывайте макеты к задачам (вставьте ссылку Figma в карточке —
+            появится живое превью). С токеном ниже добавляются миниатюры кадров,
+            приватные файлы и синк комментариев.
+          </p>
+          <FigmaConnectionCard connected={!!figma} hint={figma?.tokenHint ?? null} />
+          <div className="border-t pt-2 text-muted-foreground">
+            <p>Вебхук изменений/комментариев Figma (в Figma → команда → Webhooks):</p>
+            <p>
+              URL: <code>{base}/api/webhooks/figma</code>
+            </p>
+            <p>
+              Passcode: переменная окружения <code>FIGMA_WEBHOOK_PASSCODE</code>
+            </p>
+          </div>
         </CardContent>
       </Card>
     </div>
