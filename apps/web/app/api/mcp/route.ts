@@ -10,6 +10,7 @@ import { createTask } from '@/lib/tasks/createTask';
 import { addComment } from '@/lib/tasks/addComment';
 import { changeTaskStatus } from '@/lib/tasks/changeTaskStatus';
 import { setInternalStatus } from '@/lib/tasks/setInternalStatus';
+import { ensureAiBotAssignee } from '@/lib/aiBotUser';
 
 /**
  * Model Context Protocol (MCP) server for giper-pm over Streamable HTTP.
@@ -36,6 +37,7 @@ const INSTRUCTIONS = [
   'Правила работы с задачами giper-pm:',
   '• Каждую создаваемую задачу сопровождайте комментарием: сразу после create_task вызовите add_comment с кратким описанием выполненной/планируемой работы и ссылками на коммиты и PR/MR.',
   '• Это обязательно, потому что для задач, заведённых вручную или через MCP, гит-автокомментарии НЕ создаются — они появляются только от push-вебхуков, когда КЛЮЧ-НОМЕР задачи указан в сообщении коммита.',
+  '• Исполнителем новой задачи автоматически становится пользователь «AI» (задачу создал и реализует AI). Чтобы назначить человека — передайте assigneeId в create_task.',
 ].join('\n');
 
 const STATUSES: TaskStatus[] = [
@@ -89,7 +91,7 @@ const TOOLS: ToolDef[] = [
   {
     name: 'create_task',
     description:
-      'Создать задачу в проекте. Возвращает её код (КЛЮЧ-НОМЕР). После создания ОБЯЗАТЕЛЬНО добавьте комментарий через add_comment с описанием работы и ссылками на коммиты/PR — для задач, заведённых вручную, гит-автокомментарии не создаются.',
+      'Создать задачу в проекте. Возвращает её код (КЛЮЧ-НОМЕР). Исполнителем по умолчанию становится пользователь «AI» (передайте assigneeId, чтобы назначить человека). После создания ОБЯЗАТЕЛЬНО добавьте комментарий через add_comment с описанием работы и ссылками на коммиты/PR — для задач, заведённых вручную, гит-автокомментарии не создаются.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -247,18 +249,35 @@ async function runTool(name: string, args: Args, user: SessionUser): Promise<str
     case 'create_task': {
       const projectKey = str(args, 'projectKey');
       const title = str(args, 'title');
+      // The MCP caller is the AI agent: it created and will implement the task,
+      // so the assignee defaults to the synthetic "AI" user unless the caller
+      // passed an explicit assigneeId. Honest attribution — the work is the AI's,
+      // not whichever human owns the API token.
+      let assigneeId =
+        typeof args.assigneeId === 'string' && args.assigneeId ? args.assigneeId : undefined;
+      let autoAi = false;
+      if (!assigneeId) {
+        const project = await prisma.project.findUnique({
+          where: { key: projectKey },
+          select: { id: true },
+        });
+        if (project) {
+          assigneeId = await ensureAiBotAssignee(project.id);
+          autoAi = true;
+        }
+      }
       const created = await createTask(
         {
           projectKey,
           title,
           description: typeof args.description === 'string' ? args.description : undefined,
           priority: (args.priority as 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT') ?? undefined,
-          assigneeId: typeof args.assigneeId === 'string' ? args.assigneeId : undefined,
+          assigneeId,
           tags: [],
         },
         user,
       );
-      return `Создана задача ${projectKey}-${created.number}: ${title}`;
+      return `Создана задача ${projectKey}-${created.number}: ${title}${autoAi ? ' (исполнитель: AI)' : ''}`;
     }
     case 'add_comment': {
       const key = str(args, 'projectKey');
