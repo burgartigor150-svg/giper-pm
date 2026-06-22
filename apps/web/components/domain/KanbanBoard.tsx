@@ -198,6 +198,13 @@ export function KanbanBoard({
     const moved = prevSnapshot.find((t) => t.id === taskId);
     if (!moved) return;
 
+    // Closing requires an итог, which we can't collect mid-drag — send the user
+    // to the task card (which has the result dialog). Card stays put.
+    if (!sameStatus && newStatus === 'DONE') {
+      setError('Чтобы закрыть задачу, откройте её и укажите итог при закрытии.');
+      return;
+    }
+
     // Optimistic: update internalStatus + swimlaneId on the moved card. Mirror
     // `status` is owned by Bitrix and only updated by the sync round-trip.
     setTasks((cur) =>

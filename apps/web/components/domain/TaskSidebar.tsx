@@ -111,6 +111,9 @@ export function TaskSidebar(props: Props) {
   // Per-field "saved" indicator. Shows a green check for ~1.2s after a
   // successful save so the user gets feedback without an intrusive toast.
   const [savedField, setSavedField] = useState<string | null>(null);
+  // Close-with-result (итог) dialog state.
+  const [closeOpen, setCloseOpen] = useState(false);
+  const [resultText, setResultText] = useState('');
   useEffect(() => {
     if (!savedField) return;
     const id = setTimeout(() => setSavedField(null), 1200);
@@ -122,12 +125,41 @@ export function TaskSidebar(props: Props) {
   }
 
   function changeStatus(s: string) {
+    if (s === 'DONE') {
+      // Closing requires an итог — collect it in the dialog, then submit.
+      setResultText('');
+      setCloseOpen(true);
+      return;
+    }
     startTransition(async () => {
       const res = await setInternalStatusAction(props.taskId, props.projectKey, props.taskNumber, s);
       // Don't flash a green "saved" check on failure (the select is
       // controlled by server props, so it reverts on the next render).
       if (res.ok) flash('status');
       else alert(res.error.message);
+    });
+  }
+
+  function confirmClose() {
+    const text = resultText.trim();
+    if (!text) {
+      alert('Нужно указать итог при закрытии задачи');
+      return;
+    }
+    startTransition(async () => {
+      const res = await setInternalStatusAction(
+        props.taskId,
+        props.projectKey,
+        props.taskNumber,
+        'DONE',
+        text,
+      );
+      if (res.ok) {
+        flash('status');
+        setCloseOpen(false);
+      } else {
+        alert(res.error.message);
+      }
     });
   }
   function changePriority(p: string) {
@@ -321,6 +353,44 @@ export function TaskSidebar(props: Props) {
           <span>{fmtDate(props.completedAt)}</span>
         </div>
       </div>
+
+      {closeOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-lg bg-white p-5 shadow-xl dark:bg-neutral-900">
+            <h3 className="mb-1 text-base font-semibold">Закрыть задачу</h3>
+            <p className="mb-3 text-xs text-neutral-500">
+              Укажите итог — он сохранится в задаче и (для задач из Bitrix24) уйдёт в Bitrix
+              комментарием и «Итогом», а статус станет «завершена».
+            </p>
+            <textarea
+              autoFocus
+              value={resultText}
+              onChange={(e) => setResultText(e.target.value)}
+              rows={5}
+              placeholder="Что сделано по задаче…"
+              className="w-full resize-y rounded-md border border-neutral-300 p-2 text-sm outline-none focus:border-neutral-500 dark:border-neutral-700 dark:bg-neutral-800"
+            />
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setCloseOpen(false)}
+                disabled={pending}
+                className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm dark:border-neutral-700"
+              >
+                Отмена
+              </button>
+              <button
+                type="button"
+                onClick={confirmClose}
+                disabled={pending || !resultText.trim()}
+                className="rounded-md bg-neutral-900 px-3 py-1.5 text-sm text-white disabled:opacity-50 dark:bg-white dark:text-neutral-900"
+              >
+                {pending ? 'Закрываю…' : 'Закрыть с итогом'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

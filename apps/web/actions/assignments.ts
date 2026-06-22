@@ -170,12 +170,14 @@ export async function setInternalStatusAction(
   projectKey: string,
   taskNumber: number,
   rawStatus: string,
+  result?: string,
 ): Promise<ActionResult> {
   const me = await requireAuth();
   try {
     // Shared core (also used by the MCP server) — gate, workflow-transition
-    // check, update, and side effects all live there.
-    await setInternalStatus(taskId, rawStatus, me);
+    // check, update, and side effects all live there. `result` (итог) is
+    // required when closing (rawStatus === 'DONE').
+    await setInternalStatus(taskId, rawStatus, me, { result });
   } catch (e) {
     if (e instanceof DomainError) {
       return { ok: false, error: { code: e.code, message: e.message } };

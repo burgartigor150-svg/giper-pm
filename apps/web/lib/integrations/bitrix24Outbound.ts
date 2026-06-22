@@ -3,6 +3,7 @@ import {
   pushTaskStatus,
   pushTaskDeadline,
   pushComment,
+  pushTaskResultFromComment,
   pushProjectAsWorkgroup,
   pushTaskAsBitrix,
   enrichUserFromBitrix,
@@ -63,6 +64,40 @@ export async function pushBitrixCommentBestEffort(commentId: string): Promise<vo
   } catch (e) {
     // eslint-disable-next-line no-console
     console.error('bitrix24 outbound: pushComment failed', commentId, e);
+  }
+}
+
+/**
+ * Close a Bitrix-mirrored task end-to-end when it's closed in giper-pm:
+ *   1) push status (local DONE → Bitrix STATUS=5),
+ *   2) post the result/итог comment,
+ *   3) mark that comment as the native Bitrix "Result" (Итог).
+ * Each step is independent best-effort — a failing step never blocks the
+ * close in our system, and the others still run. No-op for native tasks.
+ */
+export async function closeBitrixTaskBestEffort(
+  taskId: string,
+  resultCommentId: string,
+): Promise<void> {
+  const client = tryClient();
+  if (!client) return;
+  try {
+    await pushTaskStatus(prisma, client, taskId);
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error('bitrix24 outbound: close pushTaskStatus failed', taskId, e);
+  }
+  try {
+    await pushComment(prisma, client, resultCommentId);
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error('bitrix24 outbound: close pushComment failed', resultCommentId, e);
+  }
+  try {
+    await pushTaskResultFromComment(prisma, client, resultCommentId);
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error('bitrix24 outbound: pushTaskResultFromComment failed', resultCommentId, e);
   }
 }
 
