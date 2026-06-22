@@ -37,7 +37,12 @@ export async function POST(req: Request) {
     const backfill = backfillParam === '1' || backfillParam === 'true';
     const groupsParam = url.searchParams.get('groups');
     const groupIds = groupsParam
-      ? groupsParam.split(',').map((s) => s.trim()).filter(Boolean)
+      ? groupsParam
+          .split(',')
+          .map((s) => s.trim())
+          // Workgroup ids are numeric — drop anything else so a malformed
+          // ?groups= can't reach the Bitrix filter as junk.
+          .filter((s) => /^\d+$/.test(s))
       : undefined;
     const result = await runBitrix24SyncNow({ force, backfill, groupIds });
     return NextResponse.json({

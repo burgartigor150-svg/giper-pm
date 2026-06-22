@@ -83,78 +83,87 @@ export async function runBitrix24Sync(
 ): Promise<RunSyncResult> {
   const startedAt = new Date();
 
-  const integration = await ensureIntegrationRow(prisma);
+  // The tasks-only global / backfill pass is a SUB-pass of the orchestrator
+  // (runBitrix24SyncNow). It must NOT take the distributed lock or write its
+  // own sync-log row: otherwise a long backfill that times out would pin a
+  // RUNNING log and block the regular cron for STALE_RUN_MS, and the
+  // per-tick global pass would spam a log row every run. It runs lock-free
+  // and log-free; its stats are aggregated by the caller.
+  let log: { id: string } | null = null;
+  if (!opts.tasksOnlyGlobal) {
+    const integration = await ensureIntegrationRow(prisma);
 
-  // Supervisor: sweep RUNNING logs older than STALE_RUN_MS to FAILED.
-  // Without this a Vercel timeout or container kill leaves the log
-  // pinned at RUNNING and blocks every subsequent trigger via the lock
-  // below.
-  const staleCutoff = new Date(Date.now() - STALE_RUN_MS);
-  await prisma.integrationSyncLog.updateMany({
-    where: {
-      integrationId: integration.id,
-      status: 'RUNNING',
-      startedAt: { lt: staleCutoff },
-    },
-    data: {
-      status: 'FAILED',
-      finishedAt: new Date(),
-      errors: { fatal: 'stale RUNNING swept by supervisor (>25min)' },
-    },
-  });
+    // Supervisor: sweep RUNNING logs older than STALE_RUN_MS to FAILED.
+    // Without this a Vercel timeout or container kill leaves the log
+    // pinned at RUNNING and blocks every subsequent trigger via the lock
+    // below.
+    const staleCutoff = new Date(Date.now() - STALE_RUN_MS);
+    await prisma.integrationSyncLog.updateMany({
+      where: {
+        integrationId: integration.id,
+        status: 'RUNNING',
+        startedAt: { lt: staleCutoff },
+      },
+      data: {
+        status: 'FAILED',
+        finishedAt: new Date(),
+        errors: { fatal: 'stale RUNNING swept by supervisor (>25min)' },
+      },
+    });
 
-  // Distributed lock: refuse to start a new run while a recent one is
-  // still RUNNING. Two parallel syncs hammering the same Bitrix webhook
-  // is the fastest path to QUERY_LIMIT_EXCEEDED — much worse than
-  // simply skipping this trigger.
-  const inflight = await prisma.integrationSyncLog.findFirst({
-    where: {
-      integrationId: integration.id,
-      status: 'RUNNING',
-      startedAt: { gte: staleCutoff },
-    },
-    select: { id: true, startedAt: true },
-  });
-  if (inflight) {
-    const skippedFinished = new Date();
-    return {
-      startedAt,
-      finishedAt: skippedFinished,
-      durationMs: 0,
-      users: { totalSeen: 0, matched: 0, updated: 0, created: 0 },
-      projects: { totalSeen: 0, created: 0, updated: 0, skipped: 0 },
-      members: {
-        projectsScanned: 0,
-        membershipsTotal: 0,
-        membershipsAdded: 0,
-        membershipsRemoved: 0,
+    // Distributed lock: refuse to start a new run while a recent one is
+    // still RUNNING. Two parallel syncs hammering the same Bitrix webhook
+    // is the fastest path to QUERY_LIMIT_EXCEEDED — much worse than
+    // simply skipping this trigger.
+    const inflight = await prisma.integrationSyncLog.findFirst({
+      where: {
+        integrationId: integration.id,
+        status: 'RUNNING',
+        startedAt: { gte: staleCutoff },
       },
-      tasks: {
-        totalSeen: 0,
-        created: 0,
-        updated: 0,
-        skippedNoProject: 0,
-        errors: 0,
-        files: { totalSeen: 0, created: 0, updated: 0, deleted: 0, errors: 0 },
-        comments: { totalSeen: 0, created: 0, updated: 0, deleted: 0, errors: 0 },
-        history: { totalSeen: 0, created: 0, updated: 0, errors: 0 },
-        chat: { totalSeen: 0, created: 0, updated: 0, errors: 0 },
+      select: { id: true, startedAt: true },
+    });
+    if (inflight) {
+      const skippedFinished = new Date();
+      return {
+        startedAt,
+        finishedAt: skippedFinished,
+        durationMs: 0,
+        users: { totalSeen: 0, matched: 0, updated: 0, created: 0 },
+        projects: { totalSeen: 0, created: 0, updated: 0, skipped: 0 },
+        members: {
+          projectsScanned: 0,
+          membershipsTotal: 0,
+          membershipsAdded: 0,
+          membershipsRemoved: 0,
+        },
+        tasks: {
+          totalSeen: 0,
+          created: 0,
+          updated: 0,
+          skippedNoProject: 0,
+          errors: 0,
+          files: { totalSeen: 0, created: 0, updated: 0, deleted: 0, errors: 0 },
+          comments: { totalSeen: 0, created: 0, updated: 0, deleted: 0, errors: 0 },
+          history: { totalSeen: 0, created: 0, updated: 0, errors: 0 },
+          chat: { totalSeen: 0, created: 0, updated: 0, errors: 0 },
+        },
+        ok: true,
+        skipped: true,
+        error: `skipped: previous sync started ${inflight.startedAt.toISOString()} still RUNNING`,
+      };
+    }
+
+    // Persist a sync log row up front so callers can monitor in-progress runs.
+    log = await prisma.integrationSyncLog.create({
+      data: {
+        integrationId: integration.id,
+        direction: 'IN',
+        status: 'RUNNING',
+        startedAt,
       },
-      ok: true,
-      skipped: true,
-      error: `skipped: previous sync started ${inflight.startedAt.toISOString()} still RUNNING`,
-    };
+    });
   }
-
-  // Persist a sync log row up front so callers can monitor in-progress runs.
-  const log = await prisma.integrationSyncLog.create({
-    data: {
-      integrationId: integration.id,
-      direction: 'IN',
-      status: 'RUNNING',
-      startedAt,
-    },
-  });
 
   let users: SyncUsersResult = { totalSeen: 0, matched: 0, updated: 0, created: 0 };
   let projects: SyncProjectsResult = {
@@ -270,30 +279,33 @@ export async function runBitrix24Sync(
     tasks.comments.errors +
     tasks.history.errors +
     tasks.chat.errors;
-  await prisma.integrationSyncLog.update({
-    where: { id: log.id },
-    data: {
-      finishedAt,
-      status: ok ? (totalErrors > 0 ? 'PARTIAL' : 'SUCCESS') : 'FAILED',
-      itemsProcessed:
-        users.totalSeen +
-        projects.totalSeen +
-        tasks.totalSeen +
-        tasks.files.totalSeen +
-        tasks.comments.totalSeen,
-      errors: error
-        ? { fatal: error }
-        : totalErrors > 0
-          ? {
-              taskErrors: tasks.errors,
-              fileErrors: tasks.files.errors,
-              commentErrors: tasks.comments.errors,
-              historyErrors: tasks.history.errors,
-              chatErrors: tasks.chat.errors,
-            }
-          : undefined,
-    },
-  });
+  // No log row for the lock-free tasks-only global / backfill pass.
+  if (log) {
+    await prisma.integrationSyncLog.update({
+      where: { id: log.id },
+      data: {
+        finishedAt,
+        status: ok ? (totalErrors > 0 ? 'PARTIAL' : 'SUCCESS') : 'FAILED',
+        itemsProcessed:
+          users.totalSeen +
+          projects.totalSeen +
+          tasks.totalSeen +
+          tasks.files.totalSeen +
+          tasks.comments.totalSeen,
+        errors: error
+          ? { fatal: error }
+          : totalErrors > 0
+            ? {
+                taskErrors: tasks.errors,
+                fileErrors: tasks.files.errors,
+                commentErrors: tasks.comments.errors,
+                historyErrors: tasks.history.errors,
+                chatErrors: tasks.chat.errors,
+              }
+            : undefined,
+      },
+    });
+  }
 
   return { startedAt, finishedAt, durationMs, users, projects, members, tasks, ok, error };
 }
