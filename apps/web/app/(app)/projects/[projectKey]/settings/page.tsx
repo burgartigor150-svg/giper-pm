@@ -1,6 +1,8 @@
 import { notFound } from 'next/navigation';
+import { prisma } from '@giper/db';
 import { Card, CardContent, CardHeader, CardTitle } from '@giper/ui/components/Card';
 import { requireAuth } from '@/lib/auth';
+import { RepoConnections } from '@/components/domain/RepoConnections';
 import { getProject } from '@/lib/projects';
 import { canEditProject } from '@/lib/permissions';
 import { getEffectiveCapsForProject } from '@/lib/capabilities';
@@ -75,6 +77,11 @@ export default async function ProjectSettingsPage({
   const recurringTasks = await getRecurringTasks(project.id);
   const userGroups = await getUserGroups();
   const webhooks = await getWebhooks(project.id);
+  const repoConnections = await prisma.repoConnection.findMany({
+    where: { projectId: project.id },
+    orderBy: { createdAt: 'asc' },
+    select: { id: true, provider: true, repo: true, status: true, tokenHint: true, baseUrl: true },
+  });
   const spaces = await getSpaces();
   const [projectRoles, projectRoleAssignments] = await Promise.all([
     listProjectAssignableRoles(),
@@ -234,6 +241,19 @@ export default async function ProjectSettingsPage({
         </CardHeader>
         <CardContent>
           <WebhooksForm projectId={project.id} initial={webhooks} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Репозитории — GitHub / GitLab</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <RepoConnections
+            projectKey={project.key}
+            initial={repoConnections}
+            canManage
+          />
         </CardContent>
       </Card>
 
