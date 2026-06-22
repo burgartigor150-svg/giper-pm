@@ -164,3 +164,56 @@ export async function deleteArticleAction(id: string): Promise<ActionResult> {
   revalidatePath('/knowledge');
   return { ok: true };
 }
+
+/** Toggle DRAFT ⇄ PUBLISHED. */
+export async function setArticleStatusAction(
+  id: string,
+  status: 'DRAFT' | 'PUBLISHED',
+): Promise<ActionResult> {
+  const me = await requireAuth();
+  if (!canEditArticles(me.role)) {
+    return { ok: false, error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' } };
+  }
+  await prisma.knowledgeArticle.update({ where: { id }, data: { status, updatedById: me.id } });
+  revalidatePath('/knowledge');
+  return { ok: true };
+}
+
+// ---- Favorites ------------------------------------------------------------
+// Any authenticated user may star (read-level personalisation, no role gate).
+
+export async function toggleFavoriteArticleAction(
+  articleId: string,
+): Promise<ActionResult<{ favorited: boolean }>> {
+  const me = await requireAuth();
+  const existing = await prisma.knowledgeFavorite.findUnique({
+    where: { userId_articleId: { userId: me.id, articleId } },
+    select: { id: true },
+  });
+  if (existing) {
+    await prisma.knowledgeFavorite.delete({ where: { id: existing.id } });
+    revalidatePath('/knowledge');
+    return { ok: true, data: { favorited: false } };
+  }
+  await prisma.knowledgeFavorite.create({ data: { userId: me.id, articleId } });
+  revalidatePath('/knowledge');
+  return { ok: true, data: { favorited: true } };
+}
+
+export async function toggleFavoriteSpaceAction(
+  spaceId: string,
+): Promise<ActionResult<{ favorited: boolean }>> {
+  const me = await requireAuth();
+  const existing = await prisma.knowledgeFavorite.findUnique({
+    where: { userId_spaceId: { userId: me.id, spaceId } },
+    select: { id: true },
+  });
+  if (existing) {
+    await prisma.knowledgeFavorite.delete({ where: { id: existing.id } });
+    revalidatePath('/knowledge');
+    return { ok: true, data: { favorited: false } };
+  }
+  await prisma.knowledgeFavorite.create({ data: { userId: me.id, spaceId } });
+  revalidatePath('/knowledge');
+  return { ok: true, data: { favorited: true } };
+}

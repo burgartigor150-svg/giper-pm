@@ -2488,19 +2488,27 @@ model Document {
 /// Org-wide Knowledge Base space (TEAMLY-style «Пространство»). Top-level
 /// container for a tree of articles. Distinct from `Space` (which groups
 /// projects).
+/// Draft articles are hidden from search and shown muted in the tree to the
+/// people who can edit; published ones are the normal readable state.
+enum KnowledgeArticleStatus {
+  DRAFT
+  PUBLISHED
+}
+
 model KnowledgeSpace {
-  id          String             @id @default(cuid())
+  id          String              @id @default(cuid())
   name        String
   description String?
   /// Emoji or short icon for the space.
   icon        String?
   color       String?
-  order       Int                @default(0)
+  order       Int                 @default(0)
   archivedAt  DateTime?
   createdById String?
-  createdAt   DateTime           @default(now())
-  updatedAt   DateTime           @updatedAt
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
   articles    KnowledgeArticle[]
+  favorites   KnowledgeFavorite[]
 
   @@index([archivedAt, order])
 }
@@ -2515,6 +2523,7 @@ model KnowledgeArticle {
   /// Markdown body, rendered via renderRichText.
   content     String             @default("")
   icon        String?
+  status      KnowledgeArticleStatus @default(PUBLISHED)
   parentId    String?
   parent      KnowledgeArticle?  @relation("KbTree", fields: [parentId], references: [id], onDelete: Cascade)
   children    KnowledgeArticle[] @relation("KbTree")
@@ -2524,6 +2533,24 @@ model KnowledgeArticle {
   updatedById String?
   createdAt   DateTime           @default(now())
   updatedAt   DateTime           @updatedAt
+  favorites   KnowledgeFavorite[]
 
   @@index([spaceId, parentId, order])
+  @@index([status])
+}
+
+/// A user's starred space or article (exactly one of spaceId/articleId set).
+/// `userId` is a soft ref (no FK) to keep the User model untouched.
+model KnowledgeFavorite {
+  id         String            @id @default(cuid())
+  userId     String
+  spaceId    String?
+  space      KnowledgeSpace?   @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  articleId  String?
+  article    KnowledgeArticle? @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  createdAt  DateTime          @default(now())
+
+  @@unique([userId, spaceId])
+  @@unique([userId, articleId])
+  @@index([userId])
 }
