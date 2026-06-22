@@ -6,6 +6,7 @@ import { requireAuth } from '@/lib/auth';
 import { canEditTaskInternal } from '@/lib/permissions';
 import { isUniqueConstraintError } from '@/lib/prisma-errors';
 import { parseFigmaUrl } from '@/lib/figma/parseFigmaUrl';
+import { refreshDesignThumbnail } from '@/lib/figma/refreshDesignThumbnail';
 
 type ActionResult<T = unknown> =
   | { ok: true; data?: T }
@@ -39,8 +40,9 @@ export async function attachFigmaDesignAction(
   if (!canEditTaskInternal(me, { creatorId: task.creatorId, assigneeId: task.assigneeId, externalSource: task.externalSource, project: task.project })) {
     return { ok: false, error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' } };
   }
+  let createdId: string;
   try {
-    await prisma.taskDesign.create({
+    const created = await prisma.taskDesign.create({
       data: {
         taskId,
         url: url.trim(),
@@ -49,13 +51,17 @@ export async function attachFigmaDesignAction(
         title: parsed.title,
         addedById: me.id,
       },
+      select: { id: true },
     });
+    createdId = created.id;
   } catch (e) {
     if (isUniqueConstraintError(e)) {
       return { ok: false, error: { code: 'CONFLICT', message: 'Этот макет уже привязан' } };
     }
     throw e;
   }
+  // Pull a thumbnail if Figma is connected (best-effort; no-op without a token).
+  await refreshDesignThumbnail(createdId);
   revalidatePath(`/projects/${projectKey}/tasks/${taskNumber}`);
   return { ok: true };
 }

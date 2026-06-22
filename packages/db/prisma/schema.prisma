@@ -1616,6 +1616,22 @@ model TaskDesign {
   @@index([fileKey])
 }
 
+/// Org-level Figma connection (single row). Holds an encrypted Figma personal
+/// access token used to fetch frame thumbnails, private files and comments.
+/// Mirrors RepoConnection's token handling (tgTokenCrypto + masked hint).
+model FigmaConnection {
+  id          String   @id @default(cuid())
+  /// Enforces exactly one connection row.
+  singleton   String   @unique @default("figma")
+  tokenEnc    String
+  tokenHint   String
+  status      String   @default("active") // 'active' | 'error'
+  lastError   String?
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
 /// In-app GitHub/GitLab repository connection for a project. The admin pastes
 /// a repo URL + access token; the server validates it, auto-creates the webhook
 /// on the forge (secret = our GITHUB/GITLAB_WEBHOOK_SECRET so existing webhook

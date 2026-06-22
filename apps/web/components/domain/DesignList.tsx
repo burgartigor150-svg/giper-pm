@@ -116,6 +116,23 @@ export function DesignList({
                       loading="lazy"
                     />
                   </div>
+                ) : d.thumbnailUrl ? (
+                  // Collapsed: show the API thumbnail (if Figma is connected).
+                  // Clicking expands to the live embed.
+                  <button
+                    type="button"
+                    onClick={() => setOpen((s) => ({ ...s, [d.id]: true }))}
+                    className="mt-2 block w-full overflow-hidden rounded border"
+                    aria-label="Показать живое превью"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={d.thumbnailUrl}
+                      alt={d.title}
+                      loading="lazy"
+                      className="max-h-56 w-full object-cover object-top"
+                    />
+                  </button>
                 ) : null}
               </li>
             );
