@@ -48,7 +48,7 @@ export default async function ApiTokensPage() {
           </pre>
           <p className="text-xs text-muted-foreground">
             Инструменты: list_projects, list_tasks, get_task, create_task,
-            add_comment, set_status.
+            add_comment, set_status, set_internal_status.
           </p>
         </CardContent>
       </Card>

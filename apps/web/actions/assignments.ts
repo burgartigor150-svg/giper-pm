@@ -3,12 +3,14 @@
 import { revalidatePath } from 'next/cache';
 import { prisma, type Position, type TaskStatus } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
+import { DomainError } from '@/lib/errors';
 import { isTransitionAllowed } from '@/lib/workflow/isTransitionAllowed';
 import {
   createNotification,
   fanoutToTaskAudience,
 } from '@/lib/notifications/createNotifications';
 import { autoUnblockDependents } from '@/lib/tasks/autoTransitions';
+import { setInternalStatus } from '@/lib/tasks/setInternalStatus';
 import { runColumnEnterAutomations } from '@/lib/automations/runColumnEnterAutomations';
 import { dispatchWebhooks } from '@/lib/webhooks/dispatchWebhooks';
 import { canManageAssignments } from '@/lib/permissions';
@@ -170,66 +172,16 @@ export async function setInternalStatusAction(
   rawStatus: string,
 ): Promise<ActionResult> {
   const me = await requireAuth();
-  const valid = [
-    'BACKLOG', 'TODO', 'IN_PROGRESS', 'REVIEW', 'BLOCKED', 'DONE', 'CANCELED',
-  ];
-  if (!valid.includes(rawStatus)) {
-    return { ok: false, error: { code: 'VALIDATION', message: 'Невалидный статус' } };
+  try {
+    // Shared core (also used by the MCP server) — gate, workflow-transition
+    // check, update, and side effects all live there.
+    await setInternalStatus(taskId, rawStatus, me);
+  } catch (e) {
+    if (e instanceof DomainError) {
+      return { ok: false, error: { code: e.code, message: e.message } };
+    }
+    throw e;
   }
-  const task = await prisma.task.findUnique({
-    where: { id: taskId },
-    select: {
-      number: true,
-      title: true,
-      projectId: true,
-      internalStatus: true,
-      creatorId: true,
-      assigneeId: true,
-      externalSource: true,
-      project: {
-        select: { key: true, ownerId: true, members: { select: { userId: true, role: true } } },
-      },
-    },
-  });
-  if (!task) return { ok: false, error: { code: 'NOT_FOUND', message: 'Не найдено' } };
-  // Reuse the standard task-edit gate but ignore the externalSource
-  // veto — internal status edits are explicitly allowed on mirrors.
-  const allow =
-    me.role === 'ADMIN' ||
-    me.role === 'PM' ||
-    task.creatorId === me.id ||
-    task.assigneeId === me.id ||
-    task.project.ownerId === me.id ||
-    task.project.members.some((m) => m.userId === me.id && m.role === 'LEAD');
-  if (!allow) {
-    return {
-      ok: false,
-      error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' },
-    };
-  }
-  // Configurable workflow: enforce the project's transition allowlist (inert when
-  // the project has defined no rules). The team board is the workflow track.
-  if (!(await isTransitionAllowed(task.projectId, task.internalStatus, rawStatus as TaskStatus))) {
-    return {
-      ok: false,
-      error: { code: 'TRANSITION_NOT_ALLOWED', message: 'Переход запрещён правилами рабочего процесса проекта' },
-    };
-  }
-  await prisma.task.update({
-    where: { id: taskId },
-    data: { internalStatus: rawStatus as never },
-  });
-  // Closing this task may unblock its dependants.
-  if (rawStatus === 'DONE' || rawStatus === 'CANCELED') {
-    await autoUnblockDependents(taskId, me.id);
-  }
-  // Automations: run CARD_ENTERS_COLUMN rules best-effort (never throws).
-  await runColumnEnterAutomations(taskId, rawStatus);
-  // Outgoing webhooks: fire 'card.moved' best-effort.
-  await dispatchWebhooks(task.projectId, 'card.moved', {
-    project: { id: task.projectId, key: task.project.key },
-    task: { id: taskId, number: task.number, title: task.title, toStatus: rawStatus },
-  });
   revalidatePath(`/projects/${projectKey}/tasks/${taskNumber}`);
   revalidatePath(`/projects/${projectKey}/board`);
   return { ok: true };
