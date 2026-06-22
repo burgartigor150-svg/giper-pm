@@ -38,13 +38,7 @@ export async function setInternalStatus(
   if (!VALID.includes(status as TaskStatus)) {
     throw new DomainError('VALIDATION', 400, 'Невалидный статус');
   }
-  // Closing a task (→ DONE) requires a result/итог. The same rule holds for the
-  // UI, the MCP server, and any other caller — it's enforced here, in the core.
-  const isClosing = status === 'DONE';
   const result = opts.result?.trim();
-  if (isClosing && !result) {
-    throw new DomainError('VALIDATION', 400, 'Нужно указать итог при закрытии задачи');
-  }
   const task = await prisma.task.findUnique({
     where: { id: taskId },
     select: {
@@ -73,6 +67,20 @@ export async function setInternalStatus(
     task.project.ownerId === user.id ||
     task.project.members.some((m) => m.userId === user.id && m.role === 'LEAD');
   if (!allow) throw new DomainError('INSUFFICIENT_PERMISSIONS', 403, 'Недостаточно прав');
+
+  // No-op when already in this status: don't re-run side effects, don't demand
+  // a result again, and don't post a second "Итог" comment on a re-close.
+  if (task.internalStatus === status) {
+    return { projectKey: task.project.key, number: task.number };
+  }
+
+  // Closing a task (→ DONE) requires a result/итог. Enforced in the core so the
+  // UI, the MCP server, and any other caller share the rule. Only reached on a
+  // real transition into DONE (the no-op guard above already returned).
+  const isClosing = status === 'DONE';
+  if (isClosing && !result) {
+    throw new DomainError('VALIDATION', 400, 'Нужно указать итог при закрытии задачи');
+  }
 
   if (!(await isTransitionAllowed(task.projectId, task.internalStatus, status as TaskStatus))) {
     throw new DomainError(

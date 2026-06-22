@@ -170,6 +170,18 @@ describe('setInternalStatus — close requires итог', () => {
     expect(comments.some((c) => c.body === 'Итог: Выкатили в прод')).toBe(true);
   });
 
+  it('re-closing an already-DONE task is a no-op (no duplicate Итог comment)', async () => {
+    const owner = await makeUser();
+    const p = await makeProject({ ownerId: owner.id, key: 'CLR4' });
+    const t = await makeTask({ projectId: p.id, creatorId: owner.id });
+    await setInternalStatus(t.id, 'DONE', { id: owner.id, role: owner.role }, { result: 'Первый итог' });
+    // Second close — even without a result — must not throw and must not add a
+    // second comment.
+    await setInternalStatus(t.id, 'DONE', { id: owner.id, role: owner.role });
+    const comments = await prisma.comment.findMany({ where: { taskId: t.id } });
+    expect(comments.filter((c) => c.body.startsWith('Итог:'))).toHaveLength(1);
+  });
+
   it('does not require a result for non-DONE transitions', async () => {
     const owner = await makeUser();
     const p = await makeProject({ ownerId: owner.id, key: 'CLR3' });

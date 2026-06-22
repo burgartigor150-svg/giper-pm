@@ -232,9 +232,10 @@ export async function pushTaskResultFromComment(
   ) {
     return { pushed: false };
   }
-  // The comment id Bitrix returned from task.commentitem.add is what
-  // result.addFromComment expects.
+  // tasks.task.result.addFromComment(taskId, commentId) — both required; the
+  // commentId is the Bitrix id returned earlier by task.commentitem.add.
   await client.call('tasks.task.result.addFromComment', {
+    taskId: comment.task.externalId,
     commentId: comment.externalId,
   });
   return { pushed: true };
