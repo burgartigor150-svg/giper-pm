@@ -2509,8 +2509,34 @@ model KnowledgeSpace {
   updatedAt   DateTime            @updatedAt
   articles    KnowledgeArticle[]
   favorites   KnowledgeFavorite[]
+  templates   KnowledgeTemplate[]
 
   @@index([archivedAt, order])
+}
+
+/// Article templates (TEAMLY «Шаблоны статей»). ACCOUNT templates apply in any
+/// space; SPACE templates belong to one space. Managed by ADMIN/PM.
+enum KnowledgeTemplateScope {
+  ACCOUNT
+  SPACE
+}
+
+model KnowledgeTemplate {
+  id          String                 @id @default(cuid())
+  name        String
+  description String?
+  icon        String?
+  scope       KnowledgeTemplateScope @default(ACCOUNT)
+  spaceId     String?
+  space       KnowledgeSpace?        @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  /// Markdown body copied into new articles created from this template.
+  content     String                 @default("")
+  order       Int                    @default(0)
+  createdById String?
+  createdAt   DateTime               @default(now())
+  updatedAt   DateTime               @updatedAt
+
+  @@index([scope, spaceId, order])
 }
 
 /// A Knowledge Base article (TEAMLY «Статья»). Markdown content, nested in a

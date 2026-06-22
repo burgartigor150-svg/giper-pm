@@ -10,8 +10,11 @@ import {
   toggleFavoriteSpaceAction,
 } from '@/actions/knowledge';
 import { KbEmojiPicker } from './KbEmojiPicker';
+import { KbNewFromTemplate } from './KbNewFromTemplate';
 
 const COLORS = ['#2563eb', '#16a34a', '#db2777', '#d97706', '#7c3aed', '#0891b2', '#dc2626', '#64748b'];
+
+type SpaceTemplate = { id: string; name: string; icon: string | null; description: string | null; scope: 'ACCOUNT' | 'SPACE' };
 
 /**
  * Space page header: icon + name + description, star toggle (any user), a
@@ -26,6 +29,7 @@ export function KbSpaceHeader({
   color,
   articleCount,
   isFavorite,
+  templates,
   canManage,
   canEdit,
 }: {
@@ -36,6 +40,7 @@ export function KbSpaceHeader({
   color: string | null;
   articleCount: number;
   isFavorite: boolean;
+  templates: SpaceTemplate[];
   canManage: boolean;
   canEdit: boolean;
 }) {
@@ -125,14 +130,17 @@ export function KbSpaceHeader({
             <Star className="h-4 w-4" fill={favorite ? 'currentColor' : 'none'} />
           </button>
           {canEdit ? (
-            <button
-              type="button"
-              onClick={newArticle}
-              disabled={pending}
-              className="inline-flex items-center gap-1 rounded-md border border-neutral-300 px-2 py-1.5 text-xs dark:border-neutral-700"
-            >
-              <Plus className="h-3.5 w-3.5" /> Статья
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={newArticle}
+                disabled={pending}
+                className="inline-flex items-center gap-1 rounded-md border border-neutral-300 px-2 py-1.5 text-xs dark:border-neutral-700"
+              >
+                <Plus className="h-3.5 w-3.5" /> Статья
+              </button>
+              <KbNewFromTemplate spaceId={spaceId} templates={templates} />
+            </>
           ) : null}
           {canManage ? (
             <button

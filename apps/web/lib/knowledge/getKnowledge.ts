@@ -133,6 +133,50 @@ export async function getArticleBreadcrumbs(
   return chain;
 }
 
+// ---- Templates ------------------------------------------------------------
+
+/** All templates for the management page: account-wide + every space's. */
+export async function listAllTemplates() {
+  return prisma.knowledgeTemplate.findMany({
+    orderBy: [{ scope: 'asc' }, { order: 'asc' }, { createdAt: 'asc' }],
+    select: {
+      id: true,
+      name: true,
+      description: true,
+      icon: true,
+      scope: true,
+      spaceId: true,
+      content: true,
+      space: { select: { id: true, name: true, icon: true } },
+      updatedAt: true,
+    },
+  });
+}
+
+/** Templates applicable when creating an article in a space: account + that space. */
+export async function listTemplatesForSpace(spaceId: string) {
+  return prisma.knowledgeTemplate.findMany({
+    where: { OR: [{ scope: 'ACCOUNT' }, { scope: 'SPACE', spaceId }] },
+    orderBy: [{ scope: 'asc' }, { order: 'asc' }, { createdAt: 'asc' }],
+    select: { id: true, name: true, description: true, icon: true, scope: true },
+  });
+}
+
+export async function getTemplate(id: string) {
+  return prisma.knowledgeTemplate.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      name: true,
+      description: true,
+      icon: true,
+      scope: true,
+      spaceId: true,
+      content: true,
+    },
+  });
+}
+
 /** Full-text-ish search across article titles + bodies. */
 export async function searchKnowledge(q: string, limit = 20) {
   const term = q.trim();

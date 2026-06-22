@@ -225,3 +225,120 @@ export async function toggleFavoriteSpaceAction(
   revalidatePath('/knowledge');
   return { ok: true, data: { favorited: true } };
 }
+
+// ---- Templates ------------------------------------------------------------
+// Templates are structural → ADMIN/PM manage; creating an article from one only
+// needs article-edit rights.
+
+type TemplateScope = 'ACCOUNT' | 'SPACE';
+
+export async function createTemplateAction(input: {
+  name: string;
+  scope: TemplateScope;
+  spaceId?: string | null;
+  content?: string;
+  description?: string | null;
+  icon?: string | null;
+}): Promise<ActionResult<{ id: string }>> {
+  const me = await requireAuth();
+  if (!canManageSpaces(me.role)) {
+    return { ok: false, error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Только ADMIN/PM' } };
+  }
+  const scope: TemplateScope = input.scope === 'SPACE' ? 'SPACE' : 'ACCOUNT';
+  const spaceId = scope === 'SPACE' ? (input.spaceId ?? null) : null;
+  if (scope === 'SPACE' && !spaceId) {
+    return { ok: false, error: { code: 'VALIDATION', message: 'Для шаблона пространства укажите пространство' } };
+  }
+  if (spaceId) {
+    const space = await prisma.knowledgeSpace.findUnique({ where: { id: spaceId }, select: { id: true } });
+    if (!space) return { ok: false, error: { code: 'NOT_FOUND', message: 'Пространство не найдено' } };
+  }
+  const max = await prisma.knowledgeTemplate.aggregate({ where: { scope, spaceId }, _max: { order: true } });
+  const tpl = await prisma.knowledgeTemplate.create({
+    data: {
+      name: input.name.trim() || 'Новый шаблон',
+      scope,
+      spaceId,
+      content: input.content ?? '',
+      description: input.description ?? null,
+      icon: input.icon ?? null,
+      order: (max._max.order ?? -1) + 1,
+      createdById: me.id,
+    },
+    select: { id: true },
+  });
+  revalidatePath('/knowledge/templates');
+  return { ok: true, data: { id: tpl.id } };
+}
+
+export async function updateTemplateAction(
+  id: string,
+  patch: { name?: string; content?: string; description?: string | null; icon?: string | null },
+): Promise<ActionResult> {
+  const me = await requireAuth();
+  if (!canManageSpaces(me.role)) {
+    return { ok: false, error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Только ADMIN/PM' } };
+  }
+  await prisma.knowledgeTemplate.update({
+    where: { id },
+    data: {
+      ...(patch.name !== undefined ? { name: patch.name.trim() || 'Новый шаблон' } : {}),
+      ...(patch.content !== undefined ? { content: patch.content } : {}),
+      ...(patch.description !== undefined ? { description: patch.description } : {}),
+      ...(patch.icon !== undefined ? { icon: patch.icon } : {}),
+    },
+  });
+  revalidatePath('/knowledge/templates');
+  return { ok: true };
+}
+
+export async function deleteTemplateAction(id: string): Promise<ActionResult> {
+  const me = await requireAuth();
+  if (!canManageSpaces(me.role)) {
+    return { ok: false, error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Только ADMIN/PM' } };
+  }
+  await prisma.knowledgeTemplate.delete({ where: { id } });
+  revalidatePath('/knowledge/templates');
+  return { ok: true };
+}
+
+/** Create a new article in a space, pre-filled from a template. */
+export async function createArticleFromTemplateAction(
+  spaceId: string,
+  parentId: string | null,
+  templateId: string,
+): Promise<ActionResult<{ id: string }>> {
+  const me = await requireAuth();
+  if (!canEditArticles(me.role)) {
+    return { ok: false, error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' } };
+  }
+  const [space, tpl] = await Promise.all([
+    prisma.knowledgeSpace.findUnique({ where: { id: spaceId }, select: { id: true } }),
+    prisma.knowledgeTemplate.findUnique({
+      where: { id: templateId },
+      select: { name: true, content: true, icon: true, scope: true, spaceId: true },
+    }),
+  ]);
+  if (!space) return { ok: false, error: { code: 'NOT_FOUND', message: 'Пространство не найдено' } };
+  if (!tpl) return { ok: false, error: { code: 'NOT_FOUND', message: 'Шаблон не найден' } };
+  // A space-scoped template can only be used inside its own space.
+  if (tpl.scope === 'SPACE' && tpl.spaceId !== spaceId) {
+    return { ok: false, error: { code: 'VALIDATION', message: 'Шаблон принадлежит другому пространству' } };
+  }
+  const order = await nextOrder({ spaceId, parentId: parentId ?? null });
+  const article = await prisma.knowledgeArticle.create({
+    data: {
+      spaceId,
+      parentId: parentId ?? null,
+      title: tpl.name.trim() || 'Без названия',
+      content: tpl.content,
+      icon: tpl.icon,
+      order,
+      createdById: me.id,
+      updatedById: me.id,
+    },
+    select: { id: true },
+  });
+  revalidatePath('/knowledge');
+  return { ok: true, data: { id: article.id } };
+}
