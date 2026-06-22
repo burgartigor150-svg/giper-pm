@@ -6,6 +6,7 @@ import {
   getSpace,
   getSpaceArticles,
   isSpaceFavorite,
+  listTemplatesForSpace,
 } from '@/lib/knowledge/getKnowledge';
 import { KbSpaceHeader } from '@/components/domain/knowledge/KbSpaceHeader';
 
@@ -19,9 +20,10 @@ export default async function KnowledgeSpacePage({
   const space = await getSpace(spaceId);
   if (!space) notFound();
 
-  const [articles, favorite] = await Promise.all([
+  const [articles, favorite, templates] = await Promise.all([
     getSpaceArticles(spaceId),
     isSpaceFavorite(me.id, spaceId),
+    listTemplatesForSpace(spaceId),
   ]);
 
   const canManage = me.role === 'ADMIN' || me.role === 'PM';
@@ -43,6 +45,7 @@ export default async function KnowledgeSpacePage({
         color={space.color}
         articleCount={space._count.articles}
         isFavorite={favorite}
+        templates={templates}
         canManage={canManage}
         canEdit={canEdit}
       />

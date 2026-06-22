@@ -3,7 +3,7 @@
 import { useMemo, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
-import { ChevronDown, ChevronRight, FileText, Plus, Star } from 'lucide-react';
+import { ChevronDown, ChevronRight, FileText, LayoutTemplate, Plus, Star } from 'lucide-react';
 import { createArticleAction, createSpaceAction } from '@/actions/knowledge';
 
 type Space = { id: string; name: string; icon: string | null };
@@ -213,14 +213,24 @@ export function KbSidebar({
         );
       })}
       {canManageSpaces ? (
-        <button
-          type="button"
-          onClick={newSpace}
-          disabled={pending}
-          className="mt-2 flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
-        >
-          <Plus className="h-3.5 w-3.5" /> Новое пространство
-        </button>
+        <div className="mt-2 flex flex-col gap-0.5 border-t border-neutral-200 pt-2 dark:border-neutral-800">
+          <button
+            type="button"
+            onClick={newSpace}
+            disabled={pending}
+            className="flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            <Plus className="h-3.5 w-3.5" /> Новое пространство
+          </button>
+          <Link
+            href="/knowledge/templates"
+            className={`flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground ${
+              pathname === '/knowledge/templates' ? 'bg-muted text-foreground' : ''
+            }`}
+          >
+            <LayoutTemplate className="h-3.5 w-3.5" /> Шаблоны
+          </Link>
+        </div>
       ) : null}
     </nav>
   );
