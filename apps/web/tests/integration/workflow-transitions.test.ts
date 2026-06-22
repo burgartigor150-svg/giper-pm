@@ -20,6 +20,7 @@ import { isTransitionAllowed } from '@/lib/workflow/isTransitionAllowed';
 import { setWorkflowTransitionsAction } from '@/actions/workflow';
 import { setInternalStatusAction } from '@/actions/assignments';
 import { changeTaskStatus } from '@/lib/tasks';
+import { setInternalStatus } from '@/lib/tasks/setInternalStatus';
 import { makeUser, makeProject, addMember, makeTask } from './helpers/factories';
 
 function as(u: { id: string; role: 'ADMIN' | 'PM' | 'MEMBER' | 'VIEWER' }) {
@@ -62,8 +63,10 @@ describe('setInternalStatusAction enforcement', () => {
     await prisma.task.update({ where: { id: task.id }, data: { internalStatus: 'TODO' } });
     as(admin);
 
-    // inert: any move ok
-    expect((await setInternalStatusAction(task.id, p.key, task.number, 'DONE')).ok).toBe(true);
+    // inert: any move ok (closing to DONE now needs a result/итог).
+    expect(
+      (await setInternalStatusAction(task.id, p.key, task.number, 'DONE', 'итог')).ok,
+    ).toBe(true);
     await prisma.task.update({ where: { id: task.id }, data: { internalStatus: 'TODO' } });
 
     // configure: only TODO→IN_PROGRESS
@@ -133,5 +136,64 @@ describe('setWorkflowTransitionsAction — gate + replace', () => {
     // clear → unrestricted again
     await setWorkflowTransitionsAction(p.key, []);
     expect(await prisma.workflowTransition.count({ where: { projectId: p.id } })).toBe(0);
+  });
+});
+
+describe('setInternalStatus — close requires итог', () => {
+  it('rejects closing (DONE) without a result', async () => {
+    const owner = await makeUser();
+    const p = await makeProject({ ownerId: owner.id, key: 'CLR1' });
+    const t = await makeTask({ projectId: p.id, creatorId: owner.id });
+    await expect(
+      setInternalStatus(t.id, 'DONE', { id: owner.id, role: owner.role }),
+    ).rejects.toThrow(/итог/i);
+    // unchanged
+    const after = await prisma.task.findUnique({
+      where: { id: t.id },
+      select: { internalStatus: true, completionResult: true },
+    });
+    expect(after?.internalStatus).not.toBe('DONE');
+    expect(after?.completionResult).toBeNull();
+  });
+
+  it('saves completionResult + posts an "Итог" comment on close', async () => {
+    const owner = await makeUser();
+    const p = await makeProject({ ownerId: owner.id, key: 'CLR2' });
+    const t = await makeTask({ projectId: p.id, creatorId: owner.id });
+    await setInternalStatus(t.id, 'DONE', { id: owner.id, role: owner.role }, { result: '  Выкатили в прод  ' });
+    const after = await prisma.task.findUnique({
+      where: { id: t.id },
+      select: { internalStatus: true, completionResult: true, completedAt: true },
+    });
+    expect(after?.internalStatus).toBe('DONE');
+    expect(after?.completionResult).toBe('Выкатили в прод'); // trimmed
+    expect(after?.completedAt).not.toBeNull();
+    const comments = await prisma.comment.findMany({ where: { taskId: t.id } });
+    expect(comments.some((c) => c.body === 'Итог: Выкатили в прод')).toBe(true);
+  });
+
+  it('re-closing an already-DONE task is a no-op (no duplicate Итог comment)', async () => {
+    const owner = await makeUser();
+    const p = await makeProject({ ownerId: owner.id, key: 'CLR4' });
+    const t = await makeTask({ projectId: p.id, creatorId: owner.id });
+    await setInternalStatus(t.id, 'DONE', { id: owner.id, role: owner.role }, { result: 'Первый итог' });
+    // Second close — even without a result — must not throw and must not add a
+    // second comment.
+    await setInternalStatus(t.id, 'DONE', { id: owner.id, role: owner.role });
+    const comments = await prisma.comment.findMany({ where: { taskId: t.id } });
+    expect(comments.filter((c) => c.body.startsWith('Итог:'))).toHaveLength(1);
+  });
+
+  it('does not require a result for non-DONE transitions', async () => {
+    const owner = await makeUser();
+    const p = await makeProject({ ownerId: owner.id, key: 'CLR3' });
+    const t = await makeTask({ projectId: p.id, creatorId: owner.id });
+    await setInternalStatus(t.id, 'IN_PROGRESS', { id: owner.id, role: owner.role });
+    const after = await prisma.task.findUnique({
+      where: { id: t.id },
+      select: { internalStatus: true, completionResult: true },
+    });
+    expect(after?.internalStatus).toBe('IN_PROGRESS');
+    expect(after?.completionResult).toBeNull();
   });
 });

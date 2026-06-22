@@ -38,6 +38,7 @@ const INSTRUCTIONS = [
   '• Каждую создаваемую задачу сопровождайте комментарием: сразу после create_task вызовите add_comment с кратким описанием выполненной/планируемой работы и ссылками на коммиты и PR/MR.',
   '• Это обязательно, потому что для задач, заведённых вручную или через MCP, гит-автокомментарии НЕ создаются — они появляются только от push-вебхуков, когда КЛЮЧ-НОМЕР задачи указан в сообщении коммита.',
   '• Исполнителем новой задачи автоматически становится пользователь «AI» (задачу создал и реализует AI). Чтобы назначить человека — передайте assigneeId в create_task.',
+  '• Закрытие задачи (set_internal_status status=DONE) ТРЕБУЕТ параметр result — итог выполнения. Если задачу закрываешь ты — итог пишешь ты сам (кратко: что сделано, ссылки на PR/коммиты). Для зеркальных из Bitrix задач итог и статус «завершена» автоматически уходят в Bitrix24.',
 ].join('\n');
 
 const STATUSES: TaskStatus[] = [
@@ -135,13 +136,17 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'set_internal_status',
-    description: `Сменить ВНУТРЕННИЙ (командной доски) статус задачи. Работает и на зеркальных из Bitrix задачах. Допустимые: ${STATUSES.join(', ')}. Учитывает правила рабочего процесса проекта.`,
+    description: `Сменить ВНУТРЕННИЙ (командной доски) статус задачи. Работает и на зеркальных из Bitrix задачах. Допустимые: ${STATUSES.join(', ')}. Учитывает правила рабочего процесса проекта. При закрытии (status=DONE) ОБЯЗАТЕЛЕН параметр result (итог) — для зеркальных задач итог и статус «завершена» уходят в Bitrix24.`,
     inputSchema: {
       type: 'object',
       properties: {
         projectKey: { type: 'string' },
         number: { type: 'integer' },
         status: { type: 'string', enum: STATUSES },
+        result: {
+          type: 'string',
+          description: 'Итог выполнения. Обязателен при status=DONE. Напишите краткое резюме сделанного.',
+        },
       },
       required: ['projectKey', 'number', 'status'],
       additionalProperties: false,
@@ -298,9 +303,13 @@ async function runTool(name: string, args: Args, user: SessionUser): Promise<str
     case 'set_internal_status': {
       const key = str(args, 'projectKey');
       const status = str(args, 'status');
+      const result = typeof args.result === 'string' ? args.result : undefined;
       const t = await resolveTaskRef(key, num(args, 'number'));
-      await setInternalStatus(t.id, status, user);
-      return `Внутренний статус ${key}-${t.number} → ${status}`;
+      // setInternalStatus enforces "result required when closing (DONE)".
+      await setInternalStatus(t.id, status, user, { result });
+      return `Внутренний статус ${key}-${t.number} → ${status}${
+        status === 'DONE' ? ' (итог записан и отправлен в Bitrix)' : ''
+      }`;
     }
     default:
       throw new DomainError('VALIDATION', 400, `Неизвестный инструмент: ${name}`);

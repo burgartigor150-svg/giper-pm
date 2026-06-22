@@ -27,6 +27,7 @@ export {
   pushTaskStatus,
   pushTaskDeadline,
   pushComment,
+  pushTaskResultFromComment,
   pushProjectAsWorkgroup,
   pushTaskAsBitrix,
   hashTaskState,

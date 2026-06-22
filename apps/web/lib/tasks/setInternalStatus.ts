@@ -5,6 +5,7 @@ import { isTransitionAllowed } from '../workflow/isTransitionAllowed';
 import { autoUnblockDependents } from './autoTransitions';
 import { runColumnEnterAutomations } from '../automations/runColumnEnterAutomations';
 import { dispatchWebhooks } from '../webhooks/dispatchWebhooks';
+import { closeBitrixTaskBestEffort } from '../integrations/bitrix24Outbound';
 
 const VALID: TaskStatus[] = [
   'BACKLOG',
@@ -32,10 +33,12 @@ export async function setInternalStatus(
   taskId: string,
   status: string,
   user: SessionUser,
+  opts: { result?: string } = {},
 ): Promise<{ projectKey: string; number: number }> {
   if (!VALID.includes(status as TaskStatus)) {
     throw new DomainError('VALIDATION', 400, 'Невалидный статус');
   }
+  const result = opts.result?.trim();
   const task = await prisma.task.findUnique({
     where: { id: taskId },
     select: {
@@ -43,6 +46,8 @@ export async function setInternalStatus(
       title: true,
       projectId: true,
       internalStatus: true,
+      completedAt: true,
+      externalSource: true,
       creatorId: true,
       assigneeId: true,
       project: {
@@ -63,6 +68,20 @@ export async function setInternalStatus(
     task.project.members.some((m) => m.userId === user.id && m.role === 'LEAD');
   if (!allow) throw new DomainError('INSUFFICIENT_PERMISSIONS', 403, 'Недостаточно прав');
 
+  // No-op when already in this status: don't re-run side effects, don't demand
+  // a result again, and don't post a second "Итог" comment on a re-close.
+  if (task.internalStatus === status) {
+    return { projectKey: task.project.key, number: task.number };
+  }
+
+  // Closing a task (→ DONE) requires a result/итог. Enforced in the core so the
+  // UI, the MCP server, and any other caller share the rule. Only reached on a
+  // real transition into DONE (the no-op guard above already returned).
+  const isClosing = status === 'DONE';
+  if (isClosing && !result) {
+    throw new DomainError('VALIDATION', 400, 'Нужно указать итог при закрытии задачи');
+  }
+
   if (!(await isTransitionAllowed(task.projectId, task.internalStatus, status as TaskStatus))) {
     throw new DomainError(
       'TRANSITION_NOT_ALLOWED',
@@ -71,9 +90,22 @@ export async function setInternalStatus(
     );
   }
 
+  const isMirror = task.externalSource === 'bitrix24';
   await prisma.task.update({
     where: { id: taskId },
-    data: { internalStatus: status as TaskStatus },
+    data: {
+      internalStatus: status as TaskStatus,
+      ...(isClosing
+        ? {
+            completionResult: result,
+            completedAt: task.completedAt ?? new Date(),
+            // Closing here closes it in Bitrix too → reflect DONE on the mirror
+            // status so pushTaskStatus sends STATUS=5 and the two tracks agree
+            // (the inbound echo is recognised by the synced-hash and skipped).
+            ...(isMirror ? { status: 'DONE' as TaskStatus } : {}),
+          }
+        : {}),
+    },
   });
 
   if (status === 'DONE' || status === 'CANCELED') {
@@ -84,6 +116,25 @@ export async function setInternalStatus(
     project: { id: task.projectId, key: task.project.key },
     task: { id: taskId, number: task.number, title: task.title, toStatus: status },
   });
+
+  if (isClosing) {
+    // Record the итог as an EXTERNAL comment so it shows in the timeline and can
+    // sync to Bitrix. Raw create (not addComment) on purpose: the actor already
+    // passed the close gate above, which is broader than canViewTask.
+    const comment = await prisma.comment.create({
+      data: {
+        taskId,
+        authorId: user.id,
+        body: `Итог: ${result}`,
+        source: 'WEB',
+        visibility: 'EXTERNAL',
+      },
+      select: { id: true },
+    });
+    // Best-effort: close in Bitrix (STATUS=5) + post the итог comment + mark it
+    // as the native Bitrix "Result". No-op for native tasks / no webhook URL.
+    await closeBitrixTaskBestEffort(taskId, comment.id);
+  }
 
   return { projectKey: task.project.key, number: task.number };
 }

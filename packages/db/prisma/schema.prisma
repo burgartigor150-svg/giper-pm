@@ -1320,7 +1320,10 @@ model Task {
   dueDate       DateTime?
   startedAt     DateTime?    // когда впервые ушло в IN_PROGRESS
   completedAt   DateTime?    // когда ушло в DONE
-  
+  /// Mandatory result/итог captured when the task is closed (internalStatus →
+  /// DONE). Pushed to Bitrix as a comment + native task Result for mirrors.
+  completionResult String?   @db.Text
+
   tags          String[]     @default([])
   
   // Внешние идентификаторы для синка

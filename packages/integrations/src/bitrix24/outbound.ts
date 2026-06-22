@@ -206,6 +206,42 @@ export async function pushComment(
 }
 
 /**
+ * Mark an already-pushed EXTERNAL comment as the task's native Bitrix24
+ * "Result" (Итог) via tasks.task.result.addFromComment. The comment must have
+ * been pushed first (so it carries a Bitrix comment id in `externalId`).
+ *
+ * Best-effort by nature: the result is a presentation nicety on top of the
+ * comment, which already carries the text. Callers wrap this in try/catch.
+ */
+export async function pushTaskResultFromComment(
+  prisma: PrismaClient,
+  client: Bitrix24Client,
+  commentId: string,
+): Promise<{ pushed: boolean }> {
+  const comment = await prisma.comment.findUnique({
+    where: { id: commentId },
+    select: {
+      externalId: true,
+      task: { select: { externalId: true, externalSource: true } },
+    },
+  });
+  if (
+    !comment?.externalId ||
+    comment.task.externalSource !== 'bitrix24' ||
+    !comment.task.externalId
+  ) {
+    return { pushed: false };
+  }
+  // tasks.task.result.addFromComment(taskId, commentId) — both required; the
+  // commentId is the Bitrix id returned earlier by task.commentitem.add.
+  await client.call('tasks.task.result.addFromComment', {
+    taskId: comment.task.externalId,
+    commentId: comment.externalId,
+  });
+  return { pushed: true };
+}
+
+/**
  * Stable hash of the synced task fields. We hash only what we actually
  * write/read across the boundary — title, description, etc. are out of
  * scope for sync, so they're not in the hash.
