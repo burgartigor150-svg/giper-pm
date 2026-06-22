@@ -332,6 +332,34 @@ describe('listProjectsForUser — Bitrix membership is NOT a visibility leg', ()
     const list = await listProjectsForUser(sessionUser(me));
     expect(list.map((x) => x.id)).toEqual([p.id]);
   });
+
+  it('ProjectMember on a Bitrix-MIRROR project is NOT a visibility leg', async () => {
+    // The sync auto-adds the upstream workgroup owner as a LEAD ProjectMember
+    // (so they render in the members list). On a mirror project that is NOT a
+    // real "I work here" signal — visibility needs owner or a task stake.
+    const owner = await makeUser();
+    const me = await makeUser({ role: 'MEMBER' });
+    const p = await prisma.project.create({
+      data: {
+        key: 'BXMIR',
+        name: 'Mirror WG',
+        ownerId: owner.id,
+        externalSource: 'bitrix24',
+        externalId: 'WG-777',
+        members: { create: { userId: me.id, role: 'LEAD' } },
+      },
+    });
+    expect(p.externalSource).toBe('bitrix24');
+    expect(await listProjectsForUser(sessionUser(me))).toHaveLength(0);
+  });
+
+  it('ProjectMember on a NATIVE project IS still a visibility leg', async () => {
+    const owner = await makeUser();
+    const me = await makeUser({ role: 'MEMBER' });
+    const p = await makeProject({ ownerId: owner.id });
+    await addMember(p.id, me.id, 'CONTRIBUTOR');
+    expect((await listProjectsForUser(sessionUser(me))).map((x) => x.id)).toEqual([p.id]);
+  });
 });
 
 describe('getProject', () => {

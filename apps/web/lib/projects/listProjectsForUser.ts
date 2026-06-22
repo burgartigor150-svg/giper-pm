@@ -47,7 +47,15 @@ export async function listProjectsForUser(user: SessionUser, filter: ListFilter 
     // A user sees a project only where they have a real stake:
     //
     //   • owner            — they created/own it (never lose a fresh project)
-    //   • member           — explicitly added (ProjectMember; manual projects)
+    //   • member           — explicitly added (ProjectMember) — NATIVE projects
+    //                         only. Bitrix-mirror projects auto-add the
+    //                         workgroup OWNER as a LEAD ProjectMember (so they
+    //                         render in the members list); that is NOT a real
+    //                         "I work here" signal and buried the list with
+    //                         every workgroup a user nominally owns upstream.
+    //                         For mirror projects, membership grants nothing —
+    //                         visibility is owner or a task stake (this extends
+    //                         #88: Bitrix membership is not a visibility leg).
     //   • task stake        — creator/assignee/reviewer/co-assignee/watcher
     //                         on any task in the project
     //
@@ -56,7 +64,7 @@ export async function listProjectsForUser(user: SessionUser, filter: ListFilter 
     // org-wide browse is the explicit `scope='all'` opt-in above.
     where.OR = [
       { ownerId: user.id },
-      { members: { some: { userId: user.id } } },
+      { externalSource: null, members: { some: { userId: user.id } } },
       {
         tasks: {
           some: {
