@@ -63,8 +63,10 @@ describe('setInternalStatusAction enforcement', () => {
     await prisma.task.update({ where: { id: task.id }, data: { internalStatus: 'TODO' } });
     as(admin);
 
-    // inert: any move ok
-    expect((await setInternalStatusAction(task.id, p.key, task.number, 'DONE')).ok).toBe(true);
+    // inert: any move ok (closing to DONE now needs a result/итог).
+    expect(
+      (await setInternalStatusAction(task.id, p.key, task.number, 'DONE', 'итог')).ok,
+    ).toBe(true);
     await prisma.task.update({ where: { id: task.id }, data: { internalStatus: 'TODO' } });
 
     // configure: only TODO→IN_PROGRESS
