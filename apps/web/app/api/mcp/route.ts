@@ -27,6 +27,17 @@ export const maxDuration = 60;
 const PROTOCOL_VERSION = '2024-11-05';
 const SERVER_INFO = { name: 'giper-pm', version: '1.0.0' };
 
+/**
+ * Server-level instructions surfaced to the connecting client (the AI agent)
+ * on `initialize`. These are the "rules" the agent should follow when working
+ * with giper-pm over MCP.
+ */
+const INSTRUCTIONS = [
+  'Правила работы с задачами giper-pm:',
+  '• Каждую создаваемую задачу сопровождайте комментарием: сразу после create_task вызовите add_comment с кратким описанием выполненной/планируемой работы и ссылками на коммиты и PR/MR.',
+  '• Это обязательно, потому что для задач, заведённых вручную или через MCP, гит-автокомментарии НЕ создаются — они появляются только от push-вебхуков, когда КЛЮЧ-НОМЕР задачи указан в сообщении коммита.',
+].join('\n');
+
 const STATUSES: TaskStatus[] = [
   'BACKLOG',
   'TODO',
@@ -77,7 +88,8 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'create_task',
-    description: 'Создать задачу в проекте. Возвращает её код (КЛЮЧ-НОМЕР).',
+    description:
+      'Создать задачу в проекте. Возвращает её код (КЛЮЧ-НОМЕР). После создания ОБЯЗАТЕЛЬНО добавьте комментарий через add_comment с описанием работы и ссылками на коммиты/PR — для задач, заведённых вручную, гит-автокомментарии не создаются.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -297,6 +309,7 @@ async function handleOne(msg: RpcReq, user: SessionUser): Promise<object | null>
         protocolVersion: requested || PROTOCOL_VERSION,
         capabilities: { tools: { listChanged: false } },
         serverInfo: SERVER_INFO,
+        instructions: INSTRUCTIONS,
       });
     }
     case 'ping':
