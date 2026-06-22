@@ -254,7 +254,10 @@ export default async function ProjectTasksListPage({
                     </span>
                   </td>
                   <td className="px-4 py-3">
-                    <TaskStatusBadge status={task.status} />
+                    {/* Internal (team-board) status — the track the team manages,
+                        consistent with the board. The Bitrix-mirror status lives
+                        on the task card's read-only panel. */}
+                    <TaskStatusBadge status={task.internalStatus} />
                   </td>
                   <td className="px-4 py-3">
                     {task.assignee ? (

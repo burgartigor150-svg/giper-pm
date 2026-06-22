@@ -411,15 +411,20 @@ describe('listTasksForProject', () => {
   it('filters: status, priority, assigneeId, q (case-insensitive)', async () => {
     const { owner, project, extras } = await scaffold('MEMBER', [{}]);
     const member = extras[0]!;
+    // The list filters/show the INTERNAL status track, so set internalStatus
+    // (matching the intended status) on these fixtures.
     const t1 = await makeTask({
-      projectId: project.id, creatorId: owner.id, status: 'DONE', title: 'Awesome Feature',
+      projectId: project.id, creatorId: owner.id, status: 'DONE', internalStatus: 'DONE',
+      title: 'Awesome Feature',
     });
     await prisma.task.update({ where: { id: t1.id }, data: { priority: 'URGENT' } });
     await makeTask({
-      projectId: project.id, creatorId: owner.id, status: 'TODO', title: 'Boring chore',
+      projectId: project.id, creatorId: owner.id, status: 'TODO', internalStatus: 'TODO',
+      title: 'Boring chore',
     });
     await makeTask({
-      projectId: project.id, creatorId: owner.id, assigneeId: member.id, status: 'TODO',
+      projectId: project.id, creatorId: owner.id, assigneeId: member.id,
+      status: 'TODO', internalStatus: 'TODO',
     });
     expect(
       (await listTasksForProject(project.key, F({ status: 'TODO' }), sessionUser(owner))).total,

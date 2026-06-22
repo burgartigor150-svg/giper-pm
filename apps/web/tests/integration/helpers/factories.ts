@@ -66,6 +66,7 @@ export async function makeTask(overrides: Partial<{
   creatorId: string;
   assigneeId: string | null;
   status: 'BACKLOG' | 'TODO' | 'IN_PROGRESS' | 'REVIEW' | 'BLOCKED' | 'DONE' | 'CANCELED';
+  internalStatus: 'BACKLOG' | 'TODO' | 'IN_PROGRESS' | 'REVIEW' | 'BLOCKED' | 'DONE' | 'CANCELED';
 }> = {}) {
   if (!overrides.projectId || !overrides.creatorId) {
     throw new Error('makeTask requires projectId and creatorId');
@@ -82,6 +83,9 @@ export async function makeTask(overrides: Partial<{
       creatorId: overrides.creatorId,
       assigneeId: overrides.assigneeId ?? null,
       status: overrides.status ?? 'TODO',
+      // Omitted → DB default (BACKLOG), preserving existing tests. Set it when a
+      // test exercises the internal-status track (board/list both bucket on it).
+      ...(overrides.internalStatus ? { internalStatus: overrides.internalStatus } : {}),
     },
   });
 }

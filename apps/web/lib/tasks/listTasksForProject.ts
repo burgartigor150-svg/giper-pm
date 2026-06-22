@@ -60,13 +60,18 @@ export async function listTasksForProject(
       };
 
   const where: Prisma.TaskWhereInput = { projectId: project.id };
-  if (filter.status) where.status = filter.status;
+  // The list shows and filters the INTERNAL (team-board) status track — the
+  // same one the board uses — so it reflects the status the team actually set
+  // (the Bitrix-mirror `status` is a read-only upstream field shown only on the
+  // task card). Keeping the two views in lockstep avoids "card says Готово but
+  // the list says К работе".
+  if (filter.status) where.internalStatus = filter.status;
   if (filter.priority) where.priority = filter.priority;
   if (filter.assigneeId) where.assigneeId = filter.assigneeId;
   // q / tags / type / dueWithin / reviewer come from the shared builder as
   // pure NARROWING AND-clauses — the per-stake visibilityClause below is
-  // appended to the same array and is never reassigned/clobbered. The list
-  // shows the Bitrix-mirror `status` track, so the overdue guard reads that.
+  // appended to the same array and is never reassigned/clobbered. Overdue
+  // guard reads internalStatus, matching the displayed track.
   const andClauses = buildTaskFilterClauses(
     {
       q: filter.q,
@@ -77,7 +82,7 @@ export async function listTasksForProject(
       versionId: filter.versionId,
       componentId: filter.componentId,
     },
-    { userId: user.id, statusField: 'status' },
+    { userId: user.id, statusField: 'internalStatus' },
   );
   andClauses.push(visibilityClause);
   where.AND = andClauses;
@@ -85,7 +90,9 @@ export async function listTasksForProject(
   const orderBy: Prisma.TaskOrderByWithRelationInput =
     filter.sort === 'assignee'
       ? { assignee: { name: filter.dir } }
-      : { [filter.sort]: filter.dir };
+      : filter.sort === 'status'
+        ? { internalStatus: filter.dir }
+        : { [filter.sort]: filter.dir };
 
   const skip = (filter.page - 1) * TASKS_PAGE_SIZE;
 
@@ -100,6 +107,7 @@ export async function listTasksForProject(
         number: true,
         title: true,
         status: true,
+        internalStatus: true,
         priority: true,
         type: true,
         estimateHours: true,
