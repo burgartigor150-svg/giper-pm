@@ -131,6 +131,7 @@ export async function getTask(projectKey: string, number: number, user: SessionU
         orderBy: { updatedAt: 'desc' },
         select: {
           id: true,
+          provider: true,
           repo: true,
           number: true,
           title: true,

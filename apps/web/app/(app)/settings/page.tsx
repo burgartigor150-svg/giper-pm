@@ -72,6 +72,12 @@ export default async function SettingsPage() {
               >
                 Bitrix24 →
               </Link>
+              <Link
+                href="/settings/integrations/git"
+                className="text-sm underline"
+              >
+                GitHub / GitLab (PR/MR в задачах) →
+              </Link>
               <Link href="/integrations/telegram" className="text-sm underline">
                 Telegram (личные боты PM) →
               </Link>
