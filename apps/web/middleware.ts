@@ -52,6 +52,13 @@ export default auth((req) => {
     pathname.startsWith('/api/webhooks') ||
     pathname.startsWith('/api/public') ||
     pathname.startsWith('/api/mcp') ||
+    // OAuth: discovery / DCR / token are called by the connector backend with
+    // no session. /api/oauth/authorize is public too — it does its OWN auth()
+    // and bounces to /login with the FULL url (query preserved) as callbackUrl;
+    // if middleware redirected it, the callbackUrl would lose the OAuth params
+    // (it only carries pathname) and the flow would break after login.
+    pathname.startsWith('/.well-known/oauth') ||
+    pathname.startsWith('/api/oauth/') ||
     pathname.startsWith('/api/livekit/webhook') ||
     pathname.startsWith('/m/') ||
     pathname === '/sw.js' ||

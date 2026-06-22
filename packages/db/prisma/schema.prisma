@@ -279,6 +279,63 @@ model ApiToken {
   @@index([userId])
 }
 
+// ---- OAuth 2.1 for the MCP server (remote connectors, e.g. claude.ai) ----
+// Self-contained authorization server: Dynamic Client Registration (RFC 7591),
+// Authorization Code + PKCE, and bearer access/refresh tokens. userId/clientId
+// are plain scalars (explicit lookups, no cascade) to stay isolated from the
+// User model's relation graph.
+
+/// A client registered via Dynamic Client Registration (one per MCP connector).
+model OAuthClient {
+  id           String   @id // client_id (random)
+  secretHash   String? // sha-256 of client_secret; null for public (PKCE) clients
+  name         String?
+  redirectUris String[]
+  createdAt    DateTime @default(now())
+}
+
+/// Short-lived authorization code (single use), bound to the PKCE challenge.
+model OAuthAuthCode {
+  id            String    @id @default(cuid())
+  codeHash      String    @unique
+  clientId      String
+  userId        String
+  redirectUri   String
+  codeChallenge String // PKCE S256 challenge
+  scope         String?
+  expiresAt     DateTime
+  usedAt        DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@index([expiresAt])
+}
+
+/// Bearer access token issued to a connector (hashed). Accepted by /api/mcp.
+model OAuthAccessToken {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  clientId  String
+  userId    String
+  scope     String?
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+/// Refresh token (hashed) — exchanged at /token for a fresh access token.
+model OAuthRefreshToken {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  clientId  String
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
+}
+
 // Multi-assignment with role: a single task can have a frontend, a
 // backend, and a QA all assigned. Distinct from Task.assigneeId which
 // remains the "primary" / Bitrix-mirror slot. The single-assignee
