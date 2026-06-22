@@ -39,6 +39,7 @@ import { PublishToBitrixButton } from '@/components/domain/PublishToBitrixButton
 import { TaskAttachments } from '@/components/domain/TaskAttachments';
 import { AttachmentUpload } from '@/components/domain/AttachmentUpload';
 import { PullRequestList } from '@/components/domain/PullRequestList';
+import { DesignList } from '@/components/domain/DesignList';
 import { RevalidateOnEvent } from '@/components/domain/RevalidateOnEvent';
 import { PresenceBar } from '@/components/domain/PresenceBar';
 import { SubtaskList } from '@/components/domain/SubtaskList';
@@ -510,6 +511,24 @@ export default async function TaskDetailPage({ params }: { params: Params }) {
             </CardHeader>
             <CardContent>
               <PullRequestList items={task.pullRequests} taskRef={`${task.project.key}-${task.number}`} />
+            </CardContent>
+          </Card>
+
+          {/* Figma designs — always shown so the integration is discoverable.
+              Live embed for link-shared files; thumbnails via the Figma API
+              come in a later slice. */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Макеты (Figma)</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <DesignList
+                items={task.designs}
+                taskId={task.id}
+                projectKey={task.project.key}
+                taskNumber={task.number}
+                canEdit={canEdit}
+              />
             </CardContent>
           </Card>
 

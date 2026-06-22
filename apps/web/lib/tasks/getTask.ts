@@ -143,6 +143,16 @@ export async function getTask(projectKey: string, number: number, user: SessionU
           mergedAt: true,
         },
       },
+      designs: {
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          url: true,
+          title: true,
+          nodeId: true,
+          thumbnailUrl: true,
+        },
+      },
       project: {
         select: {
           id: true,
