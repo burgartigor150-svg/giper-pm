@@ -414,6 +414,8 @@ model Project {
   bitrixMembers ProjectBitrixMember[]
   tasks         Task[]
   integrations  ProjectIntegration[]
+  /// Connected GitHub/GitLab repositories (in-app setup: token + auto webhook).
+  repoConnections RepoConnection[]
   tags          Tag[]
   channels      Channel[]
   /// Telegram supergroups / channels mirrored into giper-pm for harvest → tasks.
@@ -1524,6 +1526,35 @@ model TaskPullRequest {
   @@unique([repo, number, taskId])
   @@index([taskId])
   @@index([repo, number])
+}
+
+/// In-app GitHub/GitLab repository connection for a project. The admin pastes
+/// a repo URL + access token; the server validates it, auto-creates the webhook
+/// on the forge (secret = our GITHUB/GITLAB_WEBHOOK_SECRET so existing webhook
+/// routes keep working), and stores the (encrypted) token for management +
+/// backfill. PR/MR linkage itself is unchanged: by KEY-N reference.
+model RepoConnection {
+  id          String   @id @default(cuid())
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  provider    String   // 'github' | 'gitlab'
+  // GitHub: "owner/repo". GitLab: "group/project" (path_with_namespace).
+  repo        String
+  // Forge base URL (self-hosted GitLab). null → public host.
+  baseUrl     String?
+  // AES-256-GCM access token (reuses tgTokenCrypto) + masked last-4 for UI.
+  tokenEnc    String
+  tokenHint   String
+  // Provider's webhook id, kept so we can delete it on disconnect.
+  webhookId   String?
+  status      String   @default("active") // 'active' | 'error'
+  lastError   String?
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([provider, repo, projectId])
+  @@index([projectId])
 }
 
 enum PullRequestState {
