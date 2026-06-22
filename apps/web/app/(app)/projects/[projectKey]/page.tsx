@@ -230,7 +230,7 @@ export default async function ProjectOverviewPage({
             href={`/projects/${project.key}/list`}
             className="mt-3 inline-block text-sm text-muted-foreground hover:text-foreground hover:underline"
           >
-            Все задачи →
+            Открыть все →
           </Link>
         </CardContent>
       </Card>
