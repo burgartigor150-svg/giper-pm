@@ -31,6 +31,7 @@ export async function listRecentTasksForProject(
       number: true,
       title: true,
       status: true,
+      internalStatus: true,
       priority: true,
       assignee: { select: { id: true, name: true, image: true } },
       updatedAt: true,

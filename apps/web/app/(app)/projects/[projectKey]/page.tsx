@@ -216,7 +216,7 @@ export default async function ProjectOverviewPage({
                   >
                     {task.title}
                   </Link>
-                  <TaskStatusBadge status={task.status} />
+                  <TaskStatusBadge status={task.internalStatus} />
                   {task.assignee ? (
                     <Avatar src={task.assignee.image} alt={task.assignee.name} className="h-6 w-6" />
                   ) : null}
@@ -224,6 +224,14 @@ export default async function ProjectOverviewPage({
               ))}
             </ul>
           )}
+          {/* The widget caps at 5 — make the full task list reachable so it
+              doesn't read as "these are all the tasks". */}
+          <Link
+            href={`/projects/${project.key}/list`}
+            className="mt-3 inline-block text-sm text-muted-foreground hover:text-foreground hover:underline"
+          >
+            Открыть все →
+          </Link>
         </CardContent>
       </Card>
     </div>
