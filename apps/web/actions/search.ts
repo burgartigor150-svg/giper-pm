@@ -64,7 +64,10 @@ export async function searchAll(query: string): Promise<SearchResult> {
       : {
           OR: [
             { ownerId: me.id },
-            { members: { some: { userId: me.id } } },
+            // Membership counts only for NATIVE projects — Bitrix-mirror
+            // projects auto-add the workgroup owner as a LEAD member, which is
+            // not a real stake (kept in lockstep with listProjectsForUser).
+            { externalSource: null, members: { some: { userId: me.id } } },
           ],
         };
 
