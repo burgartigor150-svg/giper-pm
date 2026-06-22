@@ -3,7 +3,11 @@
 import { useState, useTransition } from 'react';
 import { ChevronDown, ChevronRight, ExternalLink, Figma, Trash2 } from 'lucide-react';
 import { figmaEmbedUrl } from '@/lib/figma/parseFigmaUrl';
-import { attachFigmaDesignAction, removeFigmaDesignAction } from '@/actions/designs';
+import {
+  attachFigmaDesignAction,
+  removeFigmaDesignAction,
+  syncFigmaCommentsAction,
+} from '@/actions/designs';
 
 type Design = {
   id: string;
@@ -50,6 +54,21 @@ export function DesignList({
     startTransition(async () => {
       const res = await removeFigmaDesignAction(id, projectKey, taskNumber);
       if (!res.ok) alert(res.error.message);
+    });
+  }
+
+  function syncComments() {
+    startTransition(async () => {
+      const res = await syncFigmaCommentsAction(taskId, projectKey, taskNumber);
+      if (res.ok) {
+        alert(
+          res.data && res.data.created > 0
+            ? `Подтянуто комментариев: ${res.data.created}`
+            : 'Новых комментариев Figma нет (или Figma не подключена).',
+        );
+      } else {
+        alert(res.error.message);
+      }
     });
   }
 
@@ -140,24 +159,36 @@ export function DesignList({
         </ul>
       )}
       {canEdit ? (
-        <div className="flex gap-2">
-          <input
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') add();
-            }}
-            placeholder="https://www.figma.com/design/…"
-            className="min-w-0 flex-1 rounded-md border border-neutral-300 px-2 py-1.5 text-sm outline-none focus:border-neutral-500 dark:border-neutral-700 dark:bg-neutral-800"
-          />
-          <button
-            type="button"
-            onClick={add}
-            disabled={pending || !url.trim()}
-            className="rounded-md bg-neutral-900 px-3 py-1.5 text-sm text-white disabled:opacity-50 dark:bg-white dark:text-neutral-900"
-          >
-            Привязать
-          </button>
+        <div className="flex flex-col gap-2">
+          <div className="flex gap-2">
+            <input
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') add();
+              }}
+              placeholder="https://www.figma.com/design/…"
+              className="min-w-0 flex-1 rounded-md border border-neutral-300 px-2 py-1.5 text-sm outline-none focus:border-neutral-500 dark:border-neutral-700 dark:bg-neutral-800"
+            />
+            <button
+              type="button"
+              onClick={add}
+              disabled={pending || !url.trim()}
+              className="rounded-md bg-neutral-900 px-3 py-1.5 text-sm text-white disabled:opacity-50 dark:bg-white dark:text-neutral-900"
+            >
+              Привязать
+            </button>
+          </div>
+          {items.length > 0 ? (
+            <button
+              type="button"
+              onClick={syncComments}
+              disabled={pending}
+              className="self-start text-xs text-muted-foreground hover:text-foreground hover:underline disabled:opacity-50"
+            >
+              Подтянуть комментарии из Figma
+            </button>
+          ) : null}
         </div>
       ) : null}
     </div>
