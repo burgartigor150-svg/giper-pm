@@ -280,6 +280,12 @@ export default async function TaskDetailPage({ params }: { params: Params }) {
     ),
   ].sort((a, b) => a.at.getTime() - b.at.getTime());
 
+  // TEMP diagnostic: confirms all SSR data resolved; if the request still hangs
+  // after this prints, the hang is in render/RSC-serialization, not data.
+  console.error(
+    `[taskpage] data ready key=${projectKey}-${number} statusChanges=${task.statusChanges.length} mentions=${Object.keys(Object.fromEntries(actorById)).length} comments=${task.comments.length}`,
+  );
+
   return (
     <div className="mx-auto max-w-6xl space-y-4">
       <RevalidateOnEvent
@@ -564,7 +570,7 @@ export default async function TaskDetailPage({ params }: { params: Params }) {
                 taskNumber={task.number}
                 items={timeline}
                 isMirror={task.externalSource === 'bitrix24'}
-                mentions={actorById}
+                mentions={Object.fromEntries(actorById)}
               />
             </CardContent>
           </Card>
