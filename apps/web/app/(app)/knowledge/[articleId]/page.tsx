@@ -30,7 +30,7 @@ export default async function KnowledgeArticlePage({
 
   return (
     <div className="flex gap-8">
-      <div className="flex min-w-0 flex-1 flex-col gap-5">
+      <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-1 flex-col gap-5">
         <nav className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
           <Link href="/knowledge" className="hover:text-foreground">
             {article.space.icon ?? '📚'} {article.space.name}
@@ -53,6 +53,7 @@ export default async function KnowledgeArticlePage({
         </nav>
 
         <KbArticleEditor
+          key={article.id}
           id={article.id}
           spaceId={article.spaceId}
           initialTitle={article.title}
@@ -64,7 +65,7 @@ export default async function KnowledgeArticlePage({
         />
       </div>
 
-      <KbToc headings={headings} />
+      <KbToc key={article.id} headings={headings} />
     </div>
   );
 }
