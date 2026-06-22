@@ -158,6 +158,8 @@ services:
 
       # GitHub webhook
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET}
+      # GitLab webhook (X-Gitlab-Token)
+      GITLAB_WEBHOOK_SECRET: ${GITLAB_WEBHOOK_SECRET:-}
 
       # S3-compatible storage (MinIO in this stack)
       STORAGE_ENDPOINT: http://minio:9000
