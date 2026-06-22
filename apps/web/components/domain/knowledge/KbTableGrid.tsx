@@ -39,7 +39,12 @@ export function KbTableGrid({
   rows: KbRow[];
   canEdit: boolean;
 }) {
-  const structureKey = `${columns.map((c) => c.id).join(',')}|${rows.map((r) => r.id).join(',')}`;
+  // Include a hash of server cell values so a refetch with changed values (a
+  // concurrent edit, another tab) remounts the body and re-seeds local state.
+  // Local cell edits don't touch the `rows` prop, so typing isn't interrupted.
+  const structureKey = `${columns.map((c) => c.id).join(',')}|${rows
+    .map((r) => `${r.id}:${JSON.stringify(r.values)}`)
+    .join(',')}`;
   return (
     <GridInner key={structureKey} tableId={tableId} columns={columns} rows={rows} canEdit={canEdit} />
   );
@@ -147,6 +152,7 @@ function GridInner({
             {columns.map((col) => (
               <th
                 key={col.id}
+                scope="col"
                 className="group min-w-[140px] border border-neutral-300 bg-muted px-2 py-1.5 text-left font-semibold dark:border-neutral-700"
               >
                 <div className="flex items-center justify-between gap-1">
@@ -175,7 +181,7 @@ function GridInner({
               </th>
             ))}
             {canEdit ? (
-              <th className="border border-neutral-300 bg-muted px-2 py-1.5 dark:border-neutral-700">
+              <th scope="col" className="border border-neutral-300 bg-muted px-2 py-1.5 dark:border-neutral-700">
                 {adding ? (
                   <div className="flex items-center gap-1">
                     <input
@@ -209,7 +215,7 @@ function GridInner({
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => (
+          {rows.map((row, rowIndex) => (
             <tr key={row.id} className="group">
               {columns.map((col) => (
                 <td key={col.id} className="border border-neutral-300 p-0 align-top dark:border-neutral-700">
@@ -217,6 +223,7 @@ function GridInner({
                     type={col.type}
                     options={col.options}
                     value={values[row.id]?.[col.id] ?? ''}
+                    label={`${col.name}, строка ${rowIndex + 1}`}
                     disabled={!canEdit || pending}
                     onCommit={(v) => setCell(row.id, col.id, v)}
                   />
@@ -253,12 +260,14 @@ function Cell({
   type,
   options,
   value,
+  label,
   disabled,
   onCommit,
 }: {
   type: KbColumnType;
   options: string[] | null;
   value: string;
+  label: string;
   disabled: boolean;
   onCommit: (value: string) => void;
 }) {
@@ -269,6 +278,7 @@ function Cell({
       <div className="flex items-center justify-center py-1.5">
         <input
           type="checkbox"
+          aria-label={label}
           checked={value === 'true'}
           disabled={disabled}
           onChange={(e) => onCommit(e.target.checked ? 'true' : 'false')}
@@ -279,6 +289,7 @@ function Cell({
   if (type === 'SELECT') {
     return (
       <select
+        aria-label={label}
         value={value}
         disabled={disabled}
         onChange={(e) => onCommit(e.target.value)}
@@ -297,6 +308,7 @@ function Cell({
   return (
     <input
       type={inputType}
+      aria-label={label}
       defaultValue={value}
       disabled={disabled}
       onBlur={(e) => {

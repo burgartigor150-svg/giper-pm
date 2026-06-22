@@ -109,6 +109,30 @@ describe('knowledge tables — cells (atomic jsonb_set)', () => {
     expect(vals[col1]).toBe('значение-1');
     expect(vals[col2]).toBe('значение-2');
   });
+
+  it('concurrent edits to two cells of one row both survive (the no-clobber guarantee)', async () => {
+    await asUser('ADMIN');
+    const spaceId = await freshSpace();
+    const t = await createTableAction(spaceId);
+    const tableId = t.ok ? t.data!.id : '';
+    const c2 = await addColumnAction(tableId, 'Второй', 'TEXT');
+    const col2 = c2.ok ? c2.data!.id : '';
+    const table0 = await getTable(tableId);
+    const rowId = table0!.rows[0]!.id;
+    const col1 = table0!.columns[0]!.id;
+
+    // Fire both updates in parallel against the SAME row. A read-modify-write
+    // implementation would lose one value here; atomic jsonb_set keeps both.
+    await Promise.all([
+      updateCellAction(rowId, col1, 'парал-1'),
+      updateCellAction(rowId, col2, 'парал-2'),
+    ]);
+
+    const table = await getTable(tableId);
+    const vals = table!.rows[0]!.values;
+    expect(vals[col1]).toBe('парал-1');
+    expect(vals[col2]).toBe('парал-2');
+  });
 });
 
 describe('knowledge tables — deletes & cascade', () => {
