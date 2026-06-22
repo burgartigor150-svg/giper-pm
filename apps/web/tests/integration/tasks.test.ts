@@ -568,16 +568,18 @@ describe('listTasksForBoard', () => {
 // listRecentTasksForProject
 // ============================================================================
 describe('listRecentTasksForProject', () => {
-  it('returns up to limit, per-stake, ordered by updatedAt desc', async () => {
-    // Filtered by per-stake visibility — caller is the project owner
-    // and creator of every task, so all of them are visible.
+  it('returns up to limit, ordered by updatedAt desc', async () => {
     const { owner, project } = await scaffold();
     await makeTask({ projectId: project.id, creatorId: owner.id });
     await new Promise((r) => setTimeout(r, 5));
     const t2 = await makeTask({ projectId: project.id, creatorId: owner.id });
     await new Promise((r) => setTimeout(r, 5));
     const t3 = await makeTask({ projectId: project.id, creatorId: owner.id });
-    const out = await listRecentTasksForProject(project.id, owner.id, 2);
+    const out = await listRecentTasksForProject(
+      { id: project.id, ownerId: owner.id, members: [] },
+      { id: owner.id, role: owner.role },
+      2,
+    );
     expect(out).toHaveLength(2);
     expect(out[0]?.id).toBe(t3.id);
     expect(out[1]?.id).toBe(t2.id);
@@ -588,18 +590,37 @@ describe('listRecentTasksForProject', () => {
     for (let i = 0; i < 7; i++) {
       await makeTask({ projectId: project.id, creatorId: owner.id });
     }
-    const out = await listRecentTasksForProject(project.id, owner.id);
+    const out = await listRecentTasksForProject(
+      { id: project.id, ownerId: owner.id, members: [] },
+      { id: owner.id, role: owner.role },
+    );
     expect(out).toHaveLength(5);
   });
 
-  it('returns empty for a non-stake user even if other tasks exist', async () => {
+  it('returns empty for a non-stake regular member even if other tasks exist', async () => {
     const { owner, project } = await scaffold();
-    const stranger = await makeUser();
+    const stranger = await makeUser(); // MEMBER, not owner/LEAD/admin
     for (let i = 0; i < 3; i++) {
       await makeTask({ projectId: project.id, creatorId: owner.id });
     }
-    const out = await listRecentTasksForProject(project.id, stranger.id);
+    const out = await listRecentTasksForProject(
+      { id: project.id, ownerId: owner.id, members: [] },
+      { id: stranger.id, role: stranger.role },
+    );
     expect(out).toHaveLength(0);
+  });
+
+  it('leadership (non-stake project owner) sees tasks created by others', async () => {
+    const { owner, project } = await scaffold();
+    const other = await makeUser();
+    for (let i = 0; i < 3; i++) {
+      await makeTask({ projectId: project.id, creatorId: other.id });
+    }
+    const out = await listRecentTasksForProject(
+      { id: project.id, ownerId: owner.id, members: [] },
+      { id: owner.id, role: owner.role },
+    );
+    expect(out).toHaveLength(3);
   });
 });
 
