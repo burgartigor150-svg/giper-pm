@@ -17,6 +17,7 @@ import {
   Calendar,
   Send,
   Video,
+  BookOpen,
   X,
   PanelLeftClose,
   PanelLeft,
@@ -37,6 +38,7 @@ export type NavKey =
   | 'messages'
   | 'telegram'
   | 'meetings'
+  | 'knowledge'
   | 'reports'
   | 'crm'
   | 'servicedesk'
@@ -57,6 +59,7 @@ const ICONS: Record<NavKey, React.ComponentType<{ className?: string }>> = {
   messages: MessageSquare,
   telegram: Send,
   meetings: Video,
+  knowledge: BookOpen,
   reports: BarChart3,
   crm: Handshake,
   servicedesk: LifeBuoy,

@@ -2484,3 +2484,46 @@ model Document {
 
   @@index([projectId, parentId, order])
 }
+
+/// Org-wide Knowledge Base space (TEAMLY-style «Пространство»). Top-level
+/// container for a tree of articles. Distinct from `Space` (which groups
+/// projects).
+model KnowledgeSpace {
+  id          String             @id @default(cuid())
+  name        String
+  description String?
+  /// Emoji or short icon for the space.
+  icon        String?
+  color       String?
+  order       Int                @default(0)
+  archivedAt  DateTime?
+  createdById String?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  articles    KnowledgeArticle[]
+
+  @@index([archivedAt, order])
+}
+
+/// A Knowledge Base article (TEAMLY «Статья»). Markdown content, nested in a
+/// tree within a space (parent/children), ordered among siblings.
+model KnowledgeArticle {
+  id          String             @id @default(cuid())
+  spaceId     String
+  space       KnowledgeSpace     @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  title       String             @default("Без названия")
+  /// Markdown body, rendered via renderRichText.
+  content     String             @default("")
+  icon        String?
+  parentId    String?
+  parent      KnowledgeArticle?  @relation("KbTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children    KnowledgeArticle[] @relation("KbTree")
+  order       Int                @default(0)
+  /// Soft refs (no FK) to the User who created / last edited.
+  createdById String?
+  updatedById String?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  @@index([spaceId, parentId, order])
+}

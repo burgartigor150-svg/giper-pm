@@ -23,6 +23,8 @@ function buildNav(caps: EffectiveCaps, crmCanSee: boolean): NavItem[] {
     // "Созвоны" — list page itself is filtered to runs the user
     // participated in / created, so it's safe for any role.
     { key: 'meetings', href: '/meetings' },
+    // База знаний — org-wide, readable by any authenticated user.
+    { key: 'knowledge', href: '/knowledge' },
   ];
   // Section visibility via effective capabilities (custom-role overlay; for an
   // unassigned user caps === the UserRole baseline, so this is identical to the
