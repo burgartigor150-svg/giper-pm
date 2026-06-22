@@ -17,6 +17,9 @@ export default auth((req) => {
   //                           inside the route (resolveApiToken). Without
   //                           this, token requests get 302'd to /login
   //                           instead of a proper 401/200.
+  //   /api/mcp              — MCP server, same Bearer ApiToken auth inside
+  //                           the route. Must skip middleware or MCP clients
+  //                           get a 302-to-/login instead of JSON-RPC.
   //   /m/<token>            — guest meeting landing page. Auth is the
   //                           unguessable token in the URL; server-side
   //                           validation lives in joinMeetingAsGuestAction.
@@ -48,6 +51,7 @@ export default auth((req) => {
     pathname.startsWith('/api/cron') ||
     pathname.startsWith('/api/webhooks') ||
     pathname.startsWith('/api/public') ||
+    pathname.startsWith('/api/mcp') ||
     pathname.startsWith('/api/livekit/webhook') ||
     pathname.startsWith('/m/') ||
     pathname === '/sw.js' ||
