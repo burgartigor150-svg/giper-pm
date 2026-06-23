@@ -1929,6 +1929,7 @@ enum IntegrationKind {
   GOOGLE_CALENDAR
   FIGMA
   TELEGRAM
+  TEAMLY
 }
 
 model ProjectIntegration {
@@ -2520,6 +2521,10 @@ model KnowledgeSpace {
   order       Int                      @default(0)
   archivedAt  DateTime?
   createdById String?
+  /// Mirror provenance for imported spaces (e.g. "teamly") + the external id;
+  /// drives idempotent re-sync. NULL for spaces created locally.
+  externalSource String?
+  externalId     String?
   createdAt   DateTime                 @default(now())
   updatedAt   DateTime                 @updatedAt
   articles    KnowledgeArticle[]
@@ -2528,6 +2533,7 @@ model KnowledgeSpace {
   tables      KnowledgeTable[]
   members     KnowledgeSpaceMember[]
 
+  @@unique([externalSource, externalId])
   @@index([archivedAt, order])
 }
 
@@ -2646,6 +2652,12 @@ model KnowledgeArticle {
   /// Soft refs (no FK) to the User who created / last edited.
   createdById String?
   updatedById String?
+  /// Mirror provenance for imported articles (e.g. "teamly") + external id +
+  /// the source's last-modified timestamp; drives idempotent re-sync and lets
+  /// the importer skip unchanged articles. NULL for locally-created articles.
+  externalSource    String?
+  externalId        String?
+  externalUpdatedAt DateTime?
   createdAt   DateTime           @default(now())
   updatedAt   DateTime           @updatedAt
   favorites   KnowledgeFavorite[]
@@ -2656,6 +2668,7 @@ model KnowledgeArticle {
   reviews     KnowledgeArticleReview[]
   attachments KnowledgeAttachment[]
 
+  @@unique([externalSource, externalId])
   @@index([spaceId, parentId, order])
   @@index([status])
 }
