@@ -159,6 +159,63 @@ export async function getArticleBreadcrumbs(
   return chain;
 }
 
+// ---- Versions -------------------------------------------------------------
+
+/** Version history of an article (newest first) with editor display names. */
+export async function listArticleVersions(articleId: string) {
+  const versions = await prisma.knowledgeArticleVersion.findMany({
+    where: { articleId },
+    orderBy: { createdAt: 'desc' },
+    select: { id: true, title: true, content: true, editedById: true, createdAt: true },
+  });
+  if (versions.length === 0) return [];
+  const ids = [...new Set(versions.map((v) => v.editedById).filter((x): x is string => !!x))];
+  const users = ids.length
+    ? await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true, email: true } })
+    : [];
+  const byId = new Map(users.map((u) => [u.id, u]));
+  return versions.map((v) => ({
+    id: v.id,
+    title: v.title,
+    content: v.content,
+    createdAt: v.createdAt,
+    editorName: v.editedById ? byId.get(v.editedById)?.name ?? byId.get(v.editedById)?.email ?? null : null,
+  }));
+}
+
+/** A single version's full snapshot (for the diff/preview pane). */
+export async function getArticleVersion(id: string) {
+  return prisma.knowledgeArticleVersion.findUnique({
+    where: { id },
+    select: { id: true, articleId: true, title: true, content: true, icon: true, createdAt: true },
+  });
+}
+
+// ---- AI retrieval ---------------------------------------------------------
+
+/**
+ * Retrieve published articles in spaces the user may view, matching a question
+ * by keyword — context for the KB AI answer. Keyword OR over the question's
+ * longer tokens (no embeddings in v1).
+ */
+export async function retrieveForAi(user: KbSessionUser, question: string, limit = 6) {
+  const tokens = [...new Set(question.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((t) => t.length >= 4))].slice(0, 8);
+  if (tokens.length === 0) return [];
+  return prisma.knowledgeArticle.findMany({
+    where: {
+      status: 'PUBLISHED',
+      space: { archivedAt: null, ...viewableSpaceWhere(user) },
+      OR: tokens.flatMap((t) => [
+        { title: { contains: t, mode: 'insensitive' as const } },
+        { content: { contains: t, mode: 'insensitive' as const } },
+      ]),
+    },
+    orderBy: { updatedAt: 'desc' },
+    take: limit,
+    select: { id: true, title: true, content: true, space: { select: { name: true } } },
+  });
+}
+
 // ---- Templates ------------------------------------------------------------
 
 /** All templates for the management page: account-wide + every space's. */

@@ -2,7 +2,8 @@
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Check, Eye, Pencil, Plus, Star, Trash2 } from 'lucide-react';
+import Link from 'next/link';
+import { Check, Eye, History, Pencil, Plus, Star, Trash2 } from 'lucide-react';
 import { renderMarkdown } from '@/lib/knowledge/renderMarkdown';
 import {
   updateArticleAction,
@@ -153,6 +154,15 @@ export function KbArticleEditor({
           >
             <Star className="h-4 w-4" fill={favorite ? 'currentColor' : 'none'} />
           </button>
+
+          <Link
+            href={`/knowledge/${id}/history`}
+            className="rounded-md border border-neutral-300 p-1.5 text-muted-foreground hover:text-foreground dark:border-neutral-700"
+            aria-label="История изменений"
+            title="История изменений"
+          >
+            <History className="h-4 w-4" />
+          </Link>
 
           {canEdit ? (
             <>

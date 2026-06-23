@@ -29,3 +29,4 @@ export {
   vertexChat,
   vertexJson,
 } from './vertex';
+export { askKnowledgeBase, type KbSource, type AskKbResult } from './askKb';

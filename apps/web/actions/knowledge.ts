@@ -127,10 +127,28 @@ export async function updateArticleAction(
   patch: { title?: string; content?: string; icon?: string | null },
 ): Promise<ActionResult> {
   const me = await requireAuth();
-  const article = await prisma.knowledgeArticle.findUnique({ where: { id }, select: { spaceId: true } });
+  const article = await prisma.knowledgeArticle.findUnique({
+    where: { id },
+    select: { spaceId: true, title: true, content: true, icon: true },
+  });
   if (!article) return { ok: false, error: { code: 'NOT_FOUND', message: 'Статья не найдена' } };
   const guard = await spaceEditGuard(me, article.spaceId);
   if (guard) return guard;
+  // Snapshot the PRIOR state into history when the body or title actually
+  // changes (icon-only / no-op saves don't spawn versions).
+  const titleChanges = patch.title !== undefined && patch.title.trim() !== article.title;
+  const contentChanges = patch.content !== undefined && patch.content !== article.content;
+  if (titleChanges || contentChanges) {
+    await prisma.knowledgeArticleVersion.create({
+      data: {
+        articleId: id,
+        title: article.title,
+        content: article.content,
+        icon: article.icon,
+        editedById: me.id,
+      },
+    });
+  }
   await prisma.knowledgeArticle.update({
     where: { id },
     data: {
@@ -202,6 +220,40 @@ export async function setArticleStatusAction(
   await prisma.knowledgeArticle.update({ where: { id }, data: { status, updatedById: me.id } });
   revalidatePath('/knowledge');
   return { ok: true };
+}
+
+/** Restore an article to a past version. Snapshots the current state first. */
+export async function restoreArticleVersionAction(
+  versionId: string,
+): Promise<ActionResult<{ articleId: string }>> {
+  const me = await requireAuth();
+  const version = await prisma.knowledgeArticleVersion.findUnique({
+    where: { id: versionId },
+    select: { articleId: true, title: true, content: true, icon: true },
+  });
+  if (!version) return { ok: false, error: { code: 'NOT_FOUND', message: 'Версия не найдена' } };
+  const article = await prisma.knowledgeArticle.findUnique({
+    where: { id: version.articleId },
+    select: { spaceId: true, title: true, content: true, icon: true },
+  });
+  if (!article) return { ok: false, error: { code: 'NOT_FOUND', message: 'Статья не найдена' } };
+  const guard = await spaceEditGuard(me, article.spaceId);
+  if (guard) return guard;
+  await prisma.knowledgeArticleVersion.create({
+    data: {
+      articleId: version.articleId,
+      title: article.title,
+      content: article.content,
+      icon: article.icon,
+      editedById: me.id,
+    },
+  });
+  await prisma.knowledgeArticle.update({
+    where: { id: version.articleId },
+    data: { title: version.title, content: version.content, icon: version.icon, updatedById: me.id },
+  });
+  revalidatePath('/knowledge');
+  return { ok: true, data: { articleId: version.articleId } };
 }
 
 // ---- Favorites ------------------------------------------------------------

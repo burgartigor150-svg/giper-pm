@@ -3,7 +3,7 @@
 import { useMemo, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
-import { ChevronDown, ChevronRight, FileText, LayoutTemplate, Plus, Star } from 'lucide-react';
+import { ChevronDown, ChevronRight, FileText, LayoutTemplate, Plus, Sparkles, Star } from 'lucide-react';
 import { createArticleAction, createSpaceAction } from '@/actions/knowledge';
 
 type Space = { id: string; name: string; icon: string | null };
@@ -145,6 +145,12 @@ export function KbSidebar({
         className={`mb-1 rounded px-2 py-1 font-semibold ${activeId === null && pathname === '/knowledge' ? 'bg-muted' : 'hover:bg-muted'}`}
       >
         База знаний
+      </Link>
+      <Link
+        href="/knowledge/ask"
+        className={`mb-1 flex items-center gap-1.5 rounded px-2 py-1 text-sm ${pathname === '/knowledge/ask' ? 'bg-muted font-medium' : 'hover:bg-muted'}`}
+      >
+        <Sparkles className="h-3.5 w-3.5 text-violet-500" /> Спросить ИИ
       </Link>
 
       {favSpaces.length > 0 || favArticles.length > 0 ? (
