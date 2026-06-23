@@ -82,6 +82,18 @@ describe('renderMarkdown', () => {
     expect(out).toContain('&lt;script&gt;');
   });
 
+  test('sanitizes unsafe link schemes (javascript:/data:) to #', () => {
+    const js = html('[x](javascript:alert(1))');
+    expect(js).not.toContain('javascript:');
+    expect(js).toContain('href="#"');
+    const data = html('[y](data:text/html;base64,PHN2Zz4=)');
+    expect(data).not.toContain('data:text/html');
+    expect(data).toContain('href="#"');
+    // legitimate schemes survive
+    expect(html('[z](https://example.com)')).toContain('href="https://example.com"');
+    expect(html('[m](mailto:a@b.co)')).toContain('href="mailto:a@b.co"');
+  });
+
   test('renders heading anchor ids that match slugs', () => {
     const out = html('## Привет Мир');
     const slug = slugifyBase('Привет Мир');

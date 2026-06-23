@@ -18,6 +18,17 @@ import type { ReactNode } from 'react';
 let keySeq = 0;
 const k = () => `kb-${keySeq++}`;
 
+/**
+ * Allowlist link schemes before they reach an <a href>. Defense in depth: even
+ * though React 19 blocks javascript: URLs and browsers block top-level data:
+ * navigation, we never emit anything outside http(s)/mailto/tel/anchors/relative
+ * — covers the article view, AI answers, and version previews in one place.
+ */
+function safeHref(href: string): string {
+  const v = href.trim();
+  return /^(https?:|mailto:|tel:|#|\/)/i.test(v) ? v : '#';
+}
+
 // ---- heading slugs (shared by renderer + table of contents) ---------------
 
 /** Stable, anchor-safe slug for a heading's text (keeps unicode letters). */
@@ -95,7 +106,7 @@ function renderInline(text: string): ReactNode[] {
     } else if (link) {
       const sep = link.indexOf('](');
       const label = link.slice(1, sep);
-      const href = link.slice(sep + 2, -1);
+      const href = safeHref(link.slice(sep + 2, -1));
       out.push(
         <a key={k()} href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline hover:no-underline dark:text-blue-400">
           {label}
