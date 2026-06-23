@@ -2651,9 +2651,37 @@ model KnowledgeArticle {
   comments    KnowledgeComment[]
   reactions   KnowledgeReaction[]
   views       KnowledgeArticleView[]
+  reviews     KnowledgeArticleReview[]
 
   @@index([spaceId, parentId, order])
   @@index([status])
+}
+
+enum KnowledgeReviewState {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+/// An approval request on an article (TEAMLY «Согласование»). One PENDING review
+/// at a time gates publishing; APPROVED publishes the article. User refs are soft.
+model KnowledgeArticleReview {
+  id            String               @id @default(cuid())
+  articleId     String
+  article       KnowledgeArticle     @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  requestedById String
+  reviewerId    String
+  state         KnowledgeReviewState @default(PENDING)
+  comment       String?
+  createdAt     DateTime             @default(now())
+  resolvedAt    DateTime?
+
+  @@index([articleId, createdAt])
+  @@index([reviewerId, state])
+  // NOTE: a partial unique index enforces "at most one PENDING review per
+  // article" — `CREATE UNIQUE INDEX ... ON (articleId) WHERE state='PENDING'`.
+  // Prisma can't express partial unique indexes, so it lives in the migration
+  // (20260623090000_knowledge_review). requestReviewAction catches its P2002.
 }
 
 /// One row per (article, user, day) — dedups views so the count is "unique
