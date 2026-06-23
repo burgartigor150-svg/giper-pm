@@ -30,6 +30,8 @@ export function KbArticleEditor({
   initialStatus,
   initialFavorite,
   canEdit,
+  tableEmbeds,
+  spaceTables = [],
 }: {
   id: string;
   spaceId: string;
@@ -39,6 +41,8 @@ export function KbArticleEditor({
   initialStatus: Status;
   initialFavorite: boolean;
   canEdit: boolean;
+  tableEmbeds?: Record<string, React.ReactNode>;
+  spaceTables?: { id: string; name: string; icon: string | null }[];
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -212,10 +216,29 @@ export function KbArticleEditor({
 
       {mode === 'edit' && canEdit ? (
         <>
+          {spaceTables.length > 0 ? (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              Вставить таблицу:
+              <select
+                value=""
+                onChange={(e) => {
+                  if (!e.target.value) return;
+                  setContent((c) => `${c}${c.endsWith('\n') || c === '' ? '' : '\n'}\n[[table:${e.target.value}]]\n`);
+                  e.target.value = '';
+                }}
+                className="rounded border border-neutral-300 px-1 py-1 text-xs text-foreground dark:border-neutral-700 dark:bg-neutral-900"
+              >
+                <option value="">— выберите —</option>
+                {spaceTables.map((t) => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </select>
+            </div>
+          ) : null}
           <textarea
             value={content}
             onChange={(e) => setContent(e.target.value)}
-            placeholder="Текст статьи в Markdown… (## заголовки, списки, **жирный**, таблицы, `код`)"
+            placeholder="Текст статьи в Markdown… (## заголовки, списки, таблицы, `код`, [[table:ID]] — встроить умную таблицу)"
             className="min-h-[420px] w-full resize-y rounded-md border border-neutral-300 p-3 font-mono text-sm outline-none focus:border-neutral-500 dark:border-neutral-700 dark:bg-neutral-900"
           />
           <div className="flex items-center gap-3">
@@ -236,7 +259,7 @@ export function KbArticleEditor({
         </>
       ) : (
         <article className="max-w-none break-words text-sm">
-          {content.trim() ? renderMarkdown(content) : (
+          {content.trim() ? renderMarkdown(content, { tableEmbeds }) : (
             <p className="text-muted-foreground">
               {canEdit ? 'Пустая статья. Нажмите «Редактор», чтобы наполнить.' : 'Пустая статья.'}
             </p>
