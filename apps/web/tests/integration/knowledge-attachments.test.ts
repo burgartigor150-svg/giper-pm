@@ -79,6 +79,14 @@ describe('kb attachments — upload', () => {
     badMime.set('file', new File([new Uint8Array([1, 2])], 'f.woff2', { type: 'font/woff2' }));
     expect((await uploadKbAttachmentAction(badMime)).ok).toBe(false);
 
+    // script-executable types are rejected at upload (stored-XSS defense)
+    for (const t of ['text/html', 'image/svg+xml', 'application/xhtml+xml', 'text/javascript']) {
+      const fd = new FormData();
+      fd.set('articleId', articleId);
+      fd.set('file', new File([new Uint8Array([60, 33])], 'x', { type: t }));
+      expect((await uploadKbAttachmentAction(fd)).ok).toBe(false);
+    }
+
     expect(putObject).not.toHaveBeenCalled();
   });
 

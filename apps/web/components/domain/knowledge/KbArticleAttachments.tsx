@@ -12,6 +12,18 @@ function formatBytes(n: number): string {
   return `${(n / 1024 / 1024).toFixed(1)} МБ`;
 }
 
+// Mirror the server limits so we can reject before a wasted round-trip.
+const MAX_BYTES = 9 * 1024 * 1024;
+const ALLOWED_MIME = /^(image|video|audio|application|text)\//;
+const DANGEROUS_MIME = /(text\/html|xhtml|\bsvg\b|svg\+xml|javascript|x-msdownload|x-msdos-program)/i;
+function clientReject(file: File): string | null {
+  if (file.size === 0) return `${file.name}: пустой файл`;
+  if (file.size > MAX_BYTES) return `${file.name}: больше 9 МБ`;
+  const m = file.type || 'application/octet-stream';
+  if (!ALLOWED_MIME.test(m) || DANGEROUS_MIME.test(m)) return `${file.name}: тип не разрешён`;
+  return null;
+}
+
 /**
  * Article attachments (TEAMLY «вложения»): upload (editors), list with inline
  * open + download, delete (editor or uploader). Bytes are streamed by
@@ -36,12 +48,15 @@ export function KbArticleAttachments({
   const [error, setError] = useState<string | null>(null);
 
   async function uploadFiles(files: FileList | File[]) {
+    if (busy || pending) return; // one mutation at a time
     const list = Array.from(files);
     if (list.length === 0) return;
     setBusy(true);
     setError(null);
     try {
       for (const file of list) {
+        const bad = clientReject(file);
+        if (bad) { setError(bad); break; }
         const fd = new FormData();
         fd.set('articleId', articleId);
         fd.set('file', file);
@@ -58,7 +73,10 @@ export function KbArticleAttachments({
     }
   }
 
+  const inFlight = busy || pending;
+
   function remove(a: KbAttachment) {
+    if (busy || pending) return;
     if (!confirm(`Удалить файл «${a.filename}»?`)) return;
     startTransition(async () => {
       const res = await deleteKbAttachmentAction(a.id);
@@ -97,7 +115,7 @@ export function KbArticleAttachments({
                   <button
                     type="button"
                     onClick={() => remove(a)}
-                    disabled={pending}
+                    disabled={inFlight}
                     className="shrink-0 rounded-md border border-input p-1 text-muted-foreground opacity-0 transition hover:text-red-600 group-hover:opacity-100 disabled:opacity-50"
                     aria-label="Удалить файл"
                     title="Удалить файл"
@@ -121,14 +139,15 @@ export function KbArticleAttachments({
           }`}
         >
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-          <button type="button" onClick={() => inputRef.current?.click()} disabled={busy} className="font-medium text-foreground hover:underline disabled:opacity-50">
+          <button type="button" onClick={() => inputRef.current?.click()} disabled={inFlight} className="font-medium text-foreground hover:underline disabled:opacity-50">
             Загрузить файл
           </button>
-          <span>или перетащите сюда (до 25 МБ)</span>
+          <span>или перетащите сюда (до 9 МБ)</span>
           <input
             ref={inputRef}
             type="file"
             multiple
+            disabled={inFlight}
             className="hidden"
             onChange={(e) => { if (e.target.files) uploadFiles(e.target.files); }}
           />

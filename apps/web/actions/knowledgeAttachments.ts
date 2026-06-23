@@ -6,8 +6,13 @@ import { requireAuth } from '@/lib/auth';
 import { getSpaceAccessById } from '@/lib/knowledge/access';
 import { buildKbAttachmentKey, deleteObject, putObject } from '@/lib/storage/s3';
 
-const MAX_BYTES = 25 * 1024 * 1024; // 25 MB per file (mirrors task attachments)
+// Cap at 9 MB so a friendly validation fires BEFORE Next's 10 MB Server-Action
+// body limit (next.config.mjs) rejects the request with an opaque error.
+const MAX_BYTES = 9 * 1024 * 1024;
 const ALLOWED_MIME = /^(image|video|audio|application|text)\//;
+// Script-executable types are rejected at upload (defense in depth — the
+// download route also forces non-safe types to download, never inline).
+const DANGEROUS_MIME = /(text\/html|xhtml|\bsvg\b|svg\+xml|javascript|x-msdownload|x-msdos-program)/i;
 
 type ActionResult<T = unknown> =
   | { ok: true; data?: T }
@@ -33,7 +38,7 @@ export async function uploadKbAttachmentAction(
     return { ok: false, error: { code: 'VALIDATION', message: `Лимит ${Math.floor(MAX_BYTES / 1024 / 1024)} МБ` } };
   }
   const mime = file.type || 'application/octet-stream';
-  if (!ALLOWED_MIME.test(mime)) {
+  if (!ALLOWED_MIME.test(mime) || DANGEROUS_MIME.test(mime)) {
     return { ok: false, error: { code: 'VALIDATION', message: 'Тип файла не разрешён' } };
   }
 
