@@ -195,19 +195,51 @@ export async function rejectKaitenSuggestion(id: string, userId: string): Promis
   return upd.count > 0;
 }
 
-export type KaitenSyncOutcome = { ok: boolean; summary: string; result?: RunKaitenSyncResult };
+export type KaitenSyncOutcome = { ok: boolean; skipped?: boolean; summary: string; result?: RunKaitenSyncResult };
+
+const SYNC_LOCK_MS = 15 * 60 * 1000;
 
 /**
  * Run a Kaiten import for one project end-to-end and persist a last-sync summary
- * back onto the connection. Shared by the manual button and the cron (K2).
+ * back onto the connection. Shared by the manual button and the cron. A per-
+ * connection lock (a timestamp marker in config, set/cleared atomically) keeps a
+ * cron run and a manual click from importing the same board concurrently.
  */
-export async function runKaitenSyncNow(projectId: string, opts?: { signal?: AbortSignal }): Promise<KaitenSyncOutcome> {
+export async function runKaitenSyncNow(
+  projectId: string,
+  opts?: { signal?: AbortSignal; reconcileArchived?: boolean },
+): Promise<KaitenSyncOutcome> {
   const link = await getKaitenLink(projectId);
   if (!link) return { ok: false, summary: 'Kaiten не подключён к проекту' };
   const c = (link.config ?? {}) as unknown as KaitenProjectConfig;
   if (!c.tokenEnc || !c.domain || !c.boardId) return { ok: false, summary: 'Kaiten не подключён к проекту' };
 
-  const client = new KaitenClient({ domain: c.domain, apiKey: decryptToken(c.tokenEnc), signal: opts?.signal });
+  // Build the client BEFORE acquiring the lock — its ctor (domain validation,
+  // token decrypt) can throw, and we must not leak a held lock if it does.
+  let client: KaitenClient;
+  try {
+    client = new KaitenClient({ domain: c.domain, apiKey: decryptToken(c.tokenEnc), signal: opts?.signal });
+  } catch (e) {
+    return { ok: false, summary: (e instanceof Error ? e.message : String(e)).slice(0, 200) };
+  }
+
+  // Acquire the lock: set syncRunningAt (epoch ms) only if no fresh marker is
+  // present. Atomic — a second caller's UPDATE matches no row and returns 0.
+  // Epoch-ms (not a timestamp string) keeps the comparison a plain integer
+  // compare, with no locale/format/timestamptz parsing in the hot path.
+  // `->>` yields NULL for both an absent key and a JSON-null value, so it covers
+  // "no lock" without the jsonb `?` existence operator (which can collide with a
+  // driver's parameter placeholder).
+  const nowMs = Date.now();
+  const acquired = await prisma.$executeRaw`
+    UPDATE "ProjectIntegration"
+    SET config = jsonb_set(COALESCE(config, '{}'::jsonb), '{syncRunningAt}', to_jsonb(${nowMs}::bigint))
+    WHERE id = ${link.id}
+      AND (
+        config->>'syncRunningAt' IS NULL
+        OR (config->>'syncRunningAt')::bigint < ${nowMs - SYNC_LOCK_MS}
+      )`;
+  if (acquired === 0) return { ok: false, skipped: true, summary: 'Синхронизация уже выполняется' };
 
   // Write ONLY the three lastSync keys atomically via jsonb_set, so a concurrent
   // saveKaitenConnection (new token/domain/board) is never clobbered by a stale
@@ -225,16 +257,22 @@ export async function runKaitenSyncNow(projectId: string, opts?: { signal?: Abor
       WHERE id = ${link.id}`;
   };
 
+  const releaseLock = async () => {
+    await prisma.$executeRaw`
+      UPDATE "ProjectIntegration" SET config = config - 'syncRunningAt' WHERE id = ${link.id}`;
+  };
+
   try {
     const result = await runKaitenSync(
       prisma,
       client,
-      { projectId, boardId: c.boardId, matchScope: c.matchScope ?? 'project' },
+      { projectId, boardId: c.boardId, matchScope: c.matchScope ?? 'project', reconcileArchived: opts?.reconcileArchived },
       { signal: opts?.signal },
     );
     const summary =
       `Карточек: ${result.cards} (новых: ${result.created}, обновлено: ${result.updated}), ` +
       `связано дублей: ${result.autoLinked}, кандидатов: ${result.suggestions}` +
+      (result.reconciled ? `, архивных обновлено: ${result.reconciled}` : '') +
       (result.truncated ? `, достигнут лимит импорта` : '') +
       (result.errors.length ? `, ошибок: ${result.errors.length}` : '');
     const status = result.ok ? 'SUCCESS' : 'PARTIAL';
@@ -244,5 +282,40 @@ export async function runKaitenSyncNow(projectId: string, opts?: { signal?: Abor
     const msg = (e instanceof Error ? e.message : String(e)).slice(0, 300);
     await writeSummary(`Ошибка: ${msg}`, 'FAILED');
     return { ok: false, summary: msg };
+  } finally {
+    // If release fails, the 15-min stale-marker check self-heals on the next run;
+    // log it so a persistent failure is observable rather than silent.
+    await releaseLock().catch((e) => {
+      console.error(`[kaiten] failed to release sync lock for project ${projectId}:`, e);
+    });
   }
+}
+
+export type KaitenAllSyncResult = { projectId: string; ok: boolean; skipped?: boolean; summary: string };
+
+/**
+ * Run a reconciling sync for every connected project. Used by the cron — keeps
+ * the mirror fresh as the remote team adds/archives cards.
+ */
+export async function runAllKaitenSyncs(opts?: { signal?: AbortSignal }): Promise<KaitenAllSyncResult[]> {
+  const links = await prisma.projectIntegration.findMany({
+    where: { integration: { kind: 'KAITEN' } },
+    select: { projectId: true },
+  });
+  const out: KaitenAllSyncResult[] = [];
+  for (const l of links) {
+    if (opts?.signal?.aborted) break;
+    // Isolate failures: one project's error must not abort the rest of the run.
+    try {
+      const r = await runKaitenSyncNow(l.projectId, { signal: opts?.signal, reconcileArchived: true });
+      out.push({ projectId: l.projectId, ok: r.ok, skipped: r.skipped, summary: r.summary });
+    } catch (e) {
+      out.push({
+        projectId: l.projectId,
+        ok: false,
+        summary: (e instanceof Error ? e.message : String(e)).slice(0, 300),
+      });
+    }
+  }
+  return out;
 }
