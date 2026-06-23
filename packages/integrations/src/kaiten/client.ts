@@ -32,6 +32,16 @@ export type KaitenComment = {
   deleted?: boolean;
 };
 
+export type KaitenFile = {
+  id: number;
+  name: string;
+  mime_type: string | null;
+  size: number | null;
+  url: string;
+  deleted?: boolean;
+  comment_id?: number | null;
+};
+
 export type KaitenBoard = { id: number; title: string };
 
 export type KaitenClientOptions = { domain: string; apiKey: string; signal?: AbortSignal };
@@ -140,5 +150,10 @@ export class KaitenClient {
   /** All comments on a card (oldest-first as returned by Kaiten). */
   async listCardComments(cardId: number): Promise<KaitenComment[]> {
     return this.request<KaitenComment[]>(`/cards/${cardId}/comments`);
+  }
+
+  /** All files attached to a card. `url` is a public (capability) download link. */
+  async listCardFiles(cardId: number): Promise<KaitenFile[]> {
+    return this.request<KaitenFile[]>(`/cards/${cardId}/files`);
   }
 }

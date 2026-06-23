@@ -4,6 +4,7 @@ export {
   normalizeKaitenDomain,
   type KaitenCard,
   type KaitenComment,
+  type KaitenFile,
   type KaitenBoard,
   type KaitenClientOptions,
 } from './client';
