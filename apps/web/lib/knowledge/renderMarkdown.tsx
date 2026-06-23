@@ -1,5 +1,22 @@
 import type { ReactNode } from 'react';
 import { KbEmbeddedTablePlaceholder } from '@/components/domain/knowledge/KbEmbeddedTable';
+import { KbCodeBlock } from '@/components/domain/knowledge/KbCodeBlock';
+
+/** Allow only http(s) and data:image URLs for <img src>; else drop (return ''). */
+function safeImgSrc(src: string): string {
+  const v = src.trim();
+  return /^(https?:\/\/|data:image\/)/i.test(v) ? v : '';
+}
+
+const CALLOUT_STYLE: Record<string, { cls: string; icon: string }> = {
+  info: { cls: 'border-blue-400 bg-blue-50 dark:bg-blue-950/30', icon: 'ℹ️' },
+  note: { cls: 'border-blue-400 bg-blue-50 dark:bg-blue-950/30', icon: 'ℹ️' },
+  tip: { cls: 'border-emerald-400 bg-emerald-50 dark:bg-emerald-950/30', icon: '💡' },
+  success: { cls: 'border-emerald-400 bg-emerald-50 dark:bg-emerald-950/30', icon: '✅' },
+  warning: { cls: 'border-amber-400 bg-amber-50 dark:bg-amber-950/30', icon: '⚠️' },
+  warn: { cls: 'border-amber-400 bg-amber-50 dark:bg-amber-950/30', icon: '⚠️' },
+  danger: { cls: 'border-red-400 bg-red-50 dark:bg-red-950/30', icon: '⛔' },
+};
 
 const TABLE_TOKEN_RE = /^\[\[table:([A-Za-z0-9_-]+)\]\]$/;
 
@@ -194,6 +211,7 @@ export function renderMarkdown(
   let i = 0;
 
   while (i < lines.length) {
+    const iStart = i;
     const line = at(i);
 
     // blank
@@ -214,8 +232,9 @@ export function renderMarkdown(
       continue;
     }
 
-    // fenced code block
+    // fenced code block (``` optionally followed by a language)
     if (line.startsWith('```')) {
+      const lang = line.slice(3).trim();
       const buf: string[] = [];
       i++;
       while (i < lines.length && !at(i).startsWith('```')) {
@@ -223,11 +242,63 @@ export function renderMarkdown(
         i++;
       }
       i++; // closing fence
+      blocks.push(<KbCodeBlock key={k()} code={buf.join('\n')} lang={lang || undefined} />);
+      continue;
+    }
+
+    // directive block: :::info | :::warning | :::success | :::tip | :::details Заголовок
+    const directive = /^:::(\w+)(?:\s+(.*))?$/.exec(line.trim());
+    if (directive && directive[1]) {
+      const kind = directive[1].toLowerCase();
+      const title = (directive[2] ?? '').trim();
+      const buf: string[] = [];
+      i++;
+      while (i < lines.length && at(i).trim() !== ':::') {
+        buf.push(at(i));
+        i++;
+      }
+      i++; // closing :::
+      const inner = renderMarkdown(buf.join('\n'), options);
+      if (kind === 'details' || kind === 'toggle' || kind === 'spoiler') {
+        blocks.push(
+          <details key={k()} className="my-3 rounded-md border border-neutral-200 px-3 py-2 dark:border-neutral-800">
+            <summary className="cursor-pointer text-sm font-medium">{title || 'Подробнее'}</summary>
+            <div className="mt-2">{inner}</div>
+          </details>,
+        );
+      } else {
+        const style = CALLOUT_STYLE[kind] ?? CALLOUT_STYLE.info!;
+        blocks.push(
+          <div key={k()} className={`my-3 rounded-md border-l-4 p-3 text-sm ${style.cls}`}>
+            <div className="flex items-start gap-2">
+              <span className="shrink-0">{style.icon}</span>
+              <div className="min-w-0 flex-1">
+                {title ? <p className="mb-1 font-semibold">{title}</p> : null}
+                {inner}
+              </div>
+            </div>
+          </div>,
+        );
+      }
+      continue;
+    }
+
+    // image block on its own line: ![alt](url). Always advances i — when the src
+    // is rejected by safeImgSrc we still consume the line (render the alt text),
+    // never falling through, so the parser can't stall.
+    const img = /^!\[([^\]]*)\]\(([^)\s]+)\)$/.exec(line.trim());
+    if (img && img[2]) {
+      const alt = img[1] ?? '';
+      const src = safeImgSrc(img[2]);
       blocks.push(
-        <pre key={k()} className="my-3 overflow-x-auto rounded-md bg-muted p-3 text-[0.85em]">
-          <code className="font-mono">{buf.join('\n')}</code>
-        </pre>,
+        src ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img key={k()} src={src} alt={alt} className="my-3 max-w-full rounded-md border border-neutral-200 dark:border-neutral-800" />
+        ) : (
+          <p key={k()} className="my-2 text-sm text-muted-foreground">{alt || 'изображение'}</p>
+        ),
       );
+      i++;
       continue;
     }
 
@@ -349,16 +420,36 @@ export function renderMarkdown(
       !HEADING_RE.test(at(i)) &&
       !HR_RE.test(at(i)) &&
       !LIST_RE.test(at(i)) &&
+      !at(i).trim().startsWith(':::') &&
+      !TABLE_TOKEN_RE.test(at(i).trim()) &&
+      !/^!\[[^\]]*\]\([^)\s]+\)$/.test(at(i).trim()) &&
       !(at(i).includes('|') && i + 1 < lines.length && isTableSeparator(at(i + 1)))
     ) {
       buf.push(at(i));
       i++;
+    }
+    // Forward-progress guard: a line that some stop-predicate flagged but no
+    // block branch consumed (e.g. a stray ':::', or an image with a rejected
+    // src) leaves buf empty — render it as a literal line and advance so the
+    // outer loop can never spin on the same index (was a hard browser hang).
+    if (buf.length === 0) {
+      blocks.push(
+        <p key={k()} className="my-2 leading-relaxed">
+          {renderInline(at(i))}
+        </p>,
+      );
+      i++;
+      continue;
     }
     blocks.push(
       <p key={k()} className="my-2 leading-relaxed">
         {renderInline(buf.join('\n'))}
       </p>,
     );
+
+    // Absolute backstop: no branch should leave i unchanged, but if one ever
+    // does, force progress rather than hang the render thread.
+    if (i === iStart) i++;
   }
 
   return <>{blocks}</>;

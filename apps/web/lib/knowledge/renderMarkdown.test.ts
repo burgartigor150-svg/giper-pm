@@ -102,6 +102,56 @@ describe('renderMarkdown', () => {
   });
 });
 
+describe('blocks (callout / toggle / image / code)', () => {
+  test('renders a fenced code block with language label + copy', () => {
+    const out = html('```js\nconst x = 1;\n```');
+    expect(out).toContain('const x = 1;');
+    expect(out.toLowerCase()).toContain('js');
+    expect(out).toContain('Копировать');
+  });
+
+  test('renders an info callout with title + body', () => {
+    const out = html(':::info Важно\nтекст инфоблока\n:::');
+    expect(out).toContain('Важно');
+    expect(out).toContain('текст инфоблока');
+  });
+
+  test('renders a details/toggle block', () => {
+    const out = html(':::details Подробнее\nскрытое\n:::');
+    expect(out).toContain('<details');
+    expect(out).toContain('<summary');
+    expect(out).toContain('Подробнее');
+    expect(out).toContain('скрытое');
+  });
+
+  test('renders an image block; drops unsafe src', () => {
+    const ok = html('![котик](https://example.com/cat.png)');
+    expect(ok).toContain('<img');
+    expect(ok).toContain('src="https://example.com/cat.png"');
+    expect(ok).toContain('alt="котик"');
+    const bad = html('![x](javascript:alert(1))');
+    expect(bad).not.toContain('<img');
+  });
+});
+
+describe('parser never hangs (forward-progress guard)', () => {
+  // A real infinite loop would blow the per-test timeout → these double as
+  // hang detectors for the stray-:::/rejected-image regressions.
+  test('stray or malformed ::: lines render without hanging', () => {
+    expect(() => html(':::')).not.toThrow();
+    expect(html('::: note\nтекст')).toContain('текст');
+    expect(html(':::!\nx')).toContain('x');
+    expect(html('before\n:::\nafter')).toContain('after');
+  });
+
+  test('image lines with rejected/relative src render (as alt) without hanging', () => {
+    expect(html('![подпись](/uploads/x.png)')).toContain('подпись');
+    expect(html('![y](ftp://h/f.png)')).not.toContain('<img');
+    expect(html('![z](javascript:alert(1))')).not.toContain('<img');
+    expect(html('text\n![a](/rel.png)\nmore')).toContain('more');
+  });
+});
+
 describe('table embeds', () => {
   test('extractTableIds finds [[table:ID]] tokens, dedups, skips fences', () => {
     expect(extractTableIds('text\n[[table:abc123]]\nmore\n[[table:abc123]]')).toEqual(['abc123']);
