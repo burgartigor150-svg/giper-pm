@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { ChevronRight } from 'lucide-react';
 import { requireAuth } from '@/lib/auth';
 import { getTable } from '@/lib/knowledge/getTables';
+import { getSpaceAccessById } from '@/lib/knowledge/access';
 import { KbTableHeader } from '@/components/domain/knowledge/KbTableHeader';
 import { KbTableGrid } from '@/components/domain/knowledge/KbTableGrid';
 
@@ -16,7 +17,10 @@ export default async function KnowledgeTablePage({
   const table = await getTable(id);
   if (!table) notFound();
 
-  const canEdit = me.role !== 'VIEWER';
+  const access = await getSpaceAccessById(me, table.spaceId);
+  if (!access.canView) notFound();
+
+  const canEdit = access.canEdit;
 
   return (
     <div className="flex flex-col gap-5">

@@ -3,18 +3,44 @@
 import { revalidatePath } from 'next/cache';
 import { prisma, Prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
+import { getSpaceAccessById } from '@/lib/knowledge/access';
 
 type ActionResult<T = unknown> =
   | { ok: true; data?: T }
   | { ok: false; error: { code: string; message: string } };
 
-// KB is org-wide. v1 access model:
-//   • read     — any authenticated user (enforced at the page).
-//   • articles — any non-VIEWER may create/edit/move/delete.
-//   • spaces   — ADMIN/PM only (structural).
-// Per-space roles arrive in a later slice.
+// Creating brand-new spaces + managing templates stays a global ADMIN/PM action.
+// Read / edit / per-space management are resolved per space (see lib/knowledge/access).
 const canManageSpaces = (role: string) => role === 'ADMIN' || role === 'PM';
-const canEditArticles = (role: string) => role !== 'VIEWER';
+
+const DENY: ActionResult<never> = {
+  ok: false,
+  error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' },
+};
+const NOT_FOUND: ActionResult<never> = {
+  ok: false,
+  error: { code: 'NOT_FOUND', message: 'Пространство не найдено' },
+};
+
+/** Returns a deny/not-found ActionResult if the user can't EDIT content in the space, else null. */
+async function spaceEditGuard(
+  me: { id: string; role: string },
+  spaceId: string,
+): Promise<ActionResult<never> | null> {
+  const acc = await getSpaceAccessById(me, spaceId);
+  if (!acc.exists) return NOT_FOUND;
+  return acc.canEdit ? null : DENY;
+}
+
+/** Returns a deny/not-found ActionResult if the user can't MANAGE the space, else null. */
+async function spaceManageGuard(
+  me: { id: string; role: string },
+  spaceId: string,
+): Promise<ActionResult<never> | null> {
+  const acc = await getSpaceAccessById(me, spaceId);
+  if (!acc.exists) return NOT_FOUND;
+  return acc.canManage ? null : DENY;
+}
 
 async function nextOrder(where: { spaceId: string; parentId: string | null }): Promise<number> {
   const max = await prisma.knowledgeArticle.aggregate({ where, _max: { order: true } });
@@ -46,9 +72,8 @@ export async function updateSpaceAction(
   patch: { name?: string; icon?: string | null; color?: string | null; description?: string | null },
 ): Promise<ActionResult> {
   const me = await requireAuth();
-  if (!canManageSpaces(me.role)) {
-    return { ok: false, error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Только ADMIN/PM' } };
-  }
+  const guard = await spaceManageGuard(me, id);
+  if (guard) return guard;
   await prisma.knowledgeSpace.update({
     where: { id },
     data: {
@@ -64,9 +89,8 @@ export async function updateSpaceAction(
 
 export async function deleteSpaceAction(id: string): Promise<ActionResult> {
   const me = await requireAuth();
-  if (!canManageSpaces(me.role)) {
-    return { ok: false, error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Только ADMIN/PM' } };
-  }
+  const guard = await spaceManageGuard(me, id);
+  if (guard) return guard;
   await prisma.knowledgeSpace.delete({ where: { id } });
   revalidatePath('/knowledge');
   return { ok: true };
@@ -80,11 +104,8 @@ export async function createArticleAction(
   title?: string,
 ): Promise<ActionResult<{ id: string }>> {
   const me = await requireAuth();
-  if (!canEditArticles(me.role)) {
-    return { ok: false, error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' } };
-  }
-  const space = await prisma.knowledgeSpace.findUnique({ where: { id: spaceId }, select: { id: true } });
-  if (!space) return { ok: false, error: { code: 'NOT_FOUND', message: 'Пространство не найдено' } };
+  const guard = await spaceEditGuard(me, spaceId);
+  if (guard) return guard;
   const order = await nextOrder({ spaceId, parentId: parentId ?? null });
   const article = await prisma.knowledgeArticle.create({
     data: {
@@ -106,9 +127,10 @@ export async function updateArticleAction(
   patch: { title?: string; content?: string; icon?: string | null },
 ): Promise<ActionResult> {
   const me = await requireAuth();
-  if (!canEditArticles(me.role)) {
-    return { ok: false, error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' } };
-  }
+  const article = await prisma.knowledgeArticle.findUnique({ where: { id }, select: { spaceId: true } });
+  if (!article) return { ok: false, error: { code: 'NOT_FOUND', message: 'Статья не найдена' } };
+  const guard = await spaceEditGuard(me, article.spaceId);
+  if (guard) return guard;
   await prisma.knowledgeArticle.update({
     where: { id },
     data: {
@@ -129,9 +151,10 @@ export async function moveArticleAction(
   order: number,
 ): Promise<ActionResult> {
   const me = await requireAuth();
-  if (!canEditArticles(me.role)) {
-    return { ok: false, error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' } };
-  }
+  const article = await prisma.knowledgeArticle.findUnique({ where: { id }, select: { spaceId: true } });
+  if (!article) return { ok: false, error: { code: 'NOT_FOUND', message: 'Статья не найдена' } };
+  const guard = await spaceEditGuard(me, article.spaceId);
+  if (guard) return guard;
   if (parentId === id) {
     return { ok: false, error: { code: 'VALIDATION', message: 'Нельзя вложить в саму себя' } };
   }
@@ -157,9 +180,10 @@ export async function moveArticleAction(
 
 export async function deleteArticleAction(id: string): Promise<ActionResult> {
   const me = await requireAuth();
-  if (!canEditArticles(me.role)) {
-    return { ok: false, error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' } };
-  }
+  const article = await prisma.knowledgeArticle.findUnique({ where: { id }, select: { spaceId: true } });
+  if (!article) return { ok: false, error: { code: 'NOT_FOUND', message: 'Статья не найдена' } };
+  const guard = await spaceEditGuard(me, article.spaceId);
+  if (guard) return guard;
   await prisma.knowledgeArticle.delete({ where: { id } });
   revalidatePath('/knowledge');
   return { ok: true };
@@ -171,9 +195,10 @@ export async function setArticleStatusAction(
   status: 'DRAFT' | 'PUBLISHED',
 ): Promise<ActionResult> {
   const me = await requireAuth();
-  if (!canEditArticles(me.role)) {
-    return { ok: false, error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' } };
-  }
+  const article = await prisma.knowledgeArticle.findUnique({ where: { id }, select: { spaceId: true } });
+  if (!article) return { ok: false, error: { code: 'NOT_FOUND', message: 'Статья не найдена' } };
+  const guard = await spaceEditGuard(me, article.spaceId);
+  if (guard) return guard;
   await prisma.knowledgeArticle.update({ where: { id }, data: { status, updatedById: me.id } });
   revalidatePath('/knowledge');
   return { ok: true };
@@ -309,17 +334,12 @@ export async function createArticleFromTemplateAction(
   templateId: string,
 ): Promise<ActionResult<{ id: string }>> {
   const me = await requireAuth();
-  if (!canEditArticles(me.role)) {
-    return { ok: false, error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' } };
-  }
-  const [space, tpl] = await Promise.all([
-    prisma.knowledgeSpace.findUnique({ where: { id: spaceId }, select: { id: true } }),
-    prisma.knowledgeTemplate.findUnique({
-      where: { id: templateId },
-      select: { name: true, content: true, icon: true, scope: true, spaceId: true },
-    }),
-  ]);
-  if (!space) return { ok: false, error: { code: 'NOT_FOUND', message: 'Пространство не найдено' } };
+  const guard = await spaceEditGuard(me, spaceId);
+  if (guard) return guard;
+  const tpl = await prisma.knowledgeTemplate.findUnique({
+    where: { id: templateId },
+    select: { name: true, content: true, icon: true, scope: true, spaceId: true },
+  });
   if (!tpl) return { ok: false, error: { code: 'NOT_FOUND', message: 'Шаблон не найден' } };
   // A space-scoped template can only be used inside its own space.
   if (tpl.scope === 'SPACE' && tpl.spaceId !== spaceId) {
@@ -341,4 +361,72 @@ export async function createArticleFromTemplateAction(
   });
   revalidatePath('/knowledge');
   return { ok: true, data: { id: article.id } };
+}
+
+// ---- Space access (visibility + members) ----------------------------------
+// All require MANAGE on the space (global ADMIN/PM, or a MANAGER member).
+
+export async function setSpaceVisibilityAction(
+  spaceId: string,
+  visibility: 'PUBLIC' | 'PRIVATE',
+): Promise<ActionResult> {
+  const me = await requireAuth();
+  const guard = await spaceManageGuard(me, spaceId);
+  if (guard) return guard;
+  if (visibility !== 'PUBLIC' && visibility !== 'PRIVATE') {
+    return { ok: false, error: { code: 'VALIDATION', message: 'Неверная видимость' } };
+  }
+  await prisma.knowledgeSpace.update({ where: { id: spaceId }, data: { visibility } });
+  revalidatePath('/knowledge');
+  revalidatePath(`/knowledge/space/${spaceId}`);
+  return { ok: true };
+}
+
+export async function addSpaceMemberAction(
+  spaceId: string,
+  userId: string,
+  role: 'EDITOR' | 'MANAGER' = 'EDITOR',
+): Promise<ActionResult> {
+  const me = await requireAuth();
+  const guard = await spaceManageGuard(me, spaceId);
+  if (guard) return guard;
+  const safeRole = role === 'MANAGER' ? 'MANAGER' : 'EDITOR';
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true } });
+  if (!user) return { ok: false, error: { code: 'NOT_FOUND', message: 'Пользователь не найден' } };
+  // Idempotent: re-adding updates the role instead of throwing on the unique key.
+  await prisma.knowledgeSpaceMember.upsert({
+    where: { spaceId_userId: { spaceId, userId } },
+    update: { role: safeRole },
+    create: { spaceId, userId, role: safeRole },
+  });
+  revalidatePath(`/knowledge/space/${spaceId}`);
+  revalidatePath('/knowledge');
+  return { ok: true };
+}
+
+export async function updateSpaceMemberRoleAction(
+  spaceId: string,
+  userId: string,
+  role: 'EDITOR' | 'MANAGER',
+): Promise<ActionResult> {
+  const me = await requireAuth();
+  const guard = await spaceManageGuard(me, spaceId);
+  if (guard) return guard;
+  const safeRole = role === 'MANAGER' ? 'MANAGER' : 'EDITOR';
+  await prisma.knowledgeSpaceMember.updateMany({ where: { spaceId, userId }, data: { role: safeRole } });
+  revalidatePath(`/knowledge/space/${spaceId}`);
+  return { ok: true };
+}
+
+export async function removeSpaceMemberAction(
+  spaceId: string,
+  userId: string,
+): Promise<ActionResult> {
+  const me = await requireAuth();
+  const guard = await spaceManageGuard(me, spaceId);
+  if (guard) return guard;
+  await prisma.knowledgeSpaceMember.deleteMany({ where: { spaceId, userId } });
+  revalidatePath(`/knowledge/space/${spaceId}`);
+  revalidatePath('/knowledge');
+  return { ok: true };
 }

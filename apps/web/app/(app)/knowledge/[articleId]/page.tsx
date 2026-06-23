@@ -7,6 +7,7 @@ import {
   getArticleBreadcrumbs,
   isArticleFavorite,
 } from '@/lib/knowledge/getKnowledge';
+import { getSpaceAccessById } from '@/lib/knowledge/access';
 import { extractHeadings } from '@/lib/knowledge/renderMarkdown';
 import { KbArticleEditor } from '@/components/domain/knowledge/KbArticleEditor';
 import { KbToc } from '@/components/domain/knowledge/KbToc';
@@ -21,11 +22,14 @@ export default async function KnowledgeArticlePage({
   const article = await getArticle(articleId);
   if (!article) notFound();
 
+  const access = await getSpaceAccessById(me, article.spaceId);
+  if (!access.canView) notFound();
+
   const [crumbs, favorite] = await Promise.all([
     getArticleBreadcrumbs(articleId),
     isArticleFavorite(me.id, articleId),
   ]);
-  const canEdit = me.role !== 'VIEWER';
+  const canEdit = access.canEdit;
   const headings = extractHeadings(article.content);
 
   return (

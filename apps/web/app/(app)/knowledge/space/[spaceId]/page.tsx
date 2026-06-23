@@ -7,8 +7,11 @@ import {
   getSpaceArticles,
   isSpaceFavorite,
   listTemplatesForSpace,
+  getSpaceMembers,
 } from '@/lib/knowledge/getKnowledge';
 import { listSpaceTables } from '@/lib/knowledge/getTables';
+import { getSpaceAccessById } from '@/lib/knowledge/access';
+import { listUsers } from '@/lib/users/listUsers';
 import { KbSpaceHeader } from '@/components/domain/knowledge/KbSpaceHeader';
 import { KbSpaceTables } from '@/components/domain/knowledge/KbSpaceTables';
 
@@ -22,15 +25,21 @@ export default async function KnowledgeSpacePage({
   const space = await getSpace(spaceId);
   if (!space) notFound();
 
+  const access = await getSpaceAccessById(me, spaceId);
+  if (!access.canView) notFound();
+  const canManage = access.canManage;
+  const canEdit = access.canEdit;
+
   const [articles, favorite, templates, tables] = await Promise.all([
     getSpaceArticles(spaceId),
     isSpaceFavorite(me.id, spaceId),
     listTemplatesForSpace(spaceId),
     listSpaceTables(spaceId),
   ]);
-
-  const canManage = me.role === 'ADMIN' || me.role === 'PM';
-  const canEdit = me.role !== 'VIEWER';
+  // Member management data is only needed (and only exposed) to managers.
+  const [members, allUsers] = canManage
+    ? await Promise.all([getSpaceMembers(spaceId), listUsers()])
+    : [[], []];
   const topLevel = articles.filter((a) => a.parentId === null);
   // child count per parent, for "N подстатей" hints on the list
   const childCount = new Map<string, number>();
@@ -49,6 +58,9 @@ export default async function KnowledgeSpacePage({
         articleCount={space._count.articles}
         isFavorite={favorite}
         templates={templates}
+        visibility={space.visibility}
+        members={members}
+        allUsers={allUsers.map((u) => ({ id: u.id, name: u.name, email: u.email }))}
         canManage={canManage}
         canEdit={canEdit}
       />

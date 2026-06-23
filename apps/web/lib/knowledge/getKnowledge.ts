@@ -1,9 +1,10 @@
 import { prisma } from '@giper/db';
+import { type KbSessionUser, viewableSpaceWhere } from './access';
 
-/** All non-archived knowledge spaces, ordered, with article counts. */
-export async function listKnowledgeSpaces() {
+/** Non-archived spaces the user may view, ordered, with article counts. */
+export async function listKnowledgeSpaces(user: KbSessionUser) {
   return prisma.knowledgeSpace.findMany({
-    where: { archivedAt: null },
+    where: { archivedAt: null, ...viewableSpaceWhere(user) },
     orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
     select: {
       id: true,
@@ -11,6 +12,7 @@ export async function listKnowledgeSpaces() {
       icon: true,
       color: true,
       description: true,
+      visibility: true,
       _count: { select: { articles: true } },
     },
   });
@@ -44,10 +46,34 @@ export async function getSpace(id: string) {
       description: true,
       icon: true,
       color: true,
+      visibility: true,
       archivedAt: true,
       _count: { select: { articles: true } },
     },
   });
+}
+
+/** Members of a space joined with user display info (for the settings panel). */
+export async function getSpaceMembers(spaceId: string) {
+  const members = await prisma.knowledgeSpaceMember.findMany({
+    where: { spaceId },
+    orderBy: { createdAt: 'asc' },
+    select: { id: true, userId: true, role: true },
+  });
+  if (members.length === 0) return [];
+  const users = await prisma.user.findMany({
+    where: { id: { in: members.map((m) => m.userId) } },
+    select: { id: true, name: true, email: true, image: true },
+  });
+  const byId = new Map(users.map((u) => [u.id, u]));
+  return members.map((m) => ({
+    id: m.id,
+    userId: m.userId,
+    role: m.role as 'EDITOR' | 'MANAGER',
+    name: byId.get(m.userId)?.name ?? null,
+    email: byId.get(m.userId)?.email ?? null,
+    image: byId.get(m.userId)?.image ?? null,
+  }));
 }
 
 export async function isSpaceFavorite(userId: string, spaceId: string): Promise<boolean> {
@@ -64,9 +90,9 @@ export type KbSidebarNode = KbTreeNode & { spaceId: string };
  * Flat list of every non-archived space's articles (with spaceId) — feeds the
  * persistent KB sidebar tree in one query instead of N per-space queries.
  */
-export async function getAllArticlesForSidebar(): Promise<KbSidebarNode[]> {
+export async function getAllArticlesForSidebar(user: KbSessionUser): Promise<KbSidebarNode[]> {
   return prisma.knowledgeArticle.findMany({
-    where: { space: { archivedAt: null } },
+    where: { space: { archivedAt: null, ...viewableSpaceWhere(user) } },
     orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
     select: { id: true, title: true, icon: true, parentId: true, order: true, status: true, spaceId: true },
   });
@@ -178,13 +204,15 @@ export async function getTemplate(id: string) {
 }
 
 /** Full-text-ish search across article titles + bodies. */
-export async function searchKnowledge(q: string, limit = 20) {
+export async function searchKnowledge(q: string, user: KbSessionUser, limit = 20) {
   const term = q.trim();
   if (term.length < 2) return [];
   return prisma.knowledgeArticle.findMany({
     where: {
       // Drafts are hidden from search (TEAMLY behaviour); only published.
       status: 'PUBLISHED',
+      // Only articles in spaces the user may view.
+      space: { archivedAt: null, ...viewableSpaceWhere(user) },
       OR: [
         { title: { contains: term, mode: 'insensitive' } },
         { content: { contains: term, mode: 'insensitive' } },

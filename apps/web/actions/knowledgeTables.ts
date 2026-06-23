@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
+import { getSpaceAccessById } from '@/lib/knowledge/access';
 
 type ActionResult<T = unknown> =
   | { ok: true; data?: T }
@@ -11,11 +12,40 @@ type ActionResult<T = unknown> =
 type ColumnType = 'TEXT' | 'NUMBER' | 'DATE' | 'CHECKBOX' | 'SELECT' | 'URL';
 const COLUMN_TYPES: ColumnType[] = ['TEXT', 'NUMBER', 'DATE', 'CHECKBOX', 'SELECT', 'URL'];
 
-// Smart tables are editable content → any non-VIEWER, like articles.
-const canEdit = (role: string) => role !== 'VIEWER';
-
 function deny(): ActionResult<never> {
   return { ok: false, error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' } };
+}
+function notFound(): ActionResult<never> {
+  return { ok: false, error: { code: 'NOT_FOUND', message: 'Не найдено' } };
+}
+
+// Smart-table edits require EDIT rights on the table's space (per-space access).
+async function editGuard(
+  me: { id: string; role: string },
+  spaceId: string,
+): Promise<ActionResult<never> | null> {
+  const acc = await getSpaceAccessById(me, spaceId);
+  if (!acc.exists) return notFound();
+  return acc.canEdit ? null : deny();
+}
+
+const spaceIdOfTable = (tableId: string) =>
+  prisma.knowledgeTable.findUnique({ where: { id: tableId }, select: { spaceId: true } });
+
+async function spaceIdOfColumn(columnId: string): Promise<{ spaceId: string } | null> {
+  const c = await prisma.knowledgeTableColumn.findUnique({
+    where: { id: columnId },
+    select: { table: { select: { spaceId: true } } },
+  });
+  return c ? { spaceId: c.table.spaceId } : null;
+}
+
+async function spaceIdOfRow(rowId: string): Promise<{ spaceId: string } | null> {
+  const r = await prisma.knowledgeTableRow.findUnique({
+    where: { id: rowId },
+    select: { table: { select: { spaceId: true } } },
+  });
+  return r ? { spaceId: r.table.spaceId } : null;
 }
 
 async function nextOrder(model: 'column' | 'row', tableId: string): Promise<number> {
@@ -33,9 +63,8 @@ export async function createTableAction(
   name?: string,
 ): Promise<ActionResult<{ id: string }>> {
   const me = await requireAuth();
-  if (!canEdit(me.role)) return deny();
-  const space = await prisma.knowledgeSpace.findUnique({ where: { id: spaceId }, select: { id: true } });
-  if (!space) return { ok: false, error: { code: 'NOT_FOUND', message: 'Пространство не найдено' } };
+  const guard = await editGuard(me, spaceId);
+  if (guard) return guard;
   const max = await prisma.knowledgeTable.aggregate({ where: { spaceId }, _max: { order: true } });
   const table = await prisma.knowledgeTable.create({
     data: {
@@ -54,7 +83,10 @@ export async function createTableAction(
 
 export async function renameTableAction(id: string, name: string): Promise<ActionResult> {
   const me = await requireAuth();
-  if (!canEdit(me.role)) return deny();
+  const t = await spaceIdOfTable(id);
+  if (!t) return notFound();
+  const guard = await editGuard(me, t.spaceId);
+  if (guard) return guard;
   await prisma.knowledgeTable.update({ where: { id }, data: { name: name.trim() || 'Новая таблица' } });
   revalidatePath(`/knowledge/table/${id}`);
   return { ok: true };
@@ -62,9 +94,10 @@ export async function renameTableAction(id: string, name: string): Promise<Actio
 
 export async function deleteTableAction(id: string): Promise<ActionResult<{ spaceId: string }>> {
   const me = await requireAuth();
-  if (!canEdit(me.role)) return deny();
-  const t = await prisma.knowledgeTable.findUnique({ where: { id }, select: { spaceId: true } });
-  if (!t) return { ok: false, error: { code: 'NOT_FOUND', message: 'Таблица не найдена' } };
+  const t = await spaceIdOfTable(id);
+  if (!t) return notFound();
+  const guard = await editGuard(me, t.spaceId);
+  if (guard) return guard;
   await prisma.knowledgeTable.delete({ where: { id } });
   revalidatePath('/knowledge');
   return { ok: true, data: { spaceId: t.spaceId } };
@@ -79,7 +112,10 @@ export async function addColumnAction(
   options?: string[],
 ): Promise<ActionResult<{ id: string }>> {
   const me = await requireAuth();
-  if (!canEdit(me.role)) return deny();
+  const t = await spaceIdOfTable(tableId);
+  if (!t) return notFound();
+  const guard = await editGuard(me, t.spaceId);
+  if (guard) return guard;
   if (!COLUMN_TYPES.includes(type)) {
     return { ok: false, error: { code: 'VALIDATION', message: 'Неизвестный тип столбца' } };
   }
@@ -103,7 +139,10 @@ export async function updateColumnAction(
   patch: { name?: string; options?: string[] },
 ): Promise<ActionResult> {
   const me = await requireAuth();
-  if (!canEdit(me.role)) return deny();
+  const owner = await spaceIdOfColumn(id);
+  if (!owner) return notFound();
+  const guard = await editGuard(me, owner.spaceId);
+  if (guard) return guard;
   const col = await prisma.knowledgeTableColumn.update({
     where: { id },
     data: {
@@ -118,7 +157,10 @@ export async function updateColumnAction(
 
 export async function deleteColumnAction(id: string): Promise<ActionResult> {
   const me = await requireAuth();
-  if (!canEdit(me.role)) return deny();
+  const owner = await spaceIdOfColumn(id);
+  if (!owner) return notFound();
+  const guard = await editGuard(me, owner.spaceId);
+  if (guard) return guard;
   const col = await prisma.knowledgeTableColumn.delete({ where: { id }, select: { tableId: true } });
   revalidatePath(`/knowledge/table/${col.tableId}`);
   return { ok: true };
@@ -128,7 +170,10 @@ export async function deleteColumnAction(id: string): Promise<ActionResult> {
 
 export async function addRowAction(tableId: string): Promise<ActionResult<{ id: string }>> {
   const me = await requireAuth();
-  if (!canEdit(me.role)) return deny();
+  const t = await spaceIdOfTable(tableId);
+  if (!t) return notFound();
+  const guard = await editGuard(me, t.spaceId);
+  if (guard) return guard;
   const order = await nextOrder('row', tableId);
   const row = await prisma.knowledgeTableRow.create({ data: { tableId, order }, select: { id: true } });
   revalidatePath(`/knowledge/table/${tableId}`);
@@ -137,7 +182,10 @@ export async function addRowAction(tableId: string): Promise<ActionResult<{ id: 
 
 export async function deleteRowAction(id: string): Promise<ActionResult> {
   const me = await requireAuth();
-  if (!canEdit(me.role)) return deny();
+  const owner = await spaceIdOfRow(id);
+  if (!owner) return notFound();
+  const guard = await editGuard(me, owner.spaceId);
+  if (guard) return guard;
   const row = await prisma.knowledgeTableRow.delete({ where: { id }, select: { tableId: true } });
   revalidatePath(`/knowledge/table/${row.tableId}`);
   return { ok: true };
@@ -153,7 +201,10 @@ export async function updateCellAction(
   value: string,
 ): Promise<ActionResult> {
   const me = await requireAuth();
-  if (!canEdit(me.role)) return deny();
+  const owner = await spaceIdOfRow(rowId);
+  if (!owner) return notFound();
+  const guard = await editGuard(me, owner.spaceId);
+  if (guard) return guard;
   await prisma.$executeRaw`
     UPDATE "KnowledgeTableRow"
     SET "values" = jsonb_set(COALESCE("values", '{}'::jsonb), ARRAY[${columnId}]::text[], to_jsonb(${value}::text), true),

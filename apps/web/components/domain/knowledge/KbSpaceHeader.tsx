@@ -1,13 +1,17 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useMemo, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Plus, Settings, Star, Trash2 } from 'lucide-react';
+import { Lock, Plus, Settings, Star, Trash2, UserPlus, X } from 'lucide-react';
 import {
   updateSpaceAction,
   deleteSpaceAction,
   createArticleAction,
   toggleFavoriteSpaceAction,
+  setSpaceVisibilityAction,
+  addSpaceMemberAction,
+  updateSpaceMemberRoleAction,
+  removeSpaceMemberAction,
 } from '@/actions/knowledge';
 import { KbEmojiPicker } from './KbEmojiPicker';
 import { KbNewFromTemplate } from './KbNewFromTemplate';
@@ -15,6 +19,10 @@ import { KbNewFromTemplate } from './KbNewFromTemplate';
 const COLORS = ['#2563eb', '#16a34a', '#db2777', '#d97706', '#7c3aed', '#0891b2', '#dc2626', '#64748b'];
 
 type SpaceTemplate = { id: string; name: string; icon: string | null; description: string | null; scope: 'ACCOUNT' | 'SPACE' };
+type Visibility = 'PUBLIC' | 'PRIVATE';
+type SpaceRole = 'EDITOR' | 'MANAGER';
+type Member = { id: string; userId: string; role: SpaceRole; name: string | null; email: string | null; image: string | null };
+type UserOption = { id: string; name: string | null; email: string };
 
 /**
  * Space page header: icon + name + description, star toggle (any user), a
@@ -30,6 +38,9 @@ export function KbSpaceHeader({
   articleCount,
   isFavorite,
   templates,
+  visibility,
+  members,
+  allUsers,
   canManage,
   canEdit,
 }: {
@@ -41,6 +52,9 @@ export function KbSpaceHeader({
   articleCount: number;
   isFavorite: boolean;
   templates: SpaceTemplate[];
+  visibility: Visibility;
+  members: Member[];
+  allUsers: UserOption[];
   canManage: boolean;
   canEdit: boolean;
 }) {
@@ -51,6 +65,44 @@ export function KbSpaceHeader({
   const [draftName, setDraftName] = useState(name);
   const [draftDesc, setDraftDesc] = useState(description ?? '');
   const [draftColor, setDraftColor] = useState(color);
+  const [newMemberId, setNewMemberId] = useState('');
+  const [newMemberRole, setNewMemberRole] = useState<SpaceRole>('EDITOR');
+
+  const memberUserIds = useMemo(() => new Set(members.map((m) => m.userId)), [members]);
+  const addableUsers = useMemo(() => allUsers.filter((u) => !memberUserIds.has(u.id)), [allUsers, memberUserIds]);
+
+  function setVisibility(next: Visibility) {
+    startTransition(async () => {
+      const res = await setSpaceVisibilityAction(spaceId, next);
+      if (res.ok) router.refresh();
+      else alert(res.error.message);
+    });
+  }
+  function addMember() {
+    if (!newMemberId) return;
+    startTransition(async () => {
+      const res = await addSpaceMemberAction(spaceId, newMemberId, newMemberRole);
+      if (res.ok) {
+        setNewMemberId('');
+        setNewMemberRole('EDITOR');
+        router.refresh();
+      } else alert(res.error.message);
+    });
+  }
+  function changeMemberRole(userId: string, role: SpaceRole) {
+    startTransition(async () => {
+      const res = await updateSpaceMemberRoleAction(spaceId, userId, role);
+      if (res.ok) router.refresh();
+      else alert(res.error.message);
+    });
+  }
+  function removeMember(userId: string) {
+    startTransition(async () => {
+      const res = await removeSpaceMemberAction(spaceId, userId);
+      if (res.ok) router.refresh();
+      else alert(res.error.message);
+    });
+  }
 
   function toggleStar() {
     const next = !favorite;
@@ -115,7 +167,14 @@ export function KbSpaceHeader({
           <span className="text-2xl">{icon ?? '📚'}</span>
         )}
         <div className="min-w-0 flex-1">
-          <h1 className="truncate text-2xl font-bold">{name}</h1>
+          <h1 className="flex items-center gap-2 truncate text-2xl font-bold">
+            {name}
+            {visibility === 'PRIVATE' ? (
+              <span className="inline-flex items-center gap-0.5 rounded bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground" title="Приватное пространство">
+                <Lock className="h-3 w-3" /> Приватное
+              </span>
+            ) : null}
+          </h1>
           {description ? <p className="mt-1 text-sm text-muted-foreground">{description}</p> : null}
           <p className="mt-1 text-xs text-muted-foreground">{articleCount} статей</p>
         </div>
@@ -195,6 +254,83 @@ export function KbSpaceHeader({
               </button>
             </div>
           </div>
+
+          {/* Access: visibility + members */}
+          <div className="flex flex-col gap-2 border-t border-neutral-200 pt-3 dark:border-neutral-800">
+            <div className="flex flex-col gap-1 text-xs font-medium text-muted-foreground">
+              Доступ
+              <div className="flex items-center gap-3 text-sm">
+                <label className="flex items-center gap-1.5">
+                  <input type="radio" checked={visibility === 'PUBLIC'} onChange={() => setVisibility('PUBLIC')} disabled={pending} />
+                  Открытое (вся компания)
+                </label>
+                <label className="flex items-center gap-1.5">
+                  <input type="radio" checked={visibility === 'PRIVATE'} onChange={() => setVisibility('PRIVATE')} disabled={pending} />
+                  Приватное (по списку)
+                </label>
+              </div>
+            </div>
+
+            {visibility === 'PRIVATE' ? (
+              <div className="flex flex-col gap-2">
+                <p className="text-xs font-medium text-muted-foreground">Участники</p>
+                {members.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">Пока только администраторы. Добавьте участников ниже.</p>
+                ) : (
+                  <ul className="flex flex-col gap-1">
+                    {members.map((m) => (
+                      <li key={m.id} className="flex items-center gap-2 text-sm">
+                        <span className="min-w-0 flex-1 truncate">{m.name ?? m.email ?? m.userId}</span>
+                        <select
+                          value={m.role}
+                          onChange={(e) => changeMemberRole(m.userId, e.target.value as SpaceRole)}
+                          disabled={pending}
+                          className="rounded border border-neutral-300 px-1 py-0.5 text-xs dark:border-neutral-700 dark:bg-neutral-900"
+                        >
+                          <option value="EDITOR">Редактор</option>
+                          <option value="MANAGER">Менеджер</option>
+                        </select>
+                        <button type="button" onClick={() => removeMember(m.userId)} disabled={pending} className="text-muted-foreground hover:text-red-600" aria-label="Убрать участника">
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <div className="flex items-center gap-2">
+                  <select
+                    value={newMemberId}
+                    onChange={(e) => setNewMemberId(e.target.value)}
+                    className="min-w-0 flex-1 rounded border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-700 dark:bg-neutral-900"
+                  >
+                    <option value="">— выберите пользователя —</option>
+                    {addableUsers.map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.name ?? u.email}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={newMemberRole}
+                    onChange={(e) => setNewMemberRole(e.target.value as SpaceRole)}
+                    className="rounded border border-neutral-300 px-1 py-1 text-sm dark:border-neutral-700 dark:bg-neutral-900"
+                  >
+                    <option value="EDITOR">Редактор</option>
+                    <option value="MANAGER">Менеджер</option>
+                  </select>
+                  <button
+                    type="button"
+                    onClick={addMember}
+                    disabled={pending || !newMemberId}
+                    className="inline-flex items-center gap-1 rounded-md border border-neutral-300 px-2 py-1 text-xs disabled:opacity-50 dark:border-neutral-700"
+                  >
+                    <UserPlus className="h-3.5 w-3.5" /> Добавить
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </div>
+
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <button
