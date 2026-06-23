@@ -3,7 +3,7 @@
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Check, Eye, History, Pencil, Plus, Star, Trash2 } from 'lucide-react';
+import { Check, Download, Eye, History, Pencil, Plus, Star, Trash2 } from 'lucide-react';
 import { renderMarkdown } from '@/lib/knowledge/renderMarkdown';
 import {
   updateArticleAction,
@@ -169,6 +169,15 @@ export function KbArticleEditor({
           >
             <History className="h-4 w-4" />
           </Link>
+
+          <a
+            href={`/api/knowledge/articles/${id}/export`}
+            className="rounded-md border border-neutral-300 p-1.5 text-muted-foreground hover:text-foreground dark:border-neutral-700"
+            aria-label="Экспорт в Word (.docx)"
+            title="Экспорт в Word (.docx)"
+          >
+            <Download className="h-4 w-4" />
+          </a>
 
           {canEdit ? (
             <>
