@@ -36,8 +36,21 @@ const LIST_RE = /^\s*([-*+]|\d+\.)\s+(.*)$/;
 const TASK_RE = /^\s*[-*+]\s+\[([ xX])\]\s+(.*)$/;
 const TABLE_TOKEN_RE = /^\[\[table:([A-Za-z0-9_-]+)\]\]$/;
 const CALLOUT_RE = /^:::\s*([A-Za-z]+)\s*(.*)$/;
+const IMAGE_LINE_RE = /^!\[([^\]]*)\]\(([^)\s]+)\)$/;
 const INLINE_RE =
   /(`[^`]+`)|(\[[^\]]+\]\([^)\s]+\))|(\*\*[^*]+\*\*)|(\*[^*\n]+\*|_[^_\n]+_)|(https?:\/\/[^\s)]+)/g;
+
+/** Allowlist link schemes (mirrors renderMarkdown.safeHref) before they reach a
+ * .docx relationship target. Returns '' for a rejected scheme. */
+function safeHref(href: string): string {
+  const v = href.trim();
+  return /^(https?:|mailto:|tel:|#|\/)/i.test(v) ? v : '';
+}
+
+/** Only http(s)/data:image are valid image srcs (mirrors renderMarkdown). */
+function isLinkableImage(src: string): boolean {
+  return /^https?:\/\//i.test(src.trim());
+}
 
 const CALLOUT_LABEL: Record<string, string> = {
   info: 'ℹ️ Информация',
@@ -72,8 +85,10 @@ function inlineRuns(text: string): (TextRun | ExternalHyperlink)[] {
     else if (link) {
       const sep = link.indexOf('](');
       const label = link.slice(1, sep);
-      const href = link.slice(sep + 2, -1);
-      out.push(new ExternalHyperlink({ children: [new TextRun({ text: label, style: 'Hyperlink' })], link: href }));
+      const href = safeHref(link.slice(sep + 2, -1));
+      // Rejected scheme (javascript:, data:, …) → emit the label as plain text.
+      if (href) out.push(new ExternalHyperlink({ children: [new TextRun({ text: label, style: 'Hyperlink' })], link: href }));
+      else push(label);
     } else if (bold) out.push(new TextRun({ text: bold.slice(2, -2), bold: true }));
     else if (em) out.push(new TextRun({ text: em.slice(1, -1), italics: true }));
     else if (url) out.push(new ExternalHyperlink({ children: [new TextRun({ text: url, style: 'Hyperlink' })], link: url }));
@@ -147,8 +162,9 @@ function calloutBlock(kind: string, lines: string[]): Table {
 
 type Block = Paragraph | Table;
 
-/** Convert article markdown + resolved embeds into a docx Document body. */
-function blocksFromMarkdown(src: string, tables: Record<string, DocxTableData>): Block[] {
+/** Convert article markdown + resolved embeds into a docx Document body.
+ * Exported for unit tests (structural assertions on the block sequence). */
+export function blocksFromMarkdown(src: string, tables: Record<string, DocxTableData>): Block[] {
   const lines = src.replace(/\r\n/g, '\n').split('\n');
   const at = (i: number) => lines[i] ?? '';
   const blocks: Block[] = [];
@@ -264,16 +280,45 @@ function blocksFromMarkdown(src: string, tables: Record<string, DocxTableData>):
       continue;
     }
 
-    // paragraph (gather until blank / next block start)
+    // image on its own line — docx can't embed without fetching bytes, so emit
+    // a labelled link (http(s)) or the alt text, mirroring the reader's fallback.
+    const img = IMAGE_LINE_RE.exec(line.trim());
+    if (img) {
+      const alt = (img[1] ?? '').trim() || 'изображение';
+      const src = img[2] ?? '';
+      if (isLinkableImage(src)) {
+        blocks.push(new Paragraph({ children: [new ExternalHyperlink({ children: [new TextRun({ text: `🖼 ${alt}`, style: 'Hyperlink' })], link: src })] }));
+      } else {
+        blocks.push(new Paragraph({ children: [new TextRun({ text: `🖼 ${alt}`, italics: true })] }));
+      }
+      i++;
+      continue;
+    }
+
+    // paragraph (gather until blank / next block start). The stopper mirrors
+    // renderMarkdown's so a table / HR / image directly after a text line opens
+    // its own block instead of being swallowed as literal text.
     const buf: string[] = [line];
     i++;
-    while (i < lines.length && at(i).trim() && !at(i).startsWith('```') && !HEADING_RE.test(at(i)) && !LIST_RE.test(at(i)) && !/^\s*>\s?/.test(at(i)) && !TABLE_TOKEN_RE.test(at(i).trim()) && !CALLOUT_RE.test(at(i).trim())) {
+    while (
+      i < lines.length &&
+      at(i).trim() &&
+      !at(i).startsWith('```') &&
+      !HEADING_RE.test(at(i)) &&
+      !LIST_RE.test(at(i)) &&
+      !/^\s*>\s?/.test(at(i)) &&
+      !HR_RE.test(at(i)) &&
+      !(at(i).includes('|') && isTableSeparator(at(i + 1))) &&
+      !TABLE_TOKEN_RE.test(at(i).trim()) &&
+      !CALLOUT_RE.test(at(i).trim()) &&
+      !IMAGE_LINE_RE.test(at(i).trim())
+    ) {
       buf.push(at(i));
       i++;
     }
     blocks.push(para(buf.join(' ')));
 
-    if (i === iStart) i++; // forward-progress backstop
+    if (i === iStart) i++; // forward-progress backstop (paragraph branch already advances i)
   }
 
   return blocks;

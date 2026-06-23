@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { articleToDocx, type DocxTableData } from './articleToDocx';
+import { Table, Paragraph } from 'docx';
+import { articleToDocx, blocksFromMarkdown, type DocxTableData } from './articleToDocx';
 import type { KbColumn, KbRow } from './getTables';
 
 const col = (over: Partial<KbColumn> & Pick<KbColumn, 'id' | 'name' | 'type'>): KbColumn => ({
@@ -77,5 +78,27 @@ describe('articleToDocx', () => {
   it('renders a missing embed as a placeholder without throwing', async () => {
     const buf = await articleToDocx({ title: 'X', content: '[[table:nope]]' }, {});
     expect(isZip(buf)).toBe(true);
+  });
+
+  it('does not swallow a table or HR that directly follows a text line', () => {
+    // table after a non-blank line (no leading blank) must open its own block
+    const tbl = blocksFromMarkdown('intro text\n| A | B |\n| - | - |\n| 1 | 2 |', {});
+    expect(tbl.some((b) => b instanceof Table)).toBe(true);
+    expect(tbl.filter((b) => b instanceof Paragraph).length).toBeGreaterThanOrEqual(1);
+
+    // HR after a text line → a separate paragraph (text + HR = 2 blocks)
+    const hr = blocksFromMarkdown('text above\n---', {});
+    expect(hr.length).toBe(2);
+  });
+
+  it('renders a sanitized/rejected hyperlink scheme and an image line without throwing', async () => {
+    const buf = await articleToDocx(
+      { title: 'L', content: '[x](javascript:alert(1))\n\n![картинка](https://e.com/a.png)' },
+      {},
+    );
+    expect(isZip(buf)).toBe(true);
+    // image line is its own block (not swallowed)
+    const blocks = blocksFromMarkdown('![картинка](https://e.com/a.png)', {});
+    expect(blocks.length).toBe(1);
   });
 });

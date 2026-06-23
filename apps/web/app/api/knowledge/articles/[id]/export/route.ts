@@ -36,25 +36,31 @@ export async function GET(_req: Request, { params }: Ctx) {
   const access = await getSpaceAccessById(me, article.spaceId);
   if (!access.canView) return new Response('Not found', { status: 404 });
 
-  // Resolve embedded tables (access-checked per space, capped) + relation labels.
-  const ids = extractTableIds(article.content).slice(0, MAX_EMBEDS);
-  const fetched = (await Promise.all(ids.map((tid) => getTable(tid)))).filter(
-    (t): t is NonNullable<typeof t> => t !== null,
-  );
-  const checks = await Promise.all(fetched.map((t) => getSpaceAccessById(me, t.spaceId)));
-  const viewable = fetched.filter((_, idx) => checks[idx]?.canView);
+  let buf: Buffer;
+  try {
+    // Resolve embedded tables (access-checked per space, capped) + relation labels.
+    const ids = extractTableIds(article.content).slice(0, MAX_EMBEDS);
+    const fetched = (await Promise.all(ids.map((tid) => getTable(tid)))).filter(
+      (t): t is NonNullable<typeof t> => t !== null,
+    );
+    const checks = await Promise.all(fetched.map((t) => getSpaceAccessById(me, t.spaceId)));
+    const viewable = fetched.filter((_, idx) => checks[idx]?.canView);
 
-  const relTargets = viewable.flatMap((t) =>
-    t.columns.filter((c) => c.type === 'RELATION' && c.relationTableId).map((c) => c.relationTableId as string),
-  );
-  const relations = relTargets.length ? await getRelatedRowLabels(relTargets) : {};
+    const relTargets = viewable.flatMap((t) =>
+      t.columns.filter((c) => c.type === 'RELATION' && c.relationTableId).map((c) => c.relationTableId as string),
+    );
+    const relations = relTargets.length ? await getRelatedRowLabels(relTargets) : {};
 
-  const tables: Record<string, DocxTableData> = {};
-  for (const t of viewable) {
-    tables[t.id] = { name: t.name, columns: t.columns, rows: t.rows, relations };
+    const tables: Record<string, DocxTableData> = {};
+    for (const t of viewable) {
+      tables[t.id] = { name: t.name, columns: t.columns, rows: t.rows, relations };
+    }
+
+    buf = await articleToDocx({ title: article.title, content: article.content }, tables);
+  } catch (e) {
+    console.error(`[kb-export] failed to build docx for article ${id}`, e);
+    return new Response('Export failed', { status: 500 });
   }
-
-  const buf = await articleToDocx({ title: article.title, content: article.content }, tables);
 
   const safe = (article.title || 'article').replace(/[^\p{L}\p{N} ._-]/gu, '').trim() || 'article';
   const headers = new Headers();
