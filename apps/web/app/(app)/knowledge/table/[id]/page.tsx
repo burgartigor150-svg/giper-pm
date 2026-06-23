@@ -5,7 +5,7 @@ import { requireAuth } from '@/lib/auth';
 import { getTable } from '@/lib/knowledge/getTables';
 import { getSpaceAccessById } from '@/lib/knowledge/access';
 import { KbTableHeader } from '@/components/domain/knowledge/KbTableHeader';
-import { KbTableGrid } from '@/components/domain/knowledge/KbTableGrid';
+import { KbTableViews } from '@/components/domain/knowledge/KbTableViews';
 
 export default async function KnowledgeTablePage({
   params,
@@ -44,7 +44,7 @@ export default async function KnowledgeTablePage({
         canEdit={canEdit}
       />
 
-      <KbTableGrid tableId={table.id} columns={table.columns} rows={table.rows} canEdit={canEdit} />
+      <KbTableViews tableId={table.id} columns={table.columns} rows={table.rows} canEdit={canEdit} />
     </div>
   );
 }
