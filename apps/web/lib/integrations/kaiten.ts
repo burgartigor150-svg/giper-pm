@@ -1,9 +1,9 @@
-import 'server-only';
 import { prisma } from '@giper/db';
 import { encryptToken, decryptToken, maskToken } from '@/lib/tgTokenCrypto';
 import {
   KaitenClient,
   runKaitenSync,
+  pushKaitenComment,
   normalizeKaitenDomain,
   type RunKaitenSyncResult,
   type KaitenMatchScope,
@@ -125,6 +125,27 @@ export async function disconnectKaiten(projectId: string): Promise<void> {
   await prisma.projectIntegration.deleteMany({
     where: { projectId, integration: { kind: 'KAITEN' } },
   });
+}
+
+/**
+ * Push a locally-authored EXTERNAL comment to Kaiten, if its task is Kaiten-linked
+ * and the project has a connection. Best-effort: a failure never blocks the local
+ * comment (mirrors the Bitrix outbound). Fan-out is by task linkage — a Bitrix
+ * task's comment goes to Bitrix (separate helper), a Kaiten task's goes here.
+ */
+export async function pushKaitenCommentBestEffort(commentId: string): Promise<void> {
+  try {
+    const comment = await prisma.comment.findUnique({
+      where: { id: commentId },
+      select: { task: { select: { projectId: true, externalSource: true } } },
+    });
+    if (!comment || comment.task.externalSource !== 'kaiten') return;
+    const client = await buildKaitenClient(comment.task.projectId);
+    if (!client) return;
+    await pushKaitenComment(prisma, client, commentId);
+  } catch (e) {
+    console.error('kaiten outbound: pushComment failed', commentId, e);
+  }
 }
 
 /** Build a KaitenClient from the stored project connection, or null if not connected. */

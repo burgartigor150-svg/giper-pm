@@ -27,6 +27,7 @@ import {
   pushBitrixStatusBestEffort,
   publishTaskToBitrix,
 } from '@/lib/integrations/bitrix24Outbound';
+import { pushKaitenCommentBestEffort } from '@/lib/integrations/kaiten';
 import {
   createNotification,
   fanoutToTaskAudience,
@@ -342,9 +343,12 @@ export async function addCommentAction(
   } catch (e) {
     return toErr(e);
   }
-  // Push EXTERNAL comments to Bitrix; INTERNAL stays local-only.
+  // Push EXTERNAL comments to the task's external source; INTERNAL stays local.
+  // Each helper gates on its own linkage, so a Bitrix task → Bitrix, a Kaiten
+  // task → Kaiten (and both fire harmlessly for the other).
   if (parsed.data.visibility === 'EXTERNAL') {
     await pushBitrixCommentBestEffort(comment.id);
+    await pushKaitenCommentBestEffort(comment.id);
   }
 
   // Notification fan-out — done after the comment is persisted so a

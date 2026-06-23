@@ -101,13 +101,19 @@ export class KaitenClient {
     this.signal = opts.signal;
   }
 
-  private async request<T>(path: string): Promise<T> {
+  private async request<T>(path: string, init?: { method?: string; body?: unknown }): Promise<T> {
+    const method = init?.method ?? 'GET';
     for (let attempt = 0; attempt < 6; attempt++) {
       const res = await fetch(`${this.base}${path}`, {
+        method,
         headers: { Authorization: `Bearer ${this.apiKey}`, 'Content-Type': 'application/json' },
+        body: init?.body !== undefined ? JSON.stringify(init.body) : undefined,
         signal: this.signal,
       });
-      if (res.status === 429 || res.status === 503) {
+      // 429 = request rejected (not processed) → safe to retry for any method.
+      // 503 is ambiguous for a non-GET write (the server may have applied it),
+      // so only retry it for idempotent GETs to avoid a duplicate POST.
+      if (res.status === 429 || (res.status === 503 && method === 'GET')) {
         // Honor Retry-After (seconds or HTTP-date) when present; else exponential backoff.
         const ra = res.headers.get('retry-after');
         const raMs = ra ? parseRetryAfter(ra) : null;
@@ -170,5 +176,10 @@ export class KaitenClient {
   /** All users in the Kaiten company (active + inactive). */
   async listUsers(): Promise<KaitenUser[]> {
     return this.request<KaitenUser[]>('/users');
+  }
+
+  /** Post a comment to a card (outbound). Authored by the API-key owner in Kaiten. */
+  async createCardComment(cardId: number, text: string): Promise<KaitenComment> {
+    return this.request<KaitenComment>(`/cards/${cardId}/comments`, { method: 'POST', body: { text } });
   }
 }
