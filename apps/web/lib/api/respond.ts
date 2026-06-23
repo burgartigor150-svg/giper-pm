@@ -16,8 +16,29 @@ export function apiFail(code: string, status: number, message?: string): NextRes
 
 export const apiUnauthorized = (): NextResponse => apiFail('unauthorized', 401);
 
-/** Map a thrown DomainError to its HTTP envelope; rethrow anything unexpected. */
+/**
+ * Map a thrown error to its HTTP envelope. DomainError → its code/status; anything
+ * unexpected → a uniform 500 (logged server-side, message NOT leaked) so every
+ * error path stays inside the { ok:false } contract instead of Next's bare 500.
+ */
 export function apiFromError(e: unknown): NextResponse {
   if (e instanceof DomainError) return apiFail(e.code, e.status, e.message);
-  throw e;
+  console.error('[kb-api] unexpected error', e);
+  return apiFail('internal', 500, 'Внутренняя ошибка');
+}
+
+/**
+ * Wrap a route handler so any thrown error becomes the uniform envelope (via
+ * apiFromError). Preserves the handler's own argument types (req + optional ctx).
+ */
+export function withApiErrors<A extends unknown[]>(
+  handler: (req: Request, ...args: A) => Promise<NextResponse> | NextResponse,
+): (req: Request, ...args: A) => Promise<NextResponse> {
+  return async (req: Request, ...args: A): Promise<NextResponse> => {
+    try {
+      return await handler(req, ...args);
+    } catch (e) {
+      return apiFromError(e);
+    }
+  };
 }

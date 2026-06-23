@@ -10,6 +10,15 @@ import { getSpaceAccessById, isGlobalKbManager, type KbSessionUser } from './acc
  * need Next cache invalidation do it themselves.
  */
 
+// Icon is a short string (emoji / few chars) — cap it so the API can't store
+// an oversized value that bypasses the title/content caps.
+const MAX_ICON = 64;
+
+function capIcon(icon: string | null | undefined): string | null | undefined {
+  if (typeof icon !== 'string') return icon;
+  return icon.slice(0, MAX_ICON);
+}
+
 async function assertEdit(user: KbSessionUser, spaceId: string): Promise<void> {
   const acc = await getSpaceAccessById(user, spaceId);
   if (!acc.exists) throw new DomainError('NOT_FOUND', 404, 'Пространство не найдено');
@@ -38,7 +47,7 @@ export async function createSpace(
   const space = await prisma.knowledgeSpace.create({
     data: {
       name,
-      icon: input.icon?.trim() || null,
+      icon: input.icon?.trim().slice(0, MAX_ICON) || null,
       order: (max._max.order ?? -1) + 1,
       createdById: user.id,
     },
@@ -121,7 +130,7 @@ export async function updateArticle(
     data: {
       ...(patch.title !== undefined ? { title: patch.title.trim() || 'Без названия' } : {}),
       ...(patch.content !== undefined ? { content: patch.content } : {}),
-      ...(patch.icon !== undefined ? { icon: patch.icon } : {}),
+      ...(patch.icon !== undefined ? { icon: capIcon(patch.icon) ?? null } : {}),
       updatedById: user.id,
     },
   });

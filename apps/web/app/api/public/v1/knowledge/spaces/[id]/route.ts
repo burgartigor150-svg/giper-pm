@@ -1,5 +1,5 @@
 import { resolveApiToken } from '@/lib/api/resolveApiToken';
-import { apiOk, apiFail, apiUnauthorized } from '@/lib/api/respond';
+import { apiOk, apiFail, apiUnauthorized, withApiErrors } from '@/lib/api/respond';
 import { getSpaceAccessById } from '@/lib/knowledge/access';
 import { getSpace, getSpaceArticles } from '@/lib/knowledge/getKnowledge';
 import { listSpaceTables } from '@/lib/knowledge/getTables';
@@ -12,7 +12,7 @@ export const dynamic = 'force-dynamic';
 
 type Ctx = { params: Promise<{ id: string }> };
 
-export async function GET(req: Request, { params }: Ctx) {
+export const GET = withApiErrors(async (req: Request, { params }: Ctx) => {
   const user = await resolveApiToken(req);
   if (!user) return apiUnauthorized();
   const { id } = await params;
@@ -55,4 +55,4 @@ export async function GET(req: Request, { params }: Ctx) {
     })),
     access: { canEdit: access.canEdit, canManage: access.canManage },
   });
-}
+});

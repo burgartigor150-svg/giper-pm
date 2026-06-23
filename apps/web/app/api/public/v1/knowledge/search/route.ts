@@ -1,5 +1,5 @@
 import { resolveApiToken } from '@/lib/api/resolveApiToken';
-import { apiOk, apiUnauthorized } from '@/lib/api/respond';
+import { apiOk, apiUnauthorized, withApiErrors } from '@/lib/api/respond';
 import { searchKnowledge } from '@/lib/knowledge/getKnowledge';
 
 /**
@@ -8,7 +8,7 @@ import { searchKnowledge } from '@/lib/knowledge/getKnowledge';
  */
 export const dynamic = 'force-dynamic';
 
-export async function GET(req: Request) {
+export const GET = withApiErrors(async (req: Request) => {
   const user = await resolveApiToken(req);
   if (!user) return apiUnauthorized();
   const q = new URL(req.url).searchParams.get('q') ?? '';
@@ -22,4 +22,4 @@ export async function GET(req: Request) {
       space: { id: a.space.id, name: a.space.name },
     })),
   });
-}
+});

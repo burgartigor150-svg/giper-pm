@@ -114,6 +114,25 @@ describe('KB REST API — spaces & articles', () => {
     expect(await prisma.knowledgeArticle.count({ where: { id: articleId } })).toBe(0);
   });
 
+  it('POST with status DRAFT creates a DRAFT article that stays out of search', async () => {
+    const admin = await makeUser({ role: 'ADMIN' });
+    const token = await mintToken(admin.id);
+    const { id: spaceId } = await createSpace(admin, { name: 'Черновики' });
+
+    const res = await postArticle(
+      req(token, { method: 'POST', body: { title: 'Скрытая', content: 'СекретУникум777', status: 'DRAFT' } }),
+      { params: P({ id: spaceId }) },
+    );
+    expect(res.status).toBe(201);
+    const { data } = await res.json();
+    const row = await prisma.knowledgeArticle.findUniqueOrThrow({ where: { id: data.id } });
+    expect(row.status).toBe('DRAFT'); // must NOT silently become PUBLISHED
+
+    const sr = await search(req(token, { url: 'http://localhost/api?q=СекретУникум777' }));
+    const srBody = await sr.json();
+    expect(srBody.data.results.length).toBe(0); // drafts are hidden from search
+  });
+
   it('enforces per-space access: VIEWER cannot create a space; non-member cannot read a PRIVATE space', async () => {
     // VIEWER token cannot create a space (ADMIN/PM only)
     const viewer = await makeUser({ role: 'VIEWER' });

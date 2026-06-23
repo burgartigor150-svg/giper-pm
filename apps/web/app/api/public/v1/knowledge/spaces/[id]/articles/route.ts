@@ -1,5 +1,6 @@
 import { resolveApiToken } from '@/lib/api/resolveApiToken';
-import { apiOk, apiFail, apiUnauthorized, apiFromError } from '@/lib/api/respond';
+import { apiOk, apiFail, apiUnauthorized, withApiErrors } from '@/lib/api/respond';
+import { rateLimit } from '@/lib/api/rateLimit';
 import { createArticle } from '@/lib/knowledge/writeService';
 import { normalizeKbMarkdown } from '@/lib/knowledge/markdownNormalize';
 
@@ -10,13 +11,16 @@ import { normalizeKbMarkdown } from '@/lib/knowledge/markdownNormalize';
  */
 export const dynamic = 'force-dynamic';
 
+const MAX_TITLE = 300;
 const MAX_CONTENT = 1_000_000;
 
 type Ctx = { params: Promise<{ id: string }> };
 
-export async function POST(req: Request, { params }: Ctx) {
+export const POST = withApiErrors(async (req: Request, { params }: Ctx) => {
   const user = await resolveApiToken(req);
   if (!user) return apiUnauthorized();
+  const rl = await rateLimit(`kb:write:${user.id}`, 60, 60);
+  if (!rl.ok) return apiFail('rate_limited', 429, `Слишком много запросов, повторите через ~${rl.retryAfter}с`);
   const { id: spaceId } = await params;
 
   let body: unknown;
@@ -26,7 +30,14 @@ export async function POST(req: Request, { params }: Ctx) {
     return apiFail('validation', 400, 'Ожидается JSON-тело');
   }
   const b = (body ?? {}) as Record<string, unknown>;
-  const title = typeof b.title === 'string' ? b.title.slice(0, 300) : undefined;
+
+  if (b.title !== undefined && typeof b.title !== 'string') {
+    return apiFail('validation', 400, 'title должен быть строкой');
+  }
+  if (typeof b.title === 'string' && b.title.length > MAX_TITLE) {
+    return apiFail('validation', 400, 'title слишком длинный (макс. 300)');
+  }
+  const title = typeof b.title === 'string' ? b.title : undefined;
   const parentId = typeof b.parentId === 'string' && b.parentId ? b.parentId : null;
   if (b.content !== undefined && typeof b.content !== 'string') {
     return apiFail('validation', 400, 'content должен быть строкой');
@@ -38,16 +49,13 @@ export async function POST(req: Request, { params }: Ctx) {
     return apiFail('validation', 400, 'status: DRAFT | PUBLISHED');
   }
 
-  try {
-    const { id } = await createArticle(user, {
-      spaceId,
-      parentId,
-      title,
-      content: typeof b.content === 'string' ? normalizeKbMarkdown(b.content) : undefined,
-      status: b.status === 'PUBLISHED' ? 'PUBLISHED' : undefined,
-    });
-    return apiOk({ id }, 201);
-  } catch (e) {
-    return apiFromError(e);
-  }
-}
+  const data = await createArticle(user, {
+    spaceId,
+    parentId,
+    title,
+    content: typeof b.content === 'string' ? normalizeKbMarkdown(b.content) : undefined,
+    // forward the validated status verbatim (DRAFT must NOT silently publish)
+    status: b.status === 'DRAFT' || b.status === 'PUBLISHED' ? b.status : undefined,
+  });
+  return apiOk(data, 201);
+});

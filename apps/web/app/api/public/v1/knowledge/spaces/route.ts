@@ -1,5 +1,6 @@
 import { resolveApiToken } from '@/lib/api/resolveApiToken';
-import { apiOk, apiFail, apiUnauthorized, apiFromError } from '@/lib/api/respond';
+import { apiOk, apiFail, apiUnauthorized, withApiErrors } from '@/lib/api/respond';
+import { rateLimit } from '@/lib/api/rateLimit';
 import { listKnowledgeSpaces } from '@/lib/knowledge/getKnowledge';
 import { createSpace } from '@/lib/knowledge/writeService';
 
@@ -10,7 +11,9 @@ import { createSpace } from '@/lib/knowledge/writeService';
  */
 export const dynamic = 'force-dynamic';
 
-export async function GET(req: Request) {
+const MAX_NAME = 300;
+
+export const GET = withApiErrors(async (req: Request) => {
   const user = await resolveApiToken(req);
   if (!user) return apiUnauthorized();
   const spaces = await listKnowledgeSpaces(user);
@@ -25,11 +28,14 @@ export async function GET(req: Request) {
       articleCount: s._count.articles,
     })),
   });
-}
+});
 
-export async function POST(req: Request) {
+export const POST = withApiErrors(async (req: Request) => {
   const user = await resolveApiToken(req);
   if (!user) return apiUnauthorized();
+  const rl = await rateLimit(`kb:write:${user.id}`, 60, 60);
+  if (!rl.ok) return apiFail('rate_limited', 429, `Слишком много запросов, повторите через ~${rl.retryAfter}с`);
+
   let body: unknown;
   try {
     body = await req.json();
@@ -40,11 +46,8 @@ export async function POST(req: Request) {
   if (typeof b.name !== 'string' || !b.name.trim()) {
     return apiFail('validation', 400, 'Поле name обязательно');
   }
+  if (b.name.length > MAX_NAME) return apiFail('validation', 400, 'name слишком длинный (макс. 300)');
   const icon = typeof b.icon === 'string' ? b.icon : undefined;
-  try {
-    const data = await createSpace(user, { name: b.name.slice(0, 300), icon });
-    return apiOk(data, 201);
-  } catch (e) {
-    return apiFromError(e);
-  }
-}
+  const data = await createSpace(user, { name: b.name, icon });
+  return apiOk(data, 201);
+});
