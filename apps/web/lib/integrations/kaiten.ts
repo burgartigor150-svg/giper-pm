@@ -1,4 +1,3 @@
-import 'server-only';
 import { prisma } from '@giper/db';
 import { encryptToken, decryptToken, maskToken } from '@/lib/tgTokenCrypto';
 import {
