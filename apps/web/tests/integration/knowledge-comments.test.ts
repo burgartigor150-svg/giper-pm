@@ -26,7 +26,7 @@ vi.mock('@/lib/auth', () => ({
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }));
 
 import { prisma } from '@giper/db';
-import { createSpaceAction, createArticleAction, setSpaceVisibilityAction } from '@/actions/knowledge';
+import { createSpaceAction, createArticleAction, setSpaceVisibilityAction, addSpaceMemberAction } from '@/actions/knowledge';
 import {
   addCommentAction,
   updateCommentAction,
@@ -92,6 +92,41 @@ describe('kb comments', () => {
     as(admin);
     expect((await deleteCommentAction(id)).ok).toBe(true);
     expect(await prisma.knowledgeComment.count({ where: { id } })).toBe(0);
+  });
+
+  it('a space-MANAGER member (not global admin) can delete another user\'s comment; a plain member cannot', async () => {
+    const { admin, spaceId, articleId } = await setup();
+    const author = await makeUser({ role: 'MEMBER' });
+    const manager = await makeUser({ role: 'MEMBER' });
+    const bystander = await makeUser({ role: 'MEMBER' });
+    as(admin);
+    await addSpaceMemberAction(spaceId, manager.id, 'MANAGER');
+
+    as(author);
+    const c = await addCommentAction(articleId, 'комментарий автора');
+    const id = c.ok ? c.data!.id : '';
+
+    // plain member (not author, not manager) is denied
+    as(bystander);
+    const denied = await deleteCommentAction(id);
+    expect(denied.ok).toBe(false);
+    if (!denied.ok) expect(denied.error.code).toBe('INSUFFICIENT_PERMISSIONS');
+
+    // space MANAGER member (non-ADMIN/PM) can delete — exercises per-space role, not the global shortcut
+    as(manager);
+    expect((await deleteCommentAction(id)).ok).toBe(true);
+    expect(await prisma.knowledgeComment.count({ where: { id } })).toBe(0);
+  });
+
+  it('rejects a reply to a reply (one-level enforced server-side)', async () => {
+    const { admin, articleId } = await setup();
+    as(admin);
+    const root = await addCommentAction(articleId, 'корень');
+    const rootId = root.ok ? root.data!.id : '';
+    const reply = await addCommentAction(articleId, 'ответ', rootId);
+    const replyId = reply.ok ? reply.data!.id : '';
+    // replying to a reply must be rejected
+    expect((await addCommentAction(articleId, 'глубже', replyId)).ok).toBe(false);
   });
 
   it('non-member cannot comment on a private space', async () => {

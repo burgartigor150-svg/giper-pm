@@ -45,10 +45,16 @@ export async function addCommentAction(
   if (!art) return notFound();
   const acc = await getSpaceAccessById(me, art.spaceId);
   if (!acc.canView) return deny();
-  // A reply must belong to the same article.
+  // A reply must belong to the same article AND be one level deep (replies to a
+  // reply are rejected server-side, matching the schema + UI contract).
   if (parentId) {
-    const parent = await prisma.knowledgeComment.findUnique({ where: { id: parentId }, select: { articleId: true } });
-    if (!parent || parent.articleId !== articleId) return { ok: false, error: { code: 'VALIDATION', message: 'Некорректный ответ' } };
+    const parent = await prisma.knowledgeComment.findUnique({
+      where: { id: parentId },
+      select: { articleId: true, parentId: true },
+    });
+    if (!parent || parent.articleId !== articleId || parent.parentId !== null) {
+      return { ok: false, error: { code: 'VALIDATION', message: 'Некорректный ответ' } };
+    }
   }
   const c = await prisma.knowledgeComment.create({
     data: { articleId, authorId: me.id, body: text, parentId: parentId ?? null },
