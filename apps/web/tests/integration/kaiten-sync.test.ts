@@ -139,6 +139,67 @@ describe('runKaitenSync', () => {
     expect(linked).not.toBeNull();
   });
 
+  it('records a medium-confidence match as a pending suggestion (no auto-link); reject suppresses re-proposal', async () => {
+    const owner = await makeUser();
+    const project = await makeProject({ ownerId: owner.id });
+    const twin = await makeTask({ projectId: project.id, creatorId: owner.id, title: 'Обновить прайс-лист поставщика' });
+    await prisma.task.update({ where: { id: twin.id }, data: { externalSource: 'bitrix24', externalId: 'B-PL' } });
+
+    const res = await runKaitenSync(
+      prisma,
+      fakeClient([[card({ id: 501, title: 'Обновить прайс-лист' })]]),
+      { projectId: project.id, boardId: 7 },
+    );
+    expect(res.autoLinked).toBe(0);
+    expect(res.suggestions).toBe(1);
+
+    const sugg = await prisma.kaitenMatchSuggestion.findMany({ where: { projectId: project.id, status: 'pending' } });
+    expect(sugg).toHaveLength(1);
+    expect(sugg[0].bitrixTaskId).toBe(twin.id);
+    expect(sugg[0].score).toBeGreaterThan(0.55);
+    expect(sugg[0].score).toBeLessThan(0.9);
+
+    const kt = await prisma.task.findFirst({
+      where: { projectId: project.id, externalSource: 'kaiten', externalId: '501' },
+      select: { id: true },
+    });
+    expect(await prisma.taskDependency.count({ where: { fromTaskId: kt!.id } })).toBe(0);
+
+    // Rejecting the pair suppresses it on the next sync.
+    await prisma.kaitenMatchSuggestion.update({ where: { id: sugg[0].id }, data: { status: 'rejected' } });
+    const res2 = await runKaitenSync(
+      prisma,
+      fakeClient([[card({ id: 501, title: 'Обновить прайс-лист' })]]),
+      { projectId: project.id, boardId: 7 },
+    );
+    expect(res2.suggestions).toBe(0);
+    expect(await prisma.kaitenMatchSuggestion.count({ where: { projectId: project.id, status: 'pending' } })).toBe(0);
+  });
+
+  it('does not propose a Bitrix task that already has a pending suggestion to a second card (cross-run)', async () => {
+    const owner = await makeUser();
+    const project = await makeProject({ ownerId: owner.id });
+    const twin = await makeTask({ projectId: project.id, creatorId: owner.id, title: 'Обновить прайс-лист поставщика' });
+    await prisma.task.update({ where: { id: twin.id }, data: { externalSource: 'bitrix24', externalId: 'B-PL2' } });
+
+    // Run 1: card 601 proposes the twin (pending).
+    const r1 = await runKaitenSync(
+      prisma,
+      fakeClient([[card({ id: 601, title: 'Обновить прайс-лист' })]]),
+      { projectId: project.id, boardId: 7 },
+    );
+    expect(r1.suggestions).toBe(1);
+
+    // Run 2: a different card with the same fuzzy title must NOT double-propose the twin.
+    const r2 = await runKaitenSync(
+      prisma,
+      fakeClient([[card({ id: 602, title: 'Обновить прайс-лист' })]]),
+      { projectId: project.id, boardId: 7 },
+    );
+    expect(r2.suggestions).toBe(0);
+    expect(await prisma.kaitenMatchSuggestion.count({ where: { bitrixTaskId: twin.id, status: 'pending' } })).toBe(1);
+  });
+
   it('does not let two cards both claim the same Bitrix twin in one run', async () => {
     const owner = await makeUser();
     const project = await makeProject({ ownerId: owner.id });

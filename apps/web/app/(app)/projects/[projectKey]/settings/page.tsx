@@ -4,7 +4,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@giper/ui/components/C
 import { requireAuth } from '@/lib/auth';
 import { RepoConnections } from '@/components/domain/RepoConnections';
 import { KaitenConnection } from '@/components/domain/KaitenConnection';
-import { getKaitenStatus } from '@/lib/integrations/kaiten';
+import { KaitenSuggestions } from '@/components/domain/KaitenSuggestions';
+import { getKaitenStatus, getKaitenSuggestions } from '@/lib/integrations/kaiten';
 import { getProject } from '@/lib/projects';
 import { canEditProject } from '@/lib/permissions';
 import { getEffectiveCapsForProject } from '@/lib/capabilities';
@@ -86,6 +87,7 @@ export default async function ProjectSettingsPage({
   });
   const spaces = await getSpaces();
   const kaitenStatus = await getKaitenStatus(project.id);
+  const kaitenSuggestions = kaitenStatus.connected ? await getKaitenSuggestions(project.id) : [];
   const [projectRoles, projectRoleAssignments] = await Promise.all([
     listProjectAssignableRoles(),
     listProjectMemberAssignments(project.id),
@@ -268,6 +270,17 @@ export default async function ProjectSettingsPage({
           <KaitenConnection projectKey={project.key} initial={kaitenStatus} canManage />
         </CardContent>
       </Card>
+
+      {kaitenStatus.connected ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Kaiten — кандидаты на сопоставление ({kaitenSuggestions.length})</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <KaitenSuggestions projectKey={project.key} initial={kaitenSuggestions} canManage />
+          </CardContent>
+        </Card>
+      ) : null}
 
       <Card>
         <CardHeader>
