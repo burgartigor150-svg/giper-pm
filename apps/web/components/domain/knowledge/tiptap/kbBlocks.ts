@@ -13,7 +13,14 @@ type MarkdownIt = any;
  * classes — the callout/spoiler are editable styled boxes, no raw syntax shown.
  */
 
-const CALLOUT_KINDS = ['info', 'warning', 'success', 'tip', 'danger', 'note'] as const;
+const CALLOUT_KINDS = ['info', 'warning', 'warn', 'success', 'tip', 'danger', 'note'] as const;
+const SPOILER_KINDS = ['details', 'toggle', 'spoiler'] as const;
+
+// Container blocks hold normal blocks but NOT each other — nesting callouts/
+// spoilers would desync the serializer (unbalanced :::) vs the non-nesting read
+// renderer. Excluding them from the content expression forbids nesting entirely.
+const CONTAINER_CONTENT =
+  '(paragraph | heading | bulletList | orderedList | taskList | blockquote | codeBlock | horizontalRule | table | image | kbTableEmbed)+';
 
 function calloutClass(kind: string): string {
   switch (kind) {
@@ -33,7 +40,7 @@ function calloutClass(kind: string): string {
 export const KbCallout = Node.create({
   name: 'kbCallout',
   group: 'block',
-  content: 'block+',
+  content: CONTAINER_CONTENT,
   defining: true,
 
   addAttributes() {
@@ -100,7 +107,7 @@ export const KbCallout = Node.create({
 export const KbSpoiler = Node.create({
   name: 'kbSpoiler',
   group: 'block',
-  content: 'block+',
+  content: CONTAINER_CONTENT,
   defining: true,
 
   addAttributes() {
@@ -138,17 +145,21 @@ export const KbSpoiler = Node.create({
         },
         parse: {
           setup(markdownit: MarkdownIt) {
-            markdownit.use(MarkdownItContainer, 'details', {
-              render(tokens: any[], idx: number) {
-                const token = tokens[idx];
-                if (token.nesting === 1) {
-                  const info = (token.info || '').trim();
-                  const title = info.slice('details'.length).trim() || 'Подробнее';
-                  return `<div data-spoiler data-title="${markdownit.utils.escapeHtml(title)}">`;
-                }
-                return '</div>\n';
-              },
-            });
+            // Register details + its aliases (toggle/spoiler) the read renderer
+            // also accepts, so existing articles using them aren't flattened.
+            for (const kw of SPOILER_KINDS) {
+              markdownit.use(MarkdownItContainer, kw, {
+                render(tokens: any[], idx: number) {
+                  const token = tokens[idx];
+                  if (token.nesting === 1) {
+                    const info = (token.info || '').trim();
+                    const title = info.slice(kw.length).trim() || 'Подробнее';
+                    return `<div data-spoiler data-title="${markdownit.utils.escapeHtml(title)}">`;
+                  }
+                  return '</div>\n';
+                },
+              });
+            }
           },
         },
       },

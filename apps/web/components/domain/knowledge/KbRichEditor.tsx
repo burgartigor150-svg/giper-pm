@@ -16,6 +16,7 @@ import {
   List, ListChecks, ListOrdered, Minus, Quote, Redo2, Strikethrough, Table as TableIcon, TriangleAlert, Undo2,
 } from 'lucide-react';
 import { KbCallout, KbSpoiler, KbTableEmbedNode } from './tiptap/kbBlocks';
+import { normalizeKbMarkdown } from '@/lib/knowledge/markdownNormalize';
 
 /**
  * Visual (WYSIWYG) article editor — TEAMLY/Notion-style. No raw markdown syntax
@@ -61,9 +62,7 @@ export function KbRichEditor({
     },
     onUpdate: ({ editor }) => {
       const md = (editor.storage as unknown as { markdown: { getMarkdown(): string } }).markdown.getMarkdown();
-      // Defensive: if a [[table:ID]] token ever slips into the visual editor, the
-      // markdown serializer escapes the brackets — un-escape so the embed survives.
-      onChange(md.replace(/\\\[\\\[table:([A-Za-z0-9_-]+)\\\]\\\]/g, '[[table:$1]]'));
+      onChange(normalizeKbMarkdown(md));
     },
   });
 

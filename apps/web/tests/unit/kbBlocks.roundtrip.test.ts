@@ -2,8 +2,16 @@
 import { describe, it, expect } from 'vitest';
 import { Editor } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
+import Image from '@tiptap/extension-image';
+import TaskList from '@tiptap/extension-task-list';
+import TaskItem from '@tiptap/extension-task-item';
+import { Table } from '@tiptap/extension-table';
+import TableRow from '@tiptap/extension-table-row';
+import TableHeader from '@tiptap/extension-table-header';
+import TableCell from '@tiptap/extension-table-cell';
 import { Markdown } from 'tiptap-markdown';
 import { KbCallout, KbSpoiler, KbTableEmbedNode } from '@/components/domain/knowledge/tiptap/kbBlocks';
+import { normalizeKbMarkdown } from '@/lib/knowledge/markdownNormalize';
 
 /**
  * Round-trip guard for the KB custom blocks: markdown → TipTap doc → markdown
@@ -16,6 +24,13 @@ function roundtrip(md: string): string {
     element: document.createElement('div'),
     extensions: [
       StarterKit,
+      Image,
+      TaskList,
+      TaskItem,
+      Table,
+      TableRow,
+      TableHeader,
+      TableCell,
       KbCallout,
       KbSpoiler,
       KbTableEmbedNode,
@@ -23,9 +38,9 @@ function roundtrip(md: string): string {
     ],
     content: md,
   });
-  const out = (editor.storage as unknown as { markdown: { getMarkdown(): string } }).markdown.getMarkdown();
+  const raw = (editor.storage as unknown as { markdown: { getMarkdown(): string } }).markdown.getMarkdown();
   editor.destroy();
-  return out;
+  return normalizeKbMarkdown(raw); // mirror the real save path (KbRichEditor.onUpdate)
 }
 
 describe('kb custom blocks round-trip', () => {
@@ -53,6 +68,28 @@ describe('kb custom blocks round-trip', () => {
     const out = roundtrip('[[table:abc123]]');
     expect(out).toContain('[[table:abc123]]');
     expect(out).not.toContain('\\[');
+  });
+
+  it('keeps ::: markers balanced when callouts would nest (no cumulative corruption)', () => {
+    const out = roundtrip(':::info\nouter\n:::warning\ninner\n:::\n:::');
+    const opens = (out.match(/^:::\w/gm) ?? []).length;
+    const closes = (out.match(/^:::\s*$/gm) ?? []).length;
+    expect(opens).toBe(closes); // balanced
+    expect(out).not.toMatch(/(^|\n):::(\n|$)\n*:::(\n|$)/); // no doubled stray closers
+    expect(out).toContain('outer');
+    expect(out).toContain('inner');
+  });
+
+  it('does not flatten alias keywords :::warn / :::toggle (data-loss bug)', () => {
+    const warn = roundtrip(':::warn Осторожно\nтекст предупреждения\n:::');
+    expect(warn).toMatch(/:::warn(ing)?/);
+    expect(warn).toContain('текст предупреждения');
+    expect(warn.trimEnd().endsWith(':::')).toBe(true); // not collapsed to one line
+
+    const toggle = roundtrip(':::toggle Скрыто\nтело спойлера\n:::');
+    expect(toggle).toContain('тело спойлера');
+    expect(toggle).toMatch(/:::(details|toggle)/);
+    expect(toggle.trimEnd().endsWith(':::')).toBe(true);
   });
 
   it('preserves mixed content', () => {
