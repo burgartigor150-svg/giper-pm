@@ -273,6 +273,7 @@ export async function runKaitenSyncNow(
         matchScope: c.matchScope ?? 'project',
         reconcileArchived: opts?.reconcileArchived,
         syncComments: true,
+        syncUsers: true,
       },
       { signal: opts?.signal },
     );
@@ -290,6 +291,8 @@ export async function runKaitenSyncNow(
       `Карточек: ${result.cards} (новых: ${result.created}, обновлено: ${result.updated}), ` +
       `связано дублей: ${result.autoLinked}, кандидатов: ${result.suggestions}` +
       (result.comments ? `, комментариев: ${result.comments}` : '') +
+      (result.usersCreated ? `, пользователей: ${result.usersCreated}` : '') +
+      (result.members ? `, участников: ${result.members}` : '') +
       (fileResult.files ? `, файлов: ${fileResult.files}` : '') +
       (result.reconciled ? `, архивных обновлено: ${result.reconciled}` : '') +
       (result.truncated ? `, достигнут лимит импорта` : '') +

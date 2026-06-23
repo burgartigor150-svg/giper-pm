@@ -42,6 +42,16 @@ export type KaitenFile = {
   comment_id?: number | null;
 };
 
+export type KaitenUser = {
+  id: number;
+  full_name: string | null;
+  email: string | null;
+  username: string | null;
+  activated?: boolean;
+  external?: boolean;
+  virtual?: boolean;
+};
+
 export type KaitenBoard = { id: number; title: string };
 
 export type KaitenClientOptions = { domain: string; apiKey: string; signal?: AbortSignal };
@@ -155,5 +165,10 @@ export class KaitenClient {
   /** All files attached to a card. `url` is a public (capability) download link. */
   async listCardFiles(cardId: number): Promise<KaitenFile[]> {
     return this.request<KaitenFile[]>(`/cards/${cardId}/files`);
+  }
+
+  /** All users in the Kaiten company (active + inactive). */
+  async listUsers(): Promise<KaitenUser[]> {
+    return this.request<KaitenUser[]>('/users');
   }
 }

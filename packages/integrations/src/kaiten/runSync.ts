@@ -2,6 +2,7 @@ import type { PrismaClient } from '@giper/db';
 import { KaitenClient } from './client';
 import { getKaitenBotUserId } from './botUser';
 import { prepareCandidates, bestMatchPrepared } from './match';
+import { syncKaitenUsers, buildKaitenUserMap } from './syncUsers';
 
 export const KAITEN_SOURCE = 'kaiten';
 
@@ -19,6 +20,8 @@ export type RunKaitenSyncResult = {
   suggestions: number;
   reconciled: number;
   comments: number;
+  members: number;
+  usersCreated: number;
   truncated: boolean;
   errors: string[];
   durationMs: number;
@@ -38,6 +41,9 @@ export type RunKaitenSyncParams = {
   reconcileArchived?: boolean;
   /** Mirror each card's Kaiten comments into the task's comments. */
   syncComments?: boolean;
+  /** Create/link Kaiten users → set task assignee from the card owner, add
+   *  involved people as project members, attribute comments to real users. */
+  syncUsers?: boolean;
 };
 export type RunKaitenSyncOptions = { signal?: AbortSignal; now?: Date };
 
@@ -89,6 +95,20 @@ export async function runKaitenSync(
 
   const botId = await getKaitenBotUserId(prisma);
 
+  // Build the Kaiten-user → local-user map (so card owners become assignees,
+  // comment authors are attributed to real users, and involved people become
+  // project members). Empty when syncUsers is off.
+  let userMap = new Map<number, string>();
+  let usersCreated = 0;
+  if (params.syncUsers) {
+    const ur = await syncKaitenUsers(prisma, client);
+    usersCreated = ur.created;
+    for (const e of ur.errors) errors.push(e);
+    userMap = await buildKaitenUserMap(prisma);
+  }
+  // Local user ids to ensure as project members at the end of the run.
+  const memberLocalIds = new Set<string>();
+
   // Bitrix-mirrored tasks are the match candidates — scoped to this project, or
   // org-wide when the board's twins live across several Bitrix projects.
   // Pre-normalize once so we don't re-normalize the same titles for every card
@@ -128,7 +148,13 @@ export async function runKaitenSync(
   // If the card already exists (a racing kaiten sync inserted it), adopt+update it.
   async function createOrAdopt(
     externalId: string,
-    data: { title: string; description: string; status: 'TODO' | 'IN_PROGRESS' | 'DONE'; dueDate: Date | null },
+    data: {
+      title: string;
+      description: string;
+      status: 'TODO' | 'IN_PROGRESS' | 'DONE';
+      dueDate: Date | null;
+      assigneeId?: string | null;
+    },
   ): Promise<{ id: string; created: boolean }> {
     for (let attempt = 0; attempt < 6; attempt++) {
       const agg = await prisma.task.aggregate({ where: { projectId: params.projectId }, _max: { number: true } });
@@ -141,6 +167,7 @@ export async function runKaitenSync(
             description: data.description,
             status: data.status,
             dueDate: data.dueDate,
+            assigneeId: data.assigneeId ?? null,
             creatorId: botId,
             externalSource: KAITEN_SOURCE,
             externalId,
@@ -189,21 +216,23 @@ export async function runKaitenSync(
       const text = (cm.text ?? '').trim();
       if (!text) continue;
       keptIds.add(String(cm.id));
-      // Neutralize markdown control chars in the author name so a name can't
-      // break the prefix formatting (rendering is React-escaped, so this is
-      // cosmetic, not a security fix).
+      // Attribute to the real local user when we know the Kaiten author; only
+      // fall back to the bot (with a name prefix) when we can't map them.
+      const authorLocalId = cm.author_id != null ? userMap.get(cm.author_id) : undefined;
+      if (authorLocalId) memberLocalIds.add(authorLocalId);
+      // Neutralize markdown control chars in the prefixed name (cosmetic).
       const authorName = cm.author?.full_name?.trim().replace(/[*`_~[\]]/g, ' ').trim();
-      const body = (authorName ? `**${authorName}:**\n\n${text}` : text).slice(0, 50_000);
+      const body = (authorLocalId || !authorName ? text : `**${authorName}:**\n\n${text}`).slice(0, 50_000);
       let createdAt = cm.created ? new Date(cm.created) : new Date();
       if (!Number.isFinite(createdAt.getTime())) createdAt = new Date();
       const externalId = `${taskId}:${cm.id}`;
       try {
         await prisma.comment.upsert({
           where: { externalSource_externalId: { externalSource: KAITEN_SOURCE, externalId } },
-          update: { body, taskId },
+          update: { body, taskId, authorId: authorLocalId ?? botId },
           create: {
             taskId,
-            authorId: botId,
+            authorId: authorLocalId ?? botId,
             body,
             source: 'WEB',
             visibility: 'EXTERNAL',
@@ -251,6 +280,9 @@ export async function runKaitenSync(
         const status = stateToStatus(card.state, card.id);
         const dueDate = card.due_date ? new Date(card.due_date) : null;
         const description = card.description ?? '';
+        // Card owner → local assignee (when the user is mapped). Also a member.
+        const ownerLocalId = card.owner_id != null ? userMap.get(card.owner_id) : undefined;
+        if (ownerLocalId) memberLocalIds.add(ownerLocalId);
 
         const prior = await prisma.task.findFirst({
           where: { projectId: params.projectId, externalSource: KAITEN_SOURCE, externalId },
@@ -259,11 +291,16 @@ export async function runKaitenSync(
 
         let taskId: string;
         if (prior) {
-          await prisma.task.update({ where: { id: prior.id }, data: { title, description, status, dueDate } });
+          await prisma.task.update({
+            where: { id: prior.id },
+            // Only set the assignee when the owner maps to a local user — never
+            // clear a manually-set assignee just because the owner is unmapped.
+            data: { title, description, status, dueDate, ...(ownerLocalId ? { assigneeId: ownerLocalId } : {}) },
+          });
           taskId = prior.id;
           updated++;
         } else {
-          const res = await createOrAdopt(externalId, { title, description, status, dueDate });
+          const res = await createOrAdopt(externalId, { title, description, status, dueDate, assigneeId: ownerLocalId ?? null });
           taskId = res.id;
           if (res.created) created++;
           else updated++;
@@ -327,6 +364,28 @@ export async function runKaitenSync(
     }
   }
 
+  // Ensure the Kaiten people involved (card owners + comment authors) are project
+  // members, so they're assignable and visible. Only ACTIVE users; createMany +
+  // skipDuplicates is race-safe and never downgrades an existing member's role.
+  let members = 0;
+  if (memberLocalIds.size > 0) {
+    try {
+      const active = await prisma.user.findMany({
+        where: { id: { in: [...memberLocalIds] }, isActive: true },
+        select: { id: true },
+      });
+      if (active.length > 0) {
+        const r = await prisma.projectMember.createMany({
+          data: active.map((u) => ({ projectId: params.projectId, userId: u.id, role: 'CONTRIBUTOR' as const })),
+          skipDuplicates: true,
+        });
+        members = r.count;
+      }
+    } catch (e) {
+      errors.push(`members: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
   // Reconcile pass: archived cards leave the live board, so reflect their final
   // state onto the existing local task (done→DONE, otherwise→CANCELED). Only
   // updates tasks we already imported — never creates from archived cards.
@@ -371,6 +430,8 @@ export async function runKaitenSync(
     suggestions,
     reconciled,
     comments: commentsSynced,
+    members,
+    usersCreated,
     truncated,
     errors: errors.slice(0, 50),
     durationMs: Date.now() - startedAt.getTime(),
