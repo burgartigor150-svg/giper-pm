@@ -11,6 +11,8 @@ import { getSpaceAccessById } from '@/lib/knowledge/access';
 import { getArticleComments, getArticleReactions } from '@/lib/knowledge/getComments';
 import { getTable, listSpaceTables } from '@/lib/knowledge/getTables';
 import { getArticleViewCount } from '@/lib/knowledge/getAnalytics';
+import { getArticleAttachments } from '@/lib/knowledge/getAttachments';
+import { KbArticleAttachments } from '@/components/domain/knowledge/KbArticleAttachments';
 import { getLatestReview } from '@/lib/knowledge/getReview';
 import { listUsers } from '@/lib/users/listUsers';
 import { KbViewTracker } from '@/components/domain/knowledge/KbViewTracker';
@@ -34,12 +36,13 @@ export default async function KnowledgeArticlePage({
   const access = await getSpaceAccessById(me, article.spaceId);
   if (!access.canView) notFound();
 
-  const [crumbs, favorite, comments, articleReactions, viewCount] = await Promise.all([
+  const [crumbs, favorite, comments, articleReactions, viewCount, attachments] = await Promise.all([
     getArticleBreadcrumbs(articleId),
     isArticleFavorite(me.id, articleId),
     getArticleComments(articleId, me.id),
     getArticleReactions(articleId, me.id),
     getArticleViewCount(articleId),
+    getArticleAttachments(articleId),
   ]);
   const canEdit = access.canEdit;
   const headings = extractHeadings(article.content);
@@ -119,6 +122,13 @@ export default async function KnowledgeArticlePage({
           canEdit={canEdit}
           tableEmbeds={tableEmbeds}
           spaceTables={spaceTables.map((t) => ({ id: t.id, name: t.name }))}
+        />
+
+        <KbArticleAttachments
+          articleId={article.id}
+          attachments={attachments}
+          canEdit={canEdit}
+          currentUserId={me.id}
         />
 
         <KbComments

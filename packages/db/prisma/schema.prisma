@@ -2654,9 +2654,26 @@ model KnowledgeArticle {
   reactions   KnowledgeReaction[]
   views       KnowledgeArticleView[]
   reviews     KnowledgeArticleReview[]
+  attachments KnowledgeAttachment[]
 
   @@index([spaceId, parentId, order])
   @@index([status])
+}
+
+/// A file attached to a KB article (TEAMLY «вложения»). Bytes live in S3
+/// (storageKey); access follows the article's space. uploadedById is a soft ref.
+model KnowledgeAttachment {
+  id           String           @id @default(cuid())
+  articleId    String
+  article      KnowledgeArticle @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  filename     String
+  mimeType     String
+  sizeBytes    Int
+  storageKey   String
+  uploadedById String?
+  uploadedAt   DateTime         @default(now())
+
+  @@index([articleId])
 }
 
 enum KnowledgeReviewState {

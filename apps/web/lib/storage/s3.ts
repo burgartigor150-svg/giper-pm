@@ -135,6 +135,24 @@ export function buildAttachmentKey(taskId: string, filename: string): string {
 }
 
 /**
+ * Storage key for a KB article attachment.
+ * Format: `knowledge/<articleId>/<YYYY>/<MM>/<random>-<safeName>`
+ * Same partitioning rationale as buildAttachmentKey (random prefix avoids
+ * collisions; date partitions keep prefix scans cheap).
+ */
+export function buildKbAttachmentKey(articleId: string, filename: string): string {
+  const now = new Date();
+  const yyyy = now.getUTCFullYear();
+  const mm = String(now.getUTCMonth() + 1).padStart(2, '0');
+  const rand = Math.random().toString(36).slice(2, 10);
+  const safe = filename
+    .normalize('NFKD')
+    .replace(/[^\w.\-]+/g, '_')
+    .slice(0, 80);
+  return `knowledge/${articleId}/${yyyy}/${mm}/${rand}-${safe}`;
+}
+
+/**
  * Key layout for messenger video-notes (and any future audio-notes).
  * Partitioned by channel + year-month so a per-channel data export
  * stays cheap, and S3 list-prefix scans on hot channels don't hit
