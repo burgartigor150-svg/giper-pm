@@ -36,12 +36,22 @@ export async function requestReviewAction(
   });
   if (existing) return { ok: false, error: { code: 'VALIDATION', message: 'Уже на согласовании' } };
 
-  const review = await prisma.knowledgeArticleReview.create({
-    data: { articleId, requestedById: me.id, reviewerId },
-    select: { id: true },
-  });
-  revalidatePath(`/knowledge/${articleId}`);
-  return { ok: true, data: { id: review.id } };
+  // The check above is racy on its own (two concurrent submits both see zero
+  // PENDING rows). A partial unique index on (articleId) WHERE state='PENDING'
+  // makes the invariant authoritative; map its violation to the same message.
+  try {
+    const review = await prisma.knowledgeArticleReview.create({
+      data: { articleId, requestedById: me.id, reviewerId },
+      select: { id: true },
+    });
+    revalidatePath(`/knowledge/${articleId}`);
+    return { ok: true, data: { id: review.id } };
+  } catch (e) {
+    if (e && typeof e === 'object' && 'code' in e && (e as { code?: string }).code === 'P2002') {
+      return { ok: false, error: { code: 'VALIDATION', message: 'Уже на согласовании' } };
+    }
+    throw e;
+  }
 }
 
 async function resolvableReview(reviewId: string) {

@@ -2678,6 +2678,10 @@ model KnowledgeArticleReview {
 
   @@index([articleId, createdAt])
   @@index([reviewerId, state])
+  // NOTE: a partial unique index enforces "at most one PENDING review per
+  // article" — `CREATE UNIQUE INDEX ... ON (articleId) WHERE state='PENDING'`.
+  // Prisma can't express partial unique indexes, so it lives in the migration
+  // (20260623090000_knowledge_review). requestReviewAction catches its P2002.
 }
 
 /// One row per (article, user, day) — dedups views so the count is "unique
