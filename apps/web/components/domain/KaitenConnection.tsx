@@ -15,6 +15,7 @@ export type KaitenConnectionStatus = {
   domain?: string;
   boardId?: number;
   spaceId?: number;
+  matchScope?: 'project' | 'org';
   tokenHint?: string;
   lastSyncAt?: string;
   lastSyncStatus?: string;
@@ -50,6 +51,7 @@ export function KaitenConnection({
   const [token, setToken] = useState('');
   const [boardId, setBoardId] = useState('');
   const [spaceId, setSpaceId] = useState('');
+  const [orgScope, setOrgScope] = useState(true);
   const [msg, setMsg] = useState<string | null>(null);
 
   function connect() {
@@ -73,6 +75,7 @@ export function KaitenConnection({
         token: token.trim(),
         boardId: Number(boardId.trim()),
         spaceId: spaceId.trim() ? Number(spaceId.trim()) : undefined,
+        matchScope: orgScope ? 'org' : 'project',
       });
       if (!res.ok) {
         setMsg(`Ошибка: ${res.error}`);
@@ -117,6 +120,9 @@ export function KaitenConnection({
           {initial.tokenHint ? (
             <span className="text-xs text-muted-foreground">ключ {initial.tokenHint}</span>
           ) : null}
+          <span className="text-xs text-muted-foreground">
+            матч: {initial.matchScope === 'org' ? 'все проекты' : 'этот проект'}
+          </span>
           <span className="ml-auto rounded bg-emerald-100 px-1.5 py-0.5 text-[11px] text-emerald-700">
             подключён
           </span>
@@ -187,6 +193,10 @@ export function KaitenConnection({
             className={inputCls}
             autoComplete="off"
           />
+          <label className="flex items-center gap-2 text-sm text-muted-foreground">
+            <input type="checkbox" checked={orgScope} onChange={(e) => setOrgScope(e.target.checked)} />
+            Искать дубликаты по всем проектам организации (а не только этому)
+          </label>
           <div className="flex items-center gap-2">
             <Button onClick={connect} disabled={pending} className="self-start">
               <Plus className="mr-1 h-4 w-4" />
