@@ -4,11 +4,12 @@ import { runKaitenSync, KAITEN_SOURCE, type KaitenCard } from '@giper/integratio
 import type { KaitenClient } from '@giper/integrations/kaiten';
 import { makeUser, makeProject, makeTask } from './helpers/factories';
 
-/** A KaitenClient stand-in that yields canned card pages (no network). */
-function fakeClient(pages: KaitenCard[][]): KaitenClient {
+/** A KaitenClient stand-in that yields canned card pages (no network). Live cards
+ *  for condition 1 (the default), archived cards for condition 2 (reconcile). */
+function fakeClient(livePages: KaitenCard[][], archivedPages: KaitenCard[][] = []): KaitenClient {
   return {
-    // eslint-disable-next-line require-yield
-    async *listCardsPaged() {
+    async *listCardsPaged(opts: { condition?: number }) {
+      const pages = opts?.condition === 2 ? archivedPages : livePages;
       for (const page of pages) yield page;
     },
   } as unknown as KaitenClient;
@@ -198,6 +199,45 @@ describe('runKaitenSync', () => {
     );
     expect(r2.suggestions).toBe(0);
     expect(await prisma.kaitenMatchSuggestion.count({ where: { bitrixTaskId: twin.id, status: 'pending' } })).toBe(1);
+  });
+
+  it('reconcileArchived reflects an archived card final state onto the existing task (no new tasks)', async () => {
+    const owner = await makeUser();
+    const project = await makeProject({ ownerId: owner.id });
+
+    // Imported live, in progress.
+    await runKaitenSync(
+      prisma,
+      fakeClient([[card({ id: 700, title: 'Релиз 3.0', state: 2 })]]),
+      { projectId: project.id, boardId: 7 },
+    );
+    let t = await prisma.task.findFirstOrThrow({
+      where: { projectId: project.id, externalSource: 'kaiten', externalId: '700' },
+    });
+    expect(t.status).toBe('IN_PROGRESS');
+
+    // Next sync: card archived as done (live board empty, appears under condition=2).
+    const res = await runKaitenSync(
+      prisma,
+      fakeClient([], [[card({ id: 700, title: 'Релиз 3.0', state: 3, condition: 2, archived: true })]]),
+      { projectId: project.id, boardId: 7, reconcileArchived: true },
+    );
+    expect(res.reconciled).toBe(1);
+    t = await prisma.task.findFirstOrThrow({
+      where: { projectId: project.id, externalSource: 'kaiten', externalId: '700' },
+    });
+    expect(t.status).toBe('DONE');
+
+    // An archived card we never imported is NOT created.
+    const res2 = await runKaitenSync(
+      prisma,
+      fakeClient([], [[card({ id: 999, title: 'Никогда не было', state: 1, condition: 2, archived: true })]]),
+      { projectId: project.id, boardId: 7, reconcileArchived: true },
+    );
+    expect(res2.reconciled).toBe(0);
+    expect(
+      await prisma.task.count({ where: { projectId: project.id, externalSource: 'kaiten', externalId: '999' } }),
+    ).toBe(0);
   });
 
   it('does not let two cards both claim the same Bitrix twin in one run', async () => {

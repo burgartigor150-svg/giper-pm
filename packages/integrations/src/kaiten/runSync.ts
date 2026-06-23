@@ -15,6 +15,7 @@ export type RunKaitenSyncResult = {
   updated: number;
   autoLinked: number;
   suggestions: number;
+  reconciled: number;
   truncated: boolean;
   errors: string[];
   durationMs: number;
@@ -25,7 +26,14 @@ export type RunKaitenSyncResult = {
  *  remote team's board often spans several Bitrix projects). */
 export type KaitenMatchScope = 'project' | 'org';
 
-export type RunKaitenSyncParams = { projectId: string; boardId: number; matchScope?: KaitenMatchScope };
+export type RunKaitenSyncParams = {
+  projectId: string;
+  boardId: number;
+  matchScope?: KaitenMatchScope;
+  /** Also pull archived cards and reflect their final state onto existing tasks
+   *  (done→DONE, otherwise→CANCELED). Used by the periodic cron. */
+  reconcileArchived?: boolean;
+};
 export type RunKaitenSyncOptions = { signal?: AbortSignal; now?: Date };
 
 /** Kaiten card state → local TaskStatus. We only fetch live (on-board) cards. */
@@ -67,7 +75,11 @@ export async function runKaitenSync(
   let updated = 0;
   let autoLinked = 0;
   let suggestions = 0;
+  let reconciled = 0;
   let truncated = false;
+  // Card ids seen in the live pass — the reconcile pass skips them so a card that
+  // flips live→archived mid-run isn't wrongly CANCELED right after being imported.
+  const seenLiveIds = new Set<string>();
 
   const botId = await getKaitenBotUserId(prisma);
 
@@ -156,6 +168,7 @@ export async function runKaitenSync(
       }
       try {
         const externalId = String(card.id);
+        seenLiveIds.add(externalId);
         const title = (card.title ?? '').trim() || 'Без названия';
         const status = stateToStatus(card.state, card.id);
         const dueDate = card.due_date ? new Date(card.due_date) : null;
@@ -232,6 +245,41 @@ export async function runKaitenSync(
     }
   }
 
+  // Reconcile pass: archived cards leave the live board, so reflect their final
+  // state onto the existing local task (done→DONE, otherwise→CANCELED). Only
+  // updates tasks we already imported — never creates from archived cards.
+  if (params.reconcileArchived && !opts.signal?.aborted && !truncated) {
+    let seen = 0;
+    archived: for await (const page of client.listCardsPaged({ boardId: params.boardId, condition: 2 })) {
+      if (opts.signal?.aborted) break;
+      for (const card of page) {
+        if (seen >= MAX_CARDS) {
+          truncated = true;
+          break archived;
+        }
+        seen++;
+        try {
+          const externalId = String(card.id);
+          // A card seen live this run was just imported with its real state —
+          // don't override it from a stale archived snapshot.
+          if (seenLiveIds.has(externalId)) continue;
+          const local = await prisma.task.findFirst({
+            where: { projectId: params.projectId, externalSource: KAITEN_SOURCE, externalId },
+            select: { id: true, status: true },
+          });
+          if (!local) continue;
+          const target = card.state === 3 ? 'DONE' : 'CANCELED';
+          if (local.status !== target) {
+            await prisma.task.update({ where: { id: local.id }, data: { status: target } });
+            reconciled++;
+          }
+        } catch (e) {
+          errors.push(`archived ${card.id}: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+    }
+  }
+
   return {
     ok: errors.length === 0 && !truncated,
     cards,
@@ -239,6 +287,7 @@ export async function runKaitenSync(
     updated,
     autoLinked,
     suggestions,
+    reconciled,
     truncated,
     errors: errors.slice(0, 50),
     durationMs: Date.now() - startedAt.getTime(),
