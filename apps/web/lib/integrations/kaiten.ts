@@ -8,6 +8,7 @@ import {
   type RunKaitenSyncResult,
   type KaitenMatchScope,
 } from '@giper/integrations/kaiten';
+import { syncKaitenFiles, type SyncKaitenFilesResult } from '@/lib/integrations/kaitenFiles';
 
 /**
  * Per-project Kaiten connection. One project ↔ one Kaiten board. Each project
@@ -275,16 +276,27 @@ export async function runKaitenSyncNow(
       },
       { signal: opts?.signal },
     );
+    // Mirror card files → task attachments (downloaded into our S3).
+    let fileResult: SyncKaitenFilesResult = { files: 0, deleted: 0, errors: [] };
+    try {
+      fileResult = await syncKaitenFiles(client, projectId, { signal: opts?.signal });
+    } catch (e) {
+      fileResult.errors.push(e instanceof Error ? e.message : String(e));
+    }
+
+    const totalErrors = result.errors.length + fileResult.errors.length;
+    const ok = result.ok && fileResult.errors.length === 0;
     const summary =
       `Карточек: ${result.cards} (новых: ${result.created}, обновлено: ${result.updated}), ` +
       `связано дублей: ${result.autoLinked}, кандидатов: ${result.suggestions}` +
       (result.comments ? `, комментариев: ${result.comments}` : '') +
+      (fileResult.files ? `, файлов: ${fileResult.files}` : '') +
       (result.reconciled ? `, архивных обновлено: ${result.reconciled}` : '') +
       (result.truncated ? `, достигнут лимит импорта` : '') +
-      (result.errors.length ? `, ошибок: ${result.errors.length}` : '');
-    const status = result.ok ? 'SUCCESS' : 'PARTIAL';
+      (totalErrors ? `, ошибок: ${totalErrors}` : '');
+    const status = ok ? 'SUCCESS' : 'PARTIAL';
     await writeSummary(summary, status);
-    return { ok: result.ok, summary, result };
+    return { ok, summary, result };
   } catch (e) {
     const msg = (e instanceof Error ? e.message : String(e)).slice(0, 300);
     await writeSummary(`Ошибка: ${msg}`, 'FAILED');

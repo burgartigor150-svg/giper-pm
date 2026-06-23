@@ -1797,9 +1797,9 @@ model Attachment {
   filename    String
   mimeType    String
   sizeBytes   Int
-  // For locally-uploaded files: S3 / R2 object key.
-  // For mirrored files (externalSource set) we leave it empty and rebuild
-  // the download URL at request time from the live webhook credentials.
+  // S3 / R2 object key. Set for locally-uploaded files AND for mirrored sources
+  // we download into our own bucket (Kaiten). Left empty for sources we proxy at
+  // request time from live credentials (Bitrix24 rebuilds the URL via webhook).
   storageKey  String
   uploadedById String?
   uploadedAt  DateTime  @default(now())

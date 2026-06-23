@@ -24,6 +24,22 @@ import { DomainError } from '@/lib/errors';
  */
 export const dynamic = 'force-dynamic';
 
+// Only these (attacker-uninteresting) types are served inline; everything else
+// (html, svg, xml, office docs, unknown…) is forced to download as octet-stream
+// so a mislabelled/hostile file from any source (user upload, Bitrix, Kaiten)
+// can't run scripts in our origin. Mirrors the KB attachment route.
+const SAFE_INLINE = new Set([
+  'application/pdf',
+  'text/plain',
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+]);
+function isInlineSafe(mime: string): boolean {
+  return SAFE_INLINE.has(mime) || mime.startsWith('video/') || mime.startsWith('audio/');
+}
+
 type Ctx = { params: Promise<{ id: string }> };
 
 export async function GET(req: Request, { params }: Ctx) {
@@ -60,11 +76,11 @@ export async function GET(req: Request, { params }: Ctx) {
     return NextResponse.json({ error: 'forbidden' }, { status: 403 });
   }
 
-  // Local upload path: stream straight from S3 with our own
-  // Content-Disposition. We pull the object server-side and pipe back
-  // so the user-agent never sees S3 credentials or pre-signed URLs.
+  // S3-backed path: local uploads (externalSource null) AND mirrored sources we
+  // download into our own bucket (Kaiten). Stream from S3 with our own
+  // Content-Disposition so the user-agent never sees S3 credentials.
   if (
-    attachment.externalSource == null &&
+    (attachment.externalSource == null || attachment.externalSource === 'kaiten') &&
     attachment.storageKey &&
     attachment.storageKey !== ''
   ) {
@@ -76,18 +92,19 @@ export async function GET(req: Request, { params }: Ctx) {
       return NextResponse.json({ error: 'storage read failed' }, { status: 502 });
     }
     const headers = new Headers();
-    headers.set(
-      'content-type',
-      attachment.mimeType || res.ContentType || 'application/octet-stream',
-    );
+    const mime = attachment.mimeType || res.ContentType || 'application/octet-stream';
+    const inline = isInlineSafe(mime);
+    headers.set('content-type', inline ? mime : 'application/octet-stream');
     if (res.ContentLength != null) {
       headers.set('content-length', String(res.ContentLength));
     }
     const safe = attachment.filename.replace(/[\r\n"]/g, '_');
     headers.set(
       'content-disposition',
-      `inline; filename="${asciiFallback(safe)}"; filename*=UTF-8''${encodeURIComponent(safe)}`,
+      `${inline ? 'inline' : 'attachment'}; filename="${asciiFallback(safe)}"; filename*=UTF-8''${encodeURIComponent(safe)}`,
     );
+    headers.set('x-content-type-options', 'nosniff');
+    if (!inline) headers.set('content-security-policy', "default-src 'none'; sandbox");
     headers.set('cache-control', 'private, max-age=300');
     // res.Body is a Readable / ReadableStream depending on runtime;
     // Response accepts both.
@@ -127,7 +144,9 @@ export async function GET(req: Request, { params }: Ctx) {
   const headers = new Headers();
   // Use the local-row mimeType (we already guess from extension at sync
   // time). Bitrix's own Content-Type is often application/octet-stream.
-  headers.set('content-type', attachment.mimeType || 'application/octet-stream');
+  const mime = attachment.mimeType || 'application/octet-stream';
+  const inline = isInlineSafe(mime);
+  headers.set('content-type', inline ? mime : 'application/octet-stream');
   const len = upstream.headers.get('content-length');
   if (len) headers.set('content-length', len);
   const acceptRanges = upstream.headers.get('accept-ranges');
@@ -139,8 +158,10 @@ export async function GET(req: Request, { params }: Ctx) {
   const safe = attachment.filename.replace(/[\r\n"]/g, '_');
   headers.set(
     'content-disposition',
-    `inline; filename="${asciiFallback(safe)}"; filename*=UTF-8''${encodeURIComponent(safe)}`,
+    `${inline ? 'inline' : 'attachment'}; filename="${asciiFallback(safe)}"; filename*=UTF-8''${encodeURIComponent(safe)}`,
   );
+  headers.set('x-content-type-options', 'nosniff');
+  if (!inline) headers.set('content-security-policy', "default-src 'none'; sandbox");
   // No CDN caching: URLs embed our token via the upstream and access depends
   // on the viewer's session. Browser cache is fine for the session.
   headers.set('cache-control', 'private, max-age=300');
