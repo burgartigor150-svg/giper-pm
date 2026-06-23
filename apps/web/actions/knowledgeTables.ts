@@ -9,8 +9,44 @@ type ActionResult<T = unknown> =
   | { ok: true; data?: T }
   | { ok: false; error: { code: string; message: string } };
 
-type ColumnType = 'TEXT' | 'NUMBER' | 'DATE' | 'CHECKBOX' | 'SELECT' | 'URL';
-const COLUMN_TYPES: ColumnType[] = ['TEXT', 'NUMBER', 'DATE', 'CHECKBOX', 'SELECT', 'URL'];
+type ColumnType = 'TEXT' | 'NUMBER' | 'DATE' | 'CHECKBOX' | 'SELECT' | 'URL' | 'RELATION' | 'FORMULA';
+const COLUMN_TYPES: ColumnType[] = ['TEXT', 'NUMBER', 'DATE', 'CHECKBOX', 'SELECT', 'URL', 'RELATION', 'FORMULA'];
+
+/**
+ * Per-type column config. `options` are SELECT values; `relationTableId` is the
+ * RELATION target (must live in the same space); `formulaExpr` is the FORMULA
+ * expression (`{Column} + {Other}`, see lib/knowledge/formula.ts). Stored in the
+ * column's `options` Json: string[] for SELECT, {tableId} / {expr} for the rest.
+ */
+export type KbColumnConfig = { options?: string[]; relationTableId?: string; formulaExpr?: string };
+
+const MAX_FORMULA = 500;
+const validationErr = (message: string): ActionResult<never> => ({ ok: false, error: { code: 'VALIDATION', message } });
+
+/**
+ * Resolve & validate the `options` Json payload for a column type. Returns
+ * `{ data }` to store (undefined = leave unset) or an `{ error }` ActionResult.
+ */
+async function resolveColumnOptions(
+  type: ColumnType,
+  config: KbColumnConfig | undefined,
+  spaceId: string,
+): Promise<{ data?: unknown } | { error: ActionResult<never> }> {
+  if (type === 'SELECT') return { data: config?.options ?? [] };
+  if (type === 'RELATION') {
+    const target = config?.relationTableId;
+    if (!target) return { error: validationErr('Выберите связанную таблицу') };
+    const tt = await prisma.knowledgeTable.findUnique({ where: { id: target }, select: { spaceId: true } });
+    if (!tt || tt.spaceId !== spaceId) return { error: validationErr('Связанная таблица недоступна') };
+    return { data: { tableId: target } };
+  }
+  if (type === 'FORMULA') {
+    const expr = (config?.formulaExpr ?? '').trim();
+    if (!expr) return { error: validationErr('Введите формулу') };
+    return { data: { expr: expr.slice(0, MAX_FORMULA) } };
+  }
+  return { data: undefined };
+}
 
 function deny(): ActionResult<never> {
   return { ok: false, error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' } };
@@ -109,23 +145,26 @@ export async function addColumnAction(
   tableId: string,
   name: string,
   type: ColumnType,
-  options?: string[],
+  config?: KbColumnConfig,
 ): Promise<ActionResult<{ id: string }>> {
   const me = await requireAuth();
   const t = await spaceIdOfTable(tableId);
   if (!t) return notFound();
   const guard = await editGuard(me, t.spaceId);
   if (guard) return guard;
-  if (!COLUMN_TYPES.includes(type)) {
-    return { ok: false, error: { code: 'VALIDATION', message: 'Неизвестный тип столбца' } };
-  }
+  if (!COLUMN_TYPES.includes(type)) return validationErr('Неизвестный тип столбца');
+
+  const opt = await resolveColumnOptions(type, config, t.spaceId);
+  if ('error' in opt) return opt.error;
+
   const order = await nextOrder('column', tableId);
   const col = await prisma.knowledgeTableColumn.create({
     data: {
       tableId,
       name: name.trim() || 'Столбец',
       type,
-      options: type === 'SELECT' ? (options ?? []) : undefined,
+      // Prisma's Json input accepts arrays/objects; undefined leaves it unset.
+      options: opt.data as never,
       order,
     },
     select: { id: true },
@@ -136,19 +175,36 @@ export async function addColumnAction(
 
 export async function updateColumnAction(
   id: string,
-  patch: { name?: string; options?: string[] },
+  patch: KbColumnConfig & { name?: string },
 ): Promise<ActionResult> {
   const me = await requireAuth();
-  const owner = await spaceIdOfColumn(id);
-  if (!owner) return notFound();
-  const guard = await editGuard(me, owner.spaceId);
+  const col0 = await prisma.knowledgeTableColumn.findUnique({
+    where: { id },
+    select: { type: true, table: { select: { spaceId: true } } },
+  });
+  if (!col0) return notFound();
+  const guard = await editGuard(me, col0.table.spaceId);
   if (guard) return guard;
+
+  const data: { name?: string; options?: unknown } = {};
+  if (patch.name !== undefined) data.name = patch.name.trim() || 'Столбец';
+
+  // Type-aware config update: only the field relevant to the column's type is
+  // applied, mirroring how addColumn stores `options`.
+  const type = col0.type as ColumnType;
+  const wantsConfig =
+    (type === 'SELECT' && patch.options !== undefined) ||
+    (type === 'RELATION' && patch.relationTableId !== undefined) ||
+    (type === 'FORMULA' && patch.formulaExpr !== undefined);
+  if (wantsConfig) {
+    const opt = await resolveColumnOptions(type, patch, col0.table.spaceId);
+    if ('error' in opt) return opt.error;
+    data.options = opt.data;
+  }
+
   const col = await prisma.knowledgeTableColumn.update({
     where: { id },
-    data: {
-      ...(patch.name !== undefined ? { name: patch.name.trim() || 'Столбец' } : {}),
-      ...(patch.options !== undefined ? { options: patch.options } : {}),
-    },
+    data: data as never,
     select: { tableId: true },
   });
   revalidatePath(`/knowledge/table/${col.tableId}`);

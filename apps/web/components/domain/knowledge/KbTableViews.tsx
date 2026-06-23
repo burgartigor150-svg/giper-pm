@@ -1,29 +1,35 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { CalendarDays, Columns3, Table2 } from 'lucide-react';
+import { CalendarDays, Columns3, FormInput, Table2 } from 'lucide-react';
 import type { KbColumn, KbRow } from '@/lib/knowledge/getTables';
-import { KbTableGrid } from './KbTableGrid';
+import type { KbRelationMap } from '@/lib/knowledge/tableCompute';
+import { KbTableGrid, type KbTableRef } from './KbTableGrid';
 import { KbTableBoard } from './KbTableBoard';
 import { KbTableCalendar } from './KbTableCalendar';
+import { KbTableForm } from './KbTableForm';
 
-type ViewKind = 'table' | 'board' | 'calendar';
+type ViewKind = 'table' | 'board' | 'calendar' | 'form';
 
 /**
  * Smart-table view switcher (TEAMLY «виды представления»): table grid, board
- * (grouped by a SELECT column), calendar (by a DATE column), plus client-side
- * filter + sort. Views are ephemeral (not persisted) in v1.
+ * (grouped by a SELECT column), calendar (by a DATE column), form (data entry),
+ * plus client-side filter + sort. Views are ephemeral (not persisted) in v1.
  */
 export function KbTableViews({
   tableId,
   columns,
   rows,
   canEdit,
+  relations = {},
+  spaceTables = [],
 }: {
   tableId: string;
   columns: KbColumn[];
   rows: KbRow[];
   canEdit: boolean;
+  relations?: KbRelationMap;
+  spaceTables?: KbTableRef[];
 }) {
   const [view, setView] = useState<ViewKind>('table');
   const [filterCol, setFilterCol] = useState('');
@@ -74,6 +80,7 @@ export function KbTableViews({
         {btn('table', 'Таблица', Table2)}
         {btn('board', 'Доска', Columns3)}
         {btn('calendar', 'Календарь', CalendarDays)}
+        {btn('form', 'Форма', FormInput)}
 
         <span className="mx-1 h-4 w-px bg-neutral-300 dark:bg-neutral-700" />
 
@@ -128,17 +135,23 @@ export function KbTableViews({
           canEdit={canEdit}
           filter={{ colId: filterCol, text: filterText }}
           sort={{ colId: sortCol, dir: sortDir }}
+          relations={relations}
+          spaceTables={spaceTables}
         />
       ) : view === 'board' ? (
         selectCols.length === 0 ? (
           <Empty text="Добавьте столбец типа «Список», чтобы построить доску." />
         ) : (
-          <KbTableBoard columns={columns} rows={viewRows} groupColId={groupCol} canEdit={canEdit} />
+          <KbTableBoard columns={columns} rows={viewRows} groupColId={groupCol} canEdit={canEdit} relations={relations} />
         )
-      ) : dateCols.length === 0 ? (
-        <Empty text="Добавьте столбец типа «Дата», чтобы построить календарь." />
+      ) : view === 'calendar' ? (
+        dateCols.length === 0 ? (
+          <Empty text="Добавьте столбец типа «Дата», чтобы построить календарь." />
+        ) : (
+          <KbTableCalendar columns={columns} rows={viewRows} dateColId={dateCol} />
+        )
       ) : (
-        <KbTableCalendar columns={columns} rows={viewRows} dateColId={dateCol} />
+        <KbTableForm tableId={tableId} columns={columns} rowCount={rows.length} relations={relations} canEdit={canEdit} />
       )}
     </div>
   );

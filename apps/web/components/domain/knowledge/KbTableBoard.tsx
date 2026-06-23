@@ -3,6 +3,7 @@
 import { useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import type { KbColumn, KbRow } from '@/lib/knowledge/getTables';
+import { displayCellValue, type KbRelationMap } from '@/lib/knowledge/tableCompute';
 import { updateCellAction } from '@/actions/knowledgeTables';
 
 const NONE = '__none__';
@@ -13,11 +14,13 @@ export function KbTableBoard({
   rows,
   groupColId,
   canEdit,
+  relations = {},
 }: {
   columns: KbColumn[];
   rows: KbRow[];
   groupColId: string;
   canEdit: boolean;
+  relations?: KbRelationMap;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -57,12 +60,11 @@ export function KbTableBoard({
             <div key={row.id} className="rounded-md border border-neutral-200 bg-background p-2 text-sm dark:border-neutral-800">
               <p className="truncate font-medium">{(labelCol && row.values[labelCol.id]) || 'Без названия'}</p>
               {otherCols.map((c) => {
-                const val = row.values[c.id];
-                if (!val) return null;
+                const disp = displayCellValue(c, row, columns, relations);
+                if (!disp) return null;
                 return (
                   <p key={c.id} className="truncate text-xs text-muted-foreground">
-                    <span className="opacity-70">{c.name}:</span>{' '}
-                    {c.type === 'CHECKBOX' ? (val === 'true' ? '✓' : '—') : val}
+                    <span className="opacity-70">{c.name}:</span> {disp}
                   </p>
                 );
               })}

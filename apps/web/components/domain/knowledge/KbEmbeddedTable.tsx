@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { Database } from 'lucide-react';
 import type { KbColumn, KbRow } from '@/lib/knowledge/getTables';
+import { displayCellValue } from '@/lib/knowledge/tableCompute';
 
 /**
  * Read-only render of a smart table embedded in an article via the
@@ -39,14 +40,13 @@ export function KbEmbeddedTable({
           <tbody>
             {rows.map((row) => (
               <tr key={row.id}>
-                {columns.map((c) => {
-                  const v = row.values[c.id] ?? '';
-                  return (
-                    <td key={c.id} className="border border-neutral-200 px-2 py-1 align-top dark:border-neutral-800">
-                      {c.type === 'CHECKBOX' ? (v === 'true' ? '✓' : '') : v}
-                    </td>
-                  );
-                })}
+                {columns.map((c) => (
+                  // Read-only embed: FORMULA computes; RELATION shows its label
+                  // (or «—» when target rows aren't loaded in the embed context).
+                  <td key={c.id} className="border border-neutral-200 px-2 py-1 align-top dark:border-neutral-800">
+                    {displayCellValue(c, row, columns, {})}
+                  </td>
+                ))}
               </tr>
             ))}
             {rows.length === 0 ? (
