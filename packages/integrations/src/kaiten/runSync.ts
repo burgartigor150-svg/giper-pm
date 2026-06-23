@@ -7,6 +7,8 @@ export const KAITEN_SOURCE = 'kaiten';
 
 /** Safety valve: refuse to import an implausibly huge board in one run, and say so. */
 const MAX_CARDS = 20_000;
+/** Per-card comment cap — bounds DB writes for a pathological card. */
+const MAX_COMMENTS_PER_CARD = 1_000;
 
 export type RunKaitenSyncResult = {
   ok: boolean;
@@ -16,6 +18,7 @@ export type RunKaitenSyncResult = {
   autoLinked: number;
   suggestions: number;
   reconciled: number;
+  comments: number;
   truncated: boolean;
   errors: string[];
   durationMs: number;
@@ -33,6 +36,8 @@ export type RunKaitenSyncParams = {
   /** Also pull archived cards and reflect their final state onto existing tasks
    *  (done→DONE, otherwise→CANCELED). Used by the periodic cron. */
   reconcileArchived?: boolean;
+  /** Mirror each card's Kaiten comments into the task's comments. */
+  syncComments?: boolean;
 };
 export type RunKaitenSyncOptions = { signal?: AbortSignal; now?: Date };
 
@@ -76,6 +81,7 @@ export async function runKaitenSync(
   let autoLinked = 0;
   let suggestions = 0;
   let reconciled = 0;
+  let commentsSynced = 0;
   let truncated = false;
   // Card ids seen in the live pass — the reconcile pass skips them so a card that
   // flips live→archived mid-run isn't wrongly CANCELED right after being imported.
@@ -159,6 +165,78 @@ export async function runKaitenSync(
     throw new Error('failed to allocate task number after retries');
   }
 
+  // Mirror a card's Kaiten comments into the task. Author identities don't map to
+  // local users, so the Kaiten author's name is prefixed into the body and the
+  // comment is attributed to the bot. externalId is task-scoped so the same card
+  // imported into two projects keeps independent comment copies.
+  async function syncCardComments(taskId: string, cardId: number): Promise<number> {
+    let list;
+    try {
+      list = await client.listCardComments(cardId);
+    } catch (e) {
+      errors.push(`comments ${cardId}: ${e instanceof Error ? e.message : String(e)}`);
+      return 0;
+    }
+    if (list.length > MAX_COMMENTS_PER_CARD) {
+      errors.push(`card ${cardId}: ${list.length} comments > cap ${MAX_COMMENTS_PER_CARD}, truncated`);
+      list = list.slice(0, MAX_COMMENTS_PER_CARD);
+    }
+    // Comment ids we keep this run — used to reconcile deletions below.
+    const keptIds = new Set<string>();
+    let n = 0;
+    for (const cm of list) {
+      if (cm.deleted) continue;
+      const text = (cm.text ?? '').trim();
+      if (!text) continue;
+      keptIds.add(String(cm.id));
+      // Neutralize markdown control chars in the author name so a name can't
+      // break the prefix formatting (rendering is React-escaped, so this is
+      // cosmetic, not a security fix).
+      const authorName = cm.author?.full_name?.trim().replace(/[*`_~[\]]/g, ' ').trim();
+      const body = (authorName ? `**${authorName}:**\n\n${text}` : text).slice(0, 50_000);
+      let createdAt = cm.created ? new Date(cm.created) : new Date();
+      if (!Number.isFinite(createdAt.getTime())) createdAt = new Date();
+      const externalId = `${taskId}:${cm.id}`;
+      try {
+        await prisma.comment.upsert({
+          where: { externalSource_externalId: { externalSource: KAITEN_SOURCE, externalId } },
+          update: { body, taskId },
+          create: {
+            taskId,
+            authorId: botId,
+            body,
+            source: 'WEB',
+            visibility: 'EXTERNAL',
+            externalSource: KAITEN_SOURCE,
+            externalId,
+            createdAt,
+          },
+        });
+        n++;
+      } catch (e) {
+        errors.push(`comment ${cm.id}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    // Reconcile deletions: drop local Kaiten comments for this task whose source
+    // comment is gone (deleted/removed upstream) — parity with the Bitrix mirror.
+    try {
+      const local = await prisma.comment.findMany({
+        where: { taskId, externalSource: KAITEN_SOURCE },
+        select: { id: true, externalId: true },
+      });
+      const stale = local
+        .filter((c) => {
+          const cid = c.externalId?.split(':')[1];
+          return cid && !keptIds.has(cid);
+        })
+        .map((c) => c.id);
+      if (stale.length) await prisma.comment.deleteMany({ where: { id: { in: stale } } });
+    } catch (e) {
+      errors.push(`comments-reconcile ${cardId}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    return n;
+  }
+
   outer: for await (const page of client.listCardsPaged({ boardId: params.boardId })) {
     if (opts.signal?.aborted) break;
     for (const card of page) {
@@ -191,6 +269,10 @@ export async function runKaitenSync(
           else updated++;
         }
         cards++;
+
+        if (params.syncComments && (card.comments_total ?? 0) > 0) {
+          commentsSynced += await syncCardComments(taskId, card.id);
+        }
 
         // Skip matching if this Kaiten task already has a DUPLICATES link.
         const alreadyLinked = await prisma.taskDependency.findFirst({
@@ -288,6 +370,7 @@ export async function runKaitenSync(
     autoLinked,
     suggestions,
     reconciled,
+    comments: commentsSynced,
     truncated,
     errors: errors.slice(0, 50),
     durationMs: Date.now() - startedAt.getTime(),

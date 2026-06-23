@@ -17,8 +17,19 @@ export type KaitenCard = {
   owner_id: number | null;
   due_date: string | null;
   external_id: string | null;
+  comments_total?: number;
   created: string;
   updated: string;
+};
+
+export type KaitenComment = {
+  id: number;
+  text: string;
+  author_id: number | null;
+  author?: { full_name?: string | null } | null;
+  created: string;
+  updated: string;
+  deleted?: boolean;
 };
 
 export type KaitenBoard = { id: number; title: string };
@@ -124,5 +135,10 @@ export class KaitenClient {
 
   async listBoards(spaceId: number): Promise<KaitenBoard[]> {
     return this.request<KaitenBoard[]>(`/spaces/${spaceId}/boards`);
+  }
+
+  /** All comments on a card (oldest-first as returned by Kaiten). */
+  async listCardComments(cardId: number): Promise<KaitenComment[]> {
+    return this.request<KaitenComment[]>(`/cards/${cardId}/comments`);
   }
 }

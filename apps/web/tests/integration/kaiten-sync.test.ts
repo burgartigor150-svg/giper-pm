@@ -1,18 +1,37 @@
 import { describe, it, expect } from 'vitest';
 import { prisma } from '@giper/db';
-import { runKaitenSync, KAITEN_SOURCE, type KaitenCard } from '@giper/integrations/kaiten';
+import { runKaitenSync, KAITEN_SOURCE, type KaitenCard, type KaitenComment } from '@giper/integrations/kaiten';
 import type { KaitenClient } from '@giper/integrations/kaiten';
 import { makeUser, makeProject, makeTask } from './helpers/factories';
 
 /** A KaitenClient stand-in that yields canned card pages (no network). Live cards
- *  for condition 1 (the default), archived cards for condition 2 (reconcile). */
-function fakeClient(livePages: KaitenCard[][], archivedPages: KaitenCard[][] = []): KaitenClient {
+ *  for condition 1 (the default), archived cards for condition 2 (reconcile).
+ *  commentsByCard maps a card id to its canned comments. */
+function fakeClient(
+  livePages: KaitenCard[][],
+  archivedPages: KaitenCard[][] = [],
+  commentsByCard: Record<number, KaitenComment[]> = {},
+): KaitenClient {
   return {
     async *listCardsPaged(opts: { condition?: number }) {
       const pages = opts?.condition === 2 ? archivedPages : livePages;
       for (const page of pages) yield page;
     },
+    async listCardComments(cardId: number) {
+      return commentsByCard[cardId] ?? [];
+    },
   } as unknown as KaitenClient;
+}
+
+function comment(over: Partial<KaitenComment> & { id: number; text: string }): KaitenComment {
+  return {
+    author_id: 1,
+    author: { full_name: 'Иван' },
+    created: '2026-06-01T00:00:00Z',
+    updated: '2026-06-01T00:00:00Z',
+    deleted: false,
+    ...over,
+  };
 }
 
 function card(over: Partial<KaitenCard> & { id: number; title: string }): KaitenCard {
@@ -26,6 +45,7 @@ function card(over: Partial<KaitenCard> & { id: number; title: string }): Kaiten
     owner_id: null,
     due_date: null,
     external_id: null,
+    comments_total: 0,
     created: '2026-06-01T00:00:00Z',
     updated: '2026-06-01T00:00:00Z',
     description: '',
@@ -238,6 +258,88 @@ describe('runKaitenSync', () => {
     expect(
       await prisma.task.count({ where: { projectId: project.id, externalSource: 'kaiten', externalId: '999' } }),
     ).toBe(0);
+  });
+
+  it('syncComments mirrors card comments (author prefixed, bot-authored, idempotent, skips empty/deleted)', async () => {
+    const owner = await makeUser();
+    const project = await makeProject({ ownerId: owner.id });
+
+    const cards = [[card({ id: 800, title: 'Карточка с комментами', comments_total: 3 })]];
+    const comments = {
+      800: [
+        comment({ id: 9001, text: 'Первый коммент', author: { full_name: 'Пётр' } }),
+        comment({ id: 9002, text: 'Удалённый', deleted: true }),
+        comment({ id: 9003, text: '   ', author: { full_name: 'Аноним' } }), // empty after trim
+      ],
+    };
+
+    const res = await runKaitenSync(prisma, fakeClient(cards, [], comments), {
+      projectId: project.id,
+      boardId: 7,
+      syncComments: true,
+    });
+    expect(res.comments).toBe(1); // only the one real, non-empty comment
+
+    const t = await prisma.task.findFirstOrThrow({
+      where: { projectId: project.id, externalSource: 'kaiten', externalId: '800' },
+      select: { id: true },
+    });
+    const rows = await prisma.comment.findMany({ where: { taskId: t.id }, orderBy: { createdAt: 'asc' } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].body).toContain('Пётр');
+    expect(rows[0].body).toContain('Первый коммент');
+    expect(rows[0].externalSource).toBe('kaiten');
+
+    // Idempotent: re-sync doesn't duplicate.
+    const res2 = await runKaitenSync(prisma, fakeClient(cards, [], comments), {
+      projectId: project.id,
+      boardId: 7,
+      syncComments: true,
+    });
+    expect(res2.comments).toBe(1);
+    expect(await prisma.comment.count({ where: { taskId: t.id } })).toBe(1);
+
+    // Without syncComments, no fetch/no rows added.
+    const noComments = [[card({ id: 801, title: 'Без синка комментов', comments_total: 5 })]];
+    await runKaitenSync(prisma, fakeClient(noComments, [], { 801: [comment({ id: 9100, text: 'x' })] }), {
+      projectId: project.id,
+      boardId: 7,
+    });
+    const t2 = await prisma.task.findFirstOrThrow({
+      where: { projectId: project.id, externalSource: 'kaiten', externalId: '801' },
+      select: { id: true },
+    });
+    expect(await prisma.comment.count({ where: { taskId: t2.id } })).toBe(0);
+  });
+
+  it('delete-reconciles a Kaiten comment that disappears upstream', async () => {
+    const owner = await makeUser();
+    const project = await makeProject({ ownerId: owner.id });
+
+    await runKaitenSync(
+      prisma,
+      fakeClient([[card({ id: 820, title: 'C', comments_total: 2 })]], [], {
+        820: [comment({ id: 1, text: 'остаётся' }), comment({ id: 2, text: 'уйдёт' })],
+      }),
+      { projectId: project.id, boardId: 7, syncComments: true },
+    );
+    const t = await prisma.task.findFirstOrThrow({
+      where: { projectId: project.id, externalSource: 'kaiten', externalId: '820' },
+      select: { id: true },
+    });
+    expect(await prisma.comment.count({ where: { taskId: t.id } })).toBe(2);
+
+    // Upstream now only has comment 1 (comment 2 deleted in Kaiten).
+    await runKaitenSync(
+      prisma,
+      fakeClient([[card({ id: 820, title: 'C', comments_total: 1 })]], [], {
+        820: [comment({ id: 1, text: 'остаётся' })],
+      }),
+      { projectId: project.id, boardId: 7, syncComments: true },
+    );
+    const rows = await prisma.comment.findMany({ where: { taskId: t.id } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].externalId).toContain(':1');
   });
 
   it('does not let two cards both claim the same Bitrix twin in one run', async () => {

@@ -266,12 +266,19 @@ export async function runKaitenSyncNow(
     const result = await runKaitenSync(
       prisma,
       client,
-      { projectId, boardId: c.boardId, matchScope: c.matchScope ?? 'project', reconcileArchived: opts?.reconcileArchived },
+      {
+        projectId,
+        boardId: c.boardId,
+        matchScope: c.matchScope ?? 'project',
+        reconcileArchived: opts?.reconcileArchived,
+        syncComments: true,
+      },
       { signal: opts?.signal },
     );
     const summary =
       `Карточек: ${result.cards} (новых: ${result.created}, обновлено: ${result.updated}), ` +
       `связано дублей: ${result.autoLinked}, кандидатов: ${result.suggestions}` +
+      (result.comments ? `, комментариев: ${result.comments}` : '') +
       (result.reconciled ? `, архивных обновлено: ${result.reconciled}` : '') +
       (result.truncated ? `, достигнут лимит импорта` : '') +
       (result.errors.length ? `, ошибок: ${result.errors.length}` : '');

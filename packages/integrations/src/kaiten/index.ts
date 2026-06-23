@@ -3,6 +3,7 @@ export {
   kaitenBaseUrl,
   normalizeKaitenDomain,
   type KaitenCard,
+  type KaitenComment,
   type KaitenBoard,
   type KaitenClientOptions,
 } from './client';
