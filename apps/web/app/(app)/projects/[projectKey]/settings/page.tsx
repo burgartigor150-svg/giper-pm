@@ -3,6 +3,8 @@ import { prisma } from '@giper/db';
 import { Card, CardContent, CardHeader, CardTitle } from '@giper/ui/components/Card';
 import { requireAuth } from '@/lib/auth';
 import { RepoConnections } from '@/components/domain/RepoConnections';
+import { KaitenConnection } from '@/components/domain/KaitenConnection';
+import { getKaitenStatus } from '@/lib/integrations/kaiten';
 import { getProject } from '@/lib/projects';
 import { canEditProject } from '@/lib/permissions';
 import { getEffectiveCapsForProject } from '@/lib/capabilities';
@@ -83,6 +85,7 @@ export default async function ProjectSettingsPage({
     select: { id: true, provider: true, repo: true, status: true, tokenHint: true, baseUrl: true },
   });
   const spaces = await getSpaces();
+  const kaitenStatus = await getKaitenStatus(project.id);
   const [projectRoles, projectRoleAssignments] = await Promise.all([
     listProjectAssignableRoles(),
     listProjectMemberAssignments(project.id),
@@ -254,6 +257,15 @@ export default async function ProjectSettingsPage({
             initial={repoConnections}
             canManage
           />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Kaiten — импорт карточек</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <KaitenConnection projectKey={project.key} initial={kaitenStatus} canManage />
         </CardContent>
       </Card>
 
