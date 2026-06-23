@@ -11,6 +11,7 @@ export {
 } from './client';
 export { getKaitenBotUserId, KAITEN_BOT_EMAIL } from './botUser';
 export { syncKaitenUsers, buildKaitenUserMap, type SyncKaitenUsersResult } from './syncUsers';
+export { pushKaitenComment } from './outbound';
 export {
   normalizeTitle,
   titleSimilarity,
