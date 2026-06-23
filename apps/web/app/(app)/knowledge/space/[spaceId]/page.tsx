@@ -11,9 +11,11 @@ import {
 } from '@/lib/knowledge/getKnowledge';
 import { listSpaceTables } from '@/lib/knowledge/getTables';
 import { getSpaceAccessById } from '@/lib/knowledge/access';
+import { getSpaceAnalytics } from '@/lib/knowledge/getAnalytics';
 import { listUsers } from '@/lib/users/listUsers';
 import { KbSpaceHeader } from '@/components/domain/knowledge/KbSpaceHeader';
 import { KbSpaceTables } from '@/components/domain/knowledge/KbSpaceTables';
+import { KbSpaceAnalytics } from '@/components/domain/knowledge/KbSpaceAnalytics';
 
 export default async function KnowledgeSpacePage({
   params,
@@ -36,10 +38,11 @@ export default async function KnowledgeSpacePage({
     listTemplatesForSpace(spaceId),
     listSpaceTables(spaceId),
   ]);
-  // Member management data is only needed (and only exposed) to managers.
+  // Member management + analytics are only needed (and only exposed) to managers.
   const [members, allUsers] = canManage
     ? await Promise.all([getSpaceMembers(spaceId), listUsers()])
     : [[], []];
+  const analytics = canManage ? await getSpaceAnalytics(spaceId) : null;
   const topLevel = articles.filter((a) => a.parentId === null);
   // child count per parent, for "N подстатей" hints on the list
   const childCount = new Map<string, number>();
@@ -92,6 +95,8 @@ export default async function KnowledgeSpacePage({
       )}
 
       <KbSpaceTables spaceId={space.id} tables={tables} canEdit={canEdit} />
+
+      {analytics ? <KbSpaceAnalytics analytics={analytics} /> : null}
     </div>
   );
 }

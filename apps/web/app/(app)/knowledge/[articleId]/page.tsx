@@ -10,6 +10,8 @@ import {
 import { getSpaceAccessById } from '@/lib/knowledge/access';
 import { getArticleComments, getArticleReactions } from '@/lib/knowledge/getComments';
 import { getTable, listSpaceTables } from '@/lib/knowledge/getTables';
+import { getArticleViewCount } from '@/lib/knowledge/getAnalytics';
+import { KbViewTracker } from '@/components/domain/knowledge/KbViewTracker';
 import { extractHeadings, extractTableIds } from '@/lib/knowledge/renderMarkdown';
 import { KbArticleEditor } from '@/components/domain/knowledge/KbArticleEditor';
 import { KbToc } from '@/components/domain/knowledge/KbToc';
@@ -29,11 +31,12 @@ export default async function KnowledgeArticlePage({
   const access = await getSpaceAccessById(me, article.spaceId);
   if (!access.canView) notFound();
 
-  const [crumbs, favorite, comments, articleReactions] = await Promise.all([
+  const [crumbs, favorite, comments, articleReactions, viewCount] = await Promise.all([
     getArticleBreadcrumbs(articleId),
     isArticleFavorite(me.id, articleId),
     getArticleComments(articleId, me.id),
     getArticleReactions(articleId, me.id),
+    getArticleViewCount(articleId),
   ]);
   const canEdit = access.canEdit;
   const headings = extractHeadings(article.content);
@@ -63,6 +66,7 @@ export default async function KnowledgeArticlePage({
 
   return (
     <div className="flex gap-8">
+      <KbViewTracker articleId={article.id} />
       <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-1 flex-col gap-5">
         <nav className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
           <Link href="/knowledge" className="hover:text-foreground">
@@ -83,6 +87,7 @@ export default async function KnowledgeArticlePage({
               </span>
             );
           })}
+          <span className="ml-1 shrink-0">· 👁 {viewCount}</span>
         </nav>
 
         <KbArticleEditor
