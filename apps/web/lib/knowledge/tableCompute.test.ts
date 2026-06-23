@@ -28,6 +28,16 @@ describe('computeFormula', () => {
     expect(computeFormula(sum, { ...row, values: { c1: '100' } }, columns)).toBeNull();
     expect(computeFormula(sum, { ...row, values: { c1: '100', c2: 'abc' } }, columns)).toBeNull();
   });
+  it('resolves chained formulas (a formula referencing another formula)', () => {
+    // total = {Сумма} + {Цена}; Сумма = {Цена} * {Кол-во} = 300 → total = 400
+    const total = col({ id: 'c9', name: 'Итого', type: 'FORMULA', formulaExpr: '{Сумма} + {Цена}' });
+    expect(computeFormula(total, row, [...columns, total])).toBe(400);
+  });
+  it('returns null on a circular formula reference instead of looping', () => {
+    const a = col({ id: 'ca', name: 'A', type: 'FORMULA', formulaExpr: '{B} + 1' });
+    const b = col({ id: 'cb', name: 'B', type: 'FORMULA', formulaExpr: '{A} + 1' });
+    expect(computeFormula(a, { id: 'r', order: 0, values: {} }, [a, b])).toBeNull();
+  });
 });
 
 describe('relationLabel', () => {

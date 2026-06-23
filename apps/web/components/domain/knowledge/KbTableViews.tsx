@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import { CalendarDays, Columns3, FormInput, Table2 } from 'lucide-react';
 import type { KbColumn, KbRow } from '@/lib/knowledge/getTables';
-import type { KbRelationMap } from '@/lib/knowledge/tableCompute';
+import { displayCellValue, cellNumber, type KbRelationMap } from '@/lib/knowledge/tableCompute';
 import { KbTableGrid, type KbTableRef } from './KbTableGrid';
 import { KbTableBoard } from './KbTableBoard';
 import { KbTableCalendar } from './KbTableCalendar';
@@ -43,24 +43,34 @@ export function KbTableViews({
   const dateCols = columns.filter((c) => c.type === 'DATE');
 
   const viewRows = useMemo(() => {
+    const byId = new Map(columns.map((c) => [c.id, c]));
     let r = rows;
     if (filterCol && filterText.trim()) {
       const q = filterText.trim().toLowerCase();
-      r = r.filter((row) => (row.values[filterCol] ?? '').toLowerCase().includes(q));
+      const col = byId.get(filterCol);
+      r = r.filter((row) =>
+        col
+          ? displayCellValue(col, row, columns, relations).toLowerCase().includes(q)
+          : (row.values[filterCol] ?? '').toLowerCase().includes(q),
+      );
     }
     if (sortCol) {
-      const col = columns.find((c) => c.id === sortCol);
+      const col = byId.get(sortCol);
       r = [...r].sort((a, b) => {
-        const av = a.values[sortCol] ?? '';
-        const bv = b.values[sortCol] ?? '';
         let cmp: number;
-        if (col?.type === 'NUMBER') cmp = (parseFloat(av) || 0) - (parseFloat(bv) || 0);
-        else cmp = av.localeCompare(bv, 'ru');
+        if (col && (col.type === 'NUMBER' || col.type === 'FORMULA')) {
+          cmp = cellNumber(col, a, columns) - cellNumber(col, b, columns);
+        } else if (col) {
+          cmp = displayCellValue(col, a, columns, relations).localeCompare(
+            displayCellValue(col, b, columns, relations),
+            'ru',
+          );
+        } else cmp = 0;
         return sortDir === 'asc' ? cmp : -cmp;
       });
     }
     return r;
-  }, [rows, filterCol, filterText, sortCol, sortDir, columns]);
+  }, [rows, filterCol, filterText, sortCol, sortDir, columns, relations]);
 
   const btn = (k: ViewKind, label: string, Icon: typeof Table2) => (
     <button

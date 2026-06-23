@@ -1,4 +1,3 @@
-import Link from 'next/link';
 import { Database } from 'lucide-react';
 import type { KbColumn, KbRow } from '@/lib/knowledge/getTables';
 import { displayCellValue } from '@/lib/knowledge/tableCompute';

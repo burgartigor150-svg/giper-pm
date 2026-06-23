@@ -3,7 +3,7 @@
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Check, Plus } from 'lucide-react';
-import { addRowAction, updateCellAction } from '@/actions/knowledgeTables';
+import { addRowWithValuesAction } from '@/actions/knowledgeTables';
 import type { KbColumn } from '@/lib/knowledge/getTables';
 import type { KbRelationMap } from '@/lib/knowledge/tableCompute';
 
@@ -46,14 +46,10 @@ export function KbTableForm({
 
   function submit() {
     startTransition(async () => {
-      const res = await addRowAction(tableId);
+      // One atomic action creates the row WITH its cells — a failed submit never
+      // leaves a half-filled orphan row, and the disabled button blocks re-submit.
+      const res = await addRowWithValuesAction(tableId, draft);
       if (!res.ok) { alert(res.error.message); return; }
-      const rowId = res.data!.id;
-      const entries = Object.entries(draft).filter(([, v]) => v !== '' && v !== undefined);
-      for (const [colId, v] of entries) {
-        const r = await updateCellAction(rowId, colId, v);
-        if (!r.ok) { alert(r.error.message); return; }
-      }
       setDraft({});
       setSavedAt((n) => n + 1);
       router.refresh();

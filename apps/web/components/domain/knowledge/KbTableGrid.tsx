@@ -12,7 +12,7 @@ import {
   updateCellAction,
 } from '@/actions/knowledgeTables';
 import type { KbColumn, KbRow, KbColumnType, KbRelationOption } from '@/lib/knowledge/getTables';
-import { computeFormula, formatNumber, type KbRelationMap } from '@/lib/knowledge/tableCompute';
+import { computeFormula, formatNumber, displayCellValue, cellNumber, type KbRelationMap } from '@/lib/knowledge/tableCompute';
 
 const TYPE_LABELS: Record<KbColumnType, string> = {
   TEXT: 'Текст',
@@ -106,23 +106,40 @@ function GridInner({
 
   // Filter/sort applied at render over LOCAL values (so just-saved edits are
   // reflected and nothing remounts). Editing always targets the real row id.
+  // Resolve filter/sort against the DISPLAYED value (relation label, computed
+  // formula) over LIVE local edits — so RELATION/FORMULA columns filter & sort
+  // by what the user sees, not the raw stored id / absent value.
+  const liveRow = (row: KbRow): KbRow => ({ ...row, values: values[row.id] ?? row.values });
   const displayRows = useMemo(() => {
+    const byId = new Map(columns.map((c) => [c.id, c]));
     let r = rows;
     if (filter?.colId && filter.text.trim()) {
       const q = filter.text.trim().toLowerCase();
-      r = r.filter((row) => (values[row.id]?.[filter.colId] ?? '').toLowerCase().includes(q));
+      const col = byId.get(filter.colId);
+      r = r.filter((row) =>
+        col
+          ? displayCellValue(col, liveRow(row), columns, relations).toLowerCase().includes(q)
+          : (values[row.id]?.[filter.colId] ?? '').toLowerCase().includes(q),
+      );
     }
     if (sort?.colId) {
-      const col = columns.find((c) => c.id === sort.colId);
+      const col = byId.get(sort.colId);
       r = [...r].sort((a, b) => {
-        const av = values[a.id]?.[sort.colId] ?? '';
-        const bv = values[b.id]?.[sort.colId] ?? '';
-        const cmp = col?.type === 'NUMBER' ? (parseFloat(av) || 0) - (parseFloat(bv) || 0) : av.localeCompare(bv, 'ru');
+        let cmp: number;
+        if (col && (col.type === 'NUMBER' || col.type === 'FORMULA')) {
+          cmp = cellNumber(col, liveRow(a), columns) - cellNumber(col, liveRow(b), columns);
+        } else if (col) {
+          cmp = displayCellValue(col, liveRow(a), columns, relations).localeCompare(
+            displayCellValue(col, liveRow(b), columns, relations),
+            'ru',
+          );
+        } else cmp = 0;
         return sort.dir === 'asc' ? cmp : -cmp;
       });
     }
     return r;
-  }, [rows, values, filter, sort, columns]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, values, filter, sort, columns, relations]);
 
   function setCell(rowId: string, colId: string, value: string) {
     setValues((v) => ({ ...v, [rowId]: { ...(v[rowId] ?? {}), [colId]: value } }));

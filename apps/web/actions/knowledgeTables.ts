@@ -190,11 +190,12 @@ export async function updateColumnAction(
   if (patch.name !== undefined) data.name = patch.name.trim() || 'Столбец';
 
   // Type-aware config update: only the field relevant to the column's type is
-  // applied, mirroring how addColumn stores `options`.
+  // applied, mirroring how addColumn stores `options`. RELATION re-targeting is
+  // intentionally NOT supported — changing the target would orphan every stored
+  // cell id against the new table; relation target is fixed at creation.
   const type = col0.type as ColumnType;
   const wantsConfig =
     (type === 'SELECT' && patch.options !== undefined) ||
-    (type === 'RELATION' && patch.relationTableId !== undefined) ||
     (type === 'FORMULA' && patch.formulaExpr !== undefined);
   if (wantsConfig) {
     const opt = await resolveColumnOptions(type, patch, col0.table.spaceId);
@@ -257,14 +258,88 @@ export async function updateCellAction(
   value: string,
 ): Promise<ActionResult> {
   const me = await requireAuth();
-  const owner = await spaceIdOfRow(rowId);
-  if (!owner) return notFound();
-  const guard = await editGuard(me, owner.spaceId);
+  const row = await prisma.knowledgeTableRow.findUnique({
+    where: { id: rowId },
+    select: { tableId: true, table: { select: { spaceId: true } } },
+  });
+  if (!row) return notFound();
+  const guard = await editGuard(me, row.table.spaceId);
   if (guard) return guard;
+
+  // The column must belong to the SAME table (no writing under a foreign/stale id).
+  const col = await prisma.knowledgeTableColumn.findUnique({
+    where: { id: columnId },
+    select: { tableId: true, type: true, options: true },
+  });
+  if (!col || col.tableId !== row.tableId) return notFound();
+  // FORMULA cells are computed on read — they must never be persisted.
+  if (col.type === 'FORMULA') return validationErr('Формульное поле вычисляется автоматически');
+  // A RELATION value is a target-row id; verify it exists in the target table
+  // (empty clears the cell). Guards against dangling ids from direct calls.
+  if (col.type === 'RELATION' && value) {
+    const opt = col.options && typeof col.options === 'object' && !Array.isArray(col.options)
+      ? (col.options as Record<string, unknown>)
+      : null;
+    const targetId = opt && typeof opt.tableId === 'string' ? opt.tableId : null;
+    const exists = targetId
+      ? await prisma.knowledgeTableRow.count({ where: { id: value, tableId: targetId } })
+      : 0;
+    if (!exists) return validationErr('Связанная запись не найдена');
+  }
+
   await prisma.$executeRaw`
     UPDATE "KnowledgeTableRow"
     SET "values" = jsonb_set(COALESCE("values", '{}'::jsonb), ARRAY[${columnId}]::text[], to_jsonb(${value}::text), true),
         "updatedAt" = now()
     WHERE "id" = ${rowId}`;
   return { ok: true };
+}
+
+/**
+ * Create a row AND set its cells in one shot (used by the Form view). Atomic
+ * create-with-values means a failed/abandoned submit never leaves a half-filled
+ * orphan row. FORMULA values are dropped (computed); RELATION values are kept
+ * only when they point at an existing row in the target table.
+ */
+export async function addRowWithValuesAction(
+  tableId: string,
+  values: Record<string, string>,
+): Promise<ActionResult<{ id: string }>> {
+  const me = await requireAuth();
+  const t = await spaceIdOfTable(tableId);
+  if (!t) return notFound();
+  const guard = await editGuard(me, t.spaceId);
+  if (guard) return guard;
+
+  const cols = await prisma.knowledgeTableColumn.findMany({
+    where: { tableId },
+    select: { id: true, type: true, options: true },
+  });
+  const byId = new Map(cols.map((c) => [c.id, c]));
+  const clean: Record<string, string> = {};
+  for (const [colId, raw] of Object.entries(values ?? {})) {
+    const col = byId.get(colId);
+    if (!col || col.type === 'FORMULA') continue;
+    const v = String(raw ?? '');
+    if (v === '') continue;
+    if (col.type === 'RELATION') {
+      const opt = col.options && typeof col.options === 'object' && !Array.isArray(col.options)
+        ? (col.options as Record<string, unknown>)
+        : null;
+      const targetId = opt && typeof opt.tableId === 'string' ? opt.tableId : null;
+      const exists = targetId
+        ? await prisma.knowledgeTableRow.count({ where: { id: v, tableId: targetId } })
+        : 0;
+      if (!exists) continue; // skip dangling relation refs
+    }
+    clean[colId] = v;
+  }
+
+  const order = await nextOrder('row', tableId);
+  const row = await prisma.knowledgeTableRow.create({
+    data: { tableId, order, values: clean },
+    select: { id: true },
+  });
+  revalidatePath(`/knowledge/table/${tableId}`);
+  return { ok: true, data: { id: row.id } };
 }

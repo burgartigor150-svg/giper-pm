@@ -25,4 +25,22 @@ describe('evaluateFormula', () => {
     expect(evaluateFormula('', get)).toBeNull();
     expect(evaluateFormula('alert(1)', get)).toBeNull();
   });
+
+  it('handles unary minus / plus', () => {
+    expect(evaluateFormula('-5', get)).toBe(-5);
+    expect(evaluateFormula('(-5)', get)).toBe(-5);
+    expect(evaluateFormula('{Цена} * -1', get)).toBe(-100);
+    expect(evaluateFormula('-{Скидка}', get)).toBe(-10);
+    expect(evaluateFormula('{Цена} + -{Скидка}', get)).toBe(90);
+    expect(evaluateFormula('3 - -2', get)).toBe(5);
+    expect(evaluateFormula('+7', get)).toBe(7);
+    expect(evaluateFormula('-2 ^ 2', get)).toBeNull(); // ^ unsupported
+  });
+
+  it('rejects malformed multi-dot numbers instead of truncating', () => {
+    expect(evaluateFormula('1.2.3', get)).toBeNull();
+    expect(evaluateFormula('3..5', get)).toBeNull();
+    expect(evaluateFormula('1.2.3 + 1', get)).toBeNull();
+    expect(evaluateFormula('.5 + .5', get)).toBe(1); // leading-dot decimals still valid
+  });
 });
