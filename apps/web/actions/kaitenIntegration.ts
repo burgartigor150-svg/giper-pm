@@ -10,6 +10,8 @@ import {
   saveKaitenConnection,
   disconnectKaiten,
   runKaitenSyncNow,
+  acceptKaitenSuggestion,
+  rejectKaitenSuggestion,
 } from '@/lib/integrations/kaiten';
 
 type ConnectResult = { ok: true } | { ok: false; error: string };
@@ -93,4 +95,32 @@ export async function syncKaitenAction(input: { projectKey: string }): Promise<S
   revalidatePath(`/projects/${input.projectKey}/settings`);
   revalidatePath(`/projects/${input.projectKey}`);
   return { ok: outcome.ok, summary: outcome.summary };
+}
+
+/** Verify the suggestion belongs to the gated project (no cross-project id abuse). */
+async function gateSuggestion(projectKey: string, suggestionId: string): Promise<GateOk | GateFail> {
+  const gated = await gateProject(projectKey);
+  if (!gated.ok) return gated;
+  const s = await prisma.kaitenMatchSuggestion.findUnique({ where: { id: suggestionId }, select: { projectId: true } });
+  if (!s || s.projectId !== gated.projectId) return { ok: false, error: 'Кандидат не найден' };
+  return gated;
+}
+
+export async function acceptKaitenSuggestionAction(input: { projectKey: string; suggestionId: string }): Promise<ConnectResult> {
+  const gated = await gateSuggestion(input.projectKey, input.suggestionId);
+  if (!gated.ok) return { ok: false, error: gated.error };
+  const me = await requireAuth();
+  const ok = await acceptKaitenSuggestion(input.suggestionId, me.id);
+  if (!ok) return { ok: false, error: 'Кандидат уже обработан' };
+  revalidatePath(`/projects/${input.projectKey}/settings`);
+  return { ok: true };
+}
+
+export async function rejectKaitenSuggestionAction(input: { projectKey: string; suggestionId: string }): Promise<ConnectResult> {
+  const gated = await gateSuggestion(input.projectKey, input.suggestionId);
+  if (!gated.ok) return { ok: false, error: gated.error };
+  const me = await requireAuth();
+  await rejectKaitenSuggestion(input.suggestionId, me.id);
+  revalidatePath(`/projects/${input.projectKey}/settings`);
+  return { ok: true };
 }

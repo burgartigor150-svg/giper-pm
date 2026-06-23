@@ -135,6 +135,66 @@ export async function buildKaitenClient(projectId: string, signal?: AbortSignal)
   return new KaitenClient({ domain: c.domain, apiKey: decryptToken(c.tokenEnc), signal });
 }
 
+export type KaitenSuggestion = {
+  id: string;
+  score: number;
+  kaiten: { id: string; title: string; key: string };
+  bitrix: { id: string; title: string; key: string };
+};
+
+const taskKey = (t: { number: number; project: { key: string } }) => `${t.project.key}-${t.number}`;
+
+/** Pending Kaiten↔Bitrix match suggestions for a project, newest/highest first. */
+export async function getKaitenSuggestions(projectId: string): Promise<KaitenSuggestion[]> {
+  const rows = await prisma.kaitenMatchSuggestion.findMany({
+    where: { projectId, status: 'pending' },
+    orderBy: [{ score: 'desc' }, { createdAt: 'desc' }],
+    take: 200,
+    select: {
+      id: true,
+      score: true,
+      kaitenTask: { select: { id: true, title: true, number: true, project: { select: { key: true } } } },
+      bitrixTask: { select: { id: true, title: true, number: true, project: { select: { key: true } } } },
+    },
+  });
+  return rows.map((r) => ({
+    id: r.id,
+    score: r.score,
+    kaiten: { id: r.kaitenTask.id, title: r.kaitenTask.title, key: taskKey(r.kaitenTask) },
+    bitrix: { id: r.bitrixTask.id, title: r.bitrixTask.title, key: taskKey(r.bitrixTask) },
+  }));
+}
+
+/** Accept a suggestion: create the DUPLICATES link and mark it accepted. Returns
+ *  false if it was already decided (e.g. a concurrent accept won the race). */
+export async function acceptKaitenSuggestion(id: string, userId: string): Promise<boolean> {
+  const s = await prisma.kaitenMatchSuggestion.findUnique({
+    where: { id },
+    select: { kaitenTaskId: true, bitrixTaskId: true, status: true },
+  });
+  if (!s || s.status !== 'pending') return false;
+  // Claim the row first (atomic guard) so a concurrent accept can't double-apply.
+  const claimed = await prisma.kaitenMatchSuggestion.updateMany({
+    where: { id, status: 'pending' },
+    data: { status: 'accepted', decidedAt: new Date(), decidedById: userId },
+  });
+  if (claimed.count === 0) return false;
+  await prisma.taskDependency
+    .create({ data: { fromTaskId: s.kaitenTaskId, toTaskId: s.bitrixTaskId, linkType: 'DUPLICATES', createdById: userId } })
+    .catch(() => {}); // unique conflict → link already exists; row is already marked accepted
+  return true;
+}
+
+/** Reject a suggestion: suppress the pair so future syncs don't re-propose it.
+ *  Returns false if it was already decided. */
+export async function rejectKaitenSuggestion(id: string, userId: string): Promise<boolean> {
+  const upd = await prisma.kaitenMatchSuggestion.updateMany({
+    where: { id, status: 'pending' },
+    data: { status: 'rejected', decidedAt: new Date(), decidedById: userId },
+  });
+  return upd.count > 0;
+}
+
 export type KaitenSyncOutcome = { ok: boolean; summary: string; result?: RunKaitenSyncResult };
 
 /**

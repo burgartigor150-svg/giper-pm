@@ -89,11 +89,21 @@ export async function runKaitenSync(
   // prior run, so re-syncs (in any card order) never double-claim a twin.
   const claimedBitrixIds = new Set<string>();
   if (bitrixTasks.length > 0) {
-    const existing = await prisma.taskDependency.findMany({
-      where: { linkType: 'DUPLICATES', toTaskId: { in: bitrixTasks.map((b) => b.id) } },
-      select: { toTaskId: true },
-    });
+    const bitrixIds = bitrixTasks.map((b) => b.id);
+    const [existing, pending] = await Promise.all([
+      prisma.taskDependency.findMany({
+        where: { linkType: 'DUPLICATES', toTaskId: { in: bitrixIds } },
+        select: { toTaskId: true },
+      }),
+      // A Bitrix task already awaiting review (pending suggestion) is claimed too,
+      // so a re-sync (in any card order) never proposes the same twin to a 2nd card.
+      prisma.kaitenMatchSuggestion.findMany({
+        where: { status: 'pending', bitrixTaskId: { in: bitrixIds } },
+        select: { bitrixTaskId: true },
+      }),
+    ]);
     for (const e of existing) claimedBitrixIds.add(e.toTaskId);
+    for (const s of pending) claimedBitrixIds.add(s.bitrixTaskId);
   }
 
   // Allocate a fresh per-project number, retrying if a concurrent insert took it.
@@ -194,7 +204,27 @@ export async function runKaitenSync(
             claimedBitrixIds.add(match.id);
           }
         } else {
-          suggestions++;
+          // Medium confidence → persist for manual review, unless this exact pair
+          // was already decided (accepted/rejected) so re-syncs don't re-propose it.
+          const prior = await prisma.kaitenMatchSuggestion.findUnique({
+            where: { kaitenTaskId_bitrixTaskId: { kaitenTaskId: taskId, bitrixTaskId: match.id } },
+            select: { status: true },
+          });
+          if (!prior) {
+            try {
+              await prisma.kaitenMatchSuggestion.create({
+                data: { projectId: params.projectId, kaitenTaskId: taskId, bitrixTaskId: match.id, score: match.score },
+              });
+              suggestions++;
+            } catch (e) {
+              if (!isUniqueViolation(e)) throw e; // concurrent create of same pair → tolerate; other errors surface
+            }
+            // One twin ↔ one card: don't propose the same Bitrix task to another card this run.
+            claimedBitrixIds.add(match.id);
+          } else if (prior.status === 'pending') {
+            // Already proposed (and pre-claimed via the seed above) — keep it claimed, don't recount.
+            claimedBitrixIds.add(match.id);
+          }
         }
       } catch (e) {
         errors.push(`card ${card.id}: ${e instanceof Error ? e.message : String(e)}`);

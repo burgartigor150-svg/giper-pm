@@ -473,6 +473,7 @@ model Project {
   integrations  ProjectIntegration[]
   /// Connected GitHub/GitLab repositories (in-app setup: token + auto webhook).
   repoConnections RepoConnection[]
+  kaitenSuggestions KaitenMatchSuggestion[]
   tags          Tag[]
   channels      Channel[]
   /// Telegram supergroups / channels mirrored into giper-pm for harvest → tasks.
@@ -1410,6 +1411,8 @@ model Task {
   pullRequests  TaskPullRequest[]
   designs       TaskDesign[]
   assignments   TaskAssignment[]
+  kaitenSuggAsKaiten KaitenMatchSuggestion[] @relation("KaitenSuggKaiten")
+  kaitenSuggAsBitrix KaitenMatchSuggestion[] @relation("KaitenSuggBitrix")
   // Native tag system (separate from the legacy `tags String[]` mirror
   // of Bitrix24 TAGS payloads above).
   taskTags      TaskTag[]
@@ -1553,6 +1556,27 @@ model TaskDependency {
 
   @@unique([fromTaskId, toTaskId, linkType])
   @@index([toTaskId])
+}
+
+// A medium-confidence Kaiten↔Bitrix title match (below the auto-link threshold)
+// awaiting human review. Accepting it creates a DUPLICATES TaskDependency;
+// rejecting it suppresses the pair so re-syncs don't keep re-proposing it.
+model KaitenMatchSuggestion {
+  id           String   @id @default(cuid())
+  projectId    String
+  project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  kaitenTaskId String
+  kaitenTask   Task     @relation("KaitenSuggKaiten", fields: [kaitenTaskId], references: [id], onDelete: Cascade)
+  bitrixTaskId String
+  bitrixTask   Task     @relation("KaitenSuggBitrix", fields: [bitrixTaskId], references: [id], onDelete: Cascade)
+  score        Float
+  status       String   @default("pending") // pending | accepted | rejected
+  createdAt    DateTime @default(now())
+  decidedAt    DateTime?
+  decidedById  String?
+
+  @@unique([kaitenTaskId, bitrixTaskId])
+  @@index([projectId, status])
 }
 
 // Linkage between a task and a GitHub pull request. Webhook-fed: when
