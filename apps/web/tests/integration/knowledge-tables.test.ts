@@ -76,7 +76,7 @@ describe('knowledge tables — structure', () => {
     const t = await createTableAction(spaceId);
     const tableId = t.ok ? t.data!.id : '';
     await addColumnAction(tableId, 'Готово', 'CHECKBOX');
-    await addColumnAction(tableId, 'Статус', 'SELECT', ['Новый', 'В работе']);
+    await addColumnAction(tableId, 'Статус', 'SELECT', { options: ['Новый', 'В работе'] });
     await addRowAction(tableId);
 
     const table = await getTable(tableId);
@@ -84,6 +84,49 @@ describe('knowledge tables — structure', () => {
     const sel = table?.columns.find((c) => c.type === 'SELECT');
     expect(sel?.options).toEqual(['Новый', 'В работе']);
     expect(table?.rows.length).toBe(2); // default row + added
+  });
+});
+
+describe('knowledge tables — relation & formula columns', () => {
+  it('adds a RELATION column only to a table in the same space and exposes its target', async () => {
+    await asUser('ADMIN');
+    const spaceId = await freshSpace();
+    const target = await createTableAction(spaceId, 'Клиенты');
+    const targetId = target.ok ? target.data!.id : '';
+    const main = await createTableAction(spaceId, 'Заказы');
+    const mainId = main.ok ? main.data!.id : '';
+
+    // missing target → validation error
+    expect((await addColumnAction(mainId, 'Клиент', 'RELATION')).ok).toBe(false);
+
+    // a table from ANOTHER space cannot be a target
+    mockMe.role = 'ADMIN';
+    const other = await createSpaceAction('Чужое');
+    const otherTable = await createTableAction(other.ok ? other.data!.id : '', 'Чужая');
+    const bad = await addColumnAction(mainId, 'Клиент', 'RELATION', {
+      relationTableId: otherTable.ok ? otherTable.data!.id : '',
+    });
+    expect(bad.ok).toBe(false);
+
+    const ok = await addColumnAction(mainId, 'Клиент', 'RELATION', { relationTableId: targetId });
+    expect(ok.ok).toBe(true);
+    const table = await getTable(mainId);
+    const relCol = table?.columns.find((c) => c.type === 'RELATION');
+    expect(relCol?.relationTableId).toBe(targetId);
+  });
+
+  it('adds a FORMULA column and round-trips its expression', async () => {
+    await asUser('ADMIN');
+    const spaceId = await freshSpace();
+    const t = await createTableAction(spaceId);
+    const tableId = t.ok ? t.data!.id : '';
+    await addColumnAction(tableId, 'Цена', 'NUMBER');
+    await addColumnAction(tableId, 'Кол-во', 'NUMBER');
+    expect((await addColumnAction(tableId, 'Сумма', 'FORMULA')).ok).toBe(false); // empty expr
+    const ok = await addColumnAction(tableId, 'Сумма', 'FORMULA', { formulaExpr: '{Цена} * {Кол-во}' });
+    expect(ok.ok).toBe(true);
+    const table = await getTable(tableId);
+    expect(table?.columns.find((c) => c.type === 'FORMULA')?.formulaExpr).toBe('{Цена} * {Кол-во}');
   });
 });
 
