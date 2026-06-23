@@ -7,7 +7,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./bitrix24": "./src/bitrix24/index.ts",
-    "./teamly": "./src/teamly/index.ts"
+    "./teamly": "./src/teamly/index.ts",
+    "./kaiten": "./src/kaiten/index.ts"
   },
   "scripts": {
     "lint": "echo 'no lint configured'",

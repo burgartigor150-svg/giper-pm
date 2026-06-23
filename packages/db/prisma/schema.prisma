@@ -1427,6 +1427,9 @@ model Task {
   @@index([columnId, swimlaneId])
   @@index([parentId])
   @@index([externalSource, bitrixParentId])
+  // Hot path for mirror upserts (Kaiten/Bitrix) — find a task by its external id
+  // within a project. Non-unique: prod has pre-existing duplicate external tuples.
+  @@index([projectId, externalSource, externalId])
 }
 
 /// Configurable kanban column for a project board. Maps to the
@@ -1930,6 +1933,7 @@ enum IntegrationKind {
   FIGMA
   TELEGRAM
   TEAMLY
+  KAITEN
 }
 
 model ProjectIntegration {
