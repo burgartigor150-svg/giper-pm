@@ -48,6 +48,19 @@ export function ApiTokensForm({ initial }: Props) {
         <code>GET /api/public/v1/projects</code>.
       </p>
 
+      <details className="rounded-md border border-input bg-muted/30 px-3 py-2 text-sm">
+        <summary className="cursor-pointer text-muted-foreground">Эндпоинты базы знаний</summary>
+        <ul className="mt-2 flex flex-col gap-1 font-mono text-xs text-muted-foreground">
+          <li><code>GET /api/public/v1/knowledge/spaces</code> — список пространств</li>
+          <li><code>POST /api/public/v1/knowledge/spaces</code> — создать пространство</li>
+          <li><code>GET /api/public/v1/knowledge/spaces/:id</code> — пространство, дерево статей, таблицы</li>
+          <li><code>POST /api/public/v1/knowledge/spaces/:id/articles</code> — создать статью</li>
+          <li><code>GET|PATCH|DELETE /api/public/v1/knowledge/articles/:id</code> — статья (markdown)</li>
+          <li><code>GET /api/public/v1/knowledge/search?q=…</code> — поиск по статьям</li>
+          <li><code>GET /api/public/v1/knowledge/tables/:id</code> — умная таблица</li>
+        </ul>
+      </details>
+
       {initial.length > 0 ? (
         <ul className="flex flex-col gap-1">
           {initial.map((t) => (

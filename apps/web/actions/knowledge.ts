@@ -4,10 +4,24 @@ import { revalidatePath } from 'next/cache';
 import { prisma, Prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
 import { getSpaceAccessById } from '@/lib/knowledge/access';
+import { DomainError } from '@/lib/errors';
+import {
+  createSpace as createSpaceSvc,
+  createArticle as createArticleSvc,
+  updateArticle as updateArticleSvc,
+  deleteArticle as deleteArticleSvc,
+  setArticleStatus as setArticleStatusSvc,
+} from '@/lib/knowledge/writeService';
 
 type ActionResult<T = unknown> =
   | { ok: true; data?: T }
   | { ok: false; error: { code: string; message: string } };
+
+/** Map a thrown DomainError to the action result envelope; rethrow anything else. */
+function fromDomainError(e: unknown): ActionResult<never> {
+  if (e instanceof DomainError) return { ok: false, error: { code: e.code, message: e.message } };
+  throw e;
+}
 
 // Creating brand-new spaces + managing templates stays a global ADMIN/PM action.
 // Read / edit / per-space management are resolved per space (see lib/knowledge/access).
@@ -54,17 +68,13 @@ export async function createSpaceAction(
   icon?: string,
 ): Promise<ActionResult<{ id: string }>> {
   const me = await requireAuth();
-  if (!canManageSpaces(me.role)) {
-    return { ok: false, error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Только ADMIN/PM' } };
+  try {
+    const data = await createSpaceSvc(me, { name, icon });
+    revalidatePath('/knowledge');
+    return { ok: true, data };
+  } catch (e) {
+    return fromDomainError(e);
   }
-  const title = name.trim() || 'Новое пространство';
-  const max = await prisma.knowledgeSpace.aggregate({ _max: { order: true } });
-  const space = await prisma.knowledgeSpace.create({
-    data: { name: title, icon: icon?.trim() || null, order: (max._max.order ?? -1) + 1, createdById: me.id },
-    select: { id: true },
-  });
-  revalidatePath('/knowledge');
-  return { ok: true, data: { id: space.id } };
 }
 
 export async function updateSpaceAction(
@@ -104,22 +114,13 @@ export async function createArticleAction(
   title?: string,
 ): Promise<ActionResult<{ id: string }>> {
   const me = await requireAuth();
-  const guard = await spaceEditGuard(me, spaceId);
-  if (guard) return guard;
-  const order = await nextOrder({ spaceId, parentId: parentId ?? null });
-  const article = await prisma.knowledgeArticle.create({
-    data: {
-      spaceId,
-      parentId: parentId ?? null,
-      title: title?.trim() || 'Без названия',
-      order,
-      createdById: me.id,
-      updatedById: me.id,
-    },
-    select: { id: true },
-  });
-  revalidatePath('/knowledge');
-  return { ok: true, data: { id: article.id } };
+  try {
+    const data = await createArticleSvc(me, { spaceId, parentId, title });
+    revalidatePath('/knowledge');
+    return { ok: true, data };
+  } catch (e) {
+    return fromDomainError(e);
+  }
 }
 
 export async function updateArticleAction(
@@ -127,39 +128,13 @@ export async function updateArticleAction(
   patch: { title?: string; content?: string; icon?: string | null },
 ): Promise<ActionResult> {
   const me = await requireAuth();
-  const article = await prisma.knowledgeArticle.findUnique({
-    where: { id },
-    select: { spaceId: true, title: true, content: true, icon: true },
-  });
-  if (!article) return { ok: false, error: { code: 'NOT_FOUND', message: 'Статья не найдена' } };
-  const guard = await spaceEditGuard(me, article.spaceId);
-  if (guard) return guard;
-  // Snapshot the PRIOR state into history when the body or title actually
-  // changes (icon-only / no-op saves don't spawn versions).
-  const titleChanges = patch.title !== undefined && patch.title.trim() !== article.title;
-  const contentChanges = patch.content !== undefined && patch.content !== article.content;
-  if (titleChanges || contentChanges) {
-    await prisma.knowledgeArticleVersion.create({
-      data: {
-        articleId: id,
-        title: article.title,
-        content: article.content,
-        icon: article.icon,
-        editedById: me.id,
-      },
-    });
+  try {
+    await updateArticleSvc(me, id, patch);
+    revalidatePath('/knowledge');
+    return { ok: true };
+  } catch (e) {
+    return fromDomainError(e);
   }
-  await prisma.knowledgeArticle.update({
-    where: { id },
-    data: {
-      ...(patch.title !== undefined ? { title: patch.title.trim() || 'Без названия' } : {}),
-      ...(patch.content !== undefined ? { content: patch.content } : {}),
-      ...(patch.icon !== undefined ? { icon: patch.icon } : {}),
-      updatedById: me.id,
-    },
-  });
-  revalidatePath('/knowledge');
-  return { ok: true };
 }
 
 /** Move/reparent an article (tree drag or "move to"). Guards against self/loop. */
@@ -198,13 +173,13 @@ export async function moveArticleAction(
 
 export async function deleteArticleAction(id: string): Promise<ActionResult> {
   const me = await requireAuth();
-  const article = await prisma.knowledgeArticle.findUnique({ where: { id }, select: { spaceId: true } });
-  if (!article) return { ok: false, error: { code: 'NOT_FOUND', message: 'Статья не найдена' } };
-  const guard = await spaceEditGuard(me, article.spaceId);
-  if (guard) return guard;
-  await prisma.knowledgeArticle.delete({ where: { id } });
-  revalidatePath('/knowledge');
-  return { ok: true };
+  try {
+    await deleteArticleSvc(me, id);
+    revalidatePath('/knowledge');
+    return { ok: true };
+  } catch (e) {
+    return fromDomainError(e);
+  }
 }
 
 /** Toggle DRAFT ⇄ PUBLISHED. */
@@ -213,13 +188,13 @@ export async function setArticleStatusAction(
   status: 'DRAFT' | 'PUBLISHED',
 ): Promise<ActionResult> {
   const me = await requireAuth();
-  const article = await prisma.knowledgeArticle.findUnique({ where: { id }, select: { spaceId: true } });
-  if (!article) return { ok: false, error: { code: 'NOT_FOUND', message: 'Статья не найдена' } };
-  const guard = await spaceEditGuard(me, article.spaceId);
-  if (guard) return guard;
-  await prisma.knowledgeArticle.update({ where: { id }, data: { status, updatedById: me.id } });
-  revalidatePath('/knowledge');
-  return { ok: true };
+  try {
+    await setArticleStatusSvc(me, id, status);
+    revalidatePath('/knowledge');
+    return { ok: true };
+  } catch (e) {
+    return fromDomainError(e);
+  }
 }
 
 /** Restore an article to a past version. Snapshots the current state first. */
