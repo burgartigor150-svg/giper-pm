@@ -27,6 +27,14 @@ export type RunTeamlySyncOptions = {
   signal?: AbortSignal;
   /** Only re-fetch articles whose TEAMLY updatedAt is newer than what we stored. */
   incremental?: boolean;
+  /**
+   * After a CLEAN full run (no errors, not aborted, not capped), soft-archive
+   * local teamly-sourced rows whose externalId wasn't seen this run — i.e.
+   * propagate deletions/archival from TEAMLY (spaces → archivedAt, articles →
+   * status DRAFT, hiding them from search/AI). Guarded so a partial/failed run
+   * never mass-archives.
+   */
+  reconcile?: boolean;
   maxArticlesPerSpace?: number;
 };
 
@@ -35,6 +43,7 @@ export type RunTeamlySyncResult = {
   spaces: number;
   articles: number;
   skipped: number;
+  archived: number;
   errors: string[];
   durationMs: number;
 };
@@ -59,6 +68,12 @@ export async function runTeamlySync(
   let spaceCount = 0;
   let articleCount = 0;
   let skipped = 0;
+  let archived = 0;
+  let capped = false;
+  const seenSpaceIds: string[] = [];
+  // Per-space sync outcome — drives a SAFE, scoped reconcile (a single space's
+  // silent-empty tree can't archive another space's content).
+  const synced: { teamlySpaceId: string; localSpaceId: string; seenIds: string[] }[] = [];
 
   // 1. enumerate spaces (paginated)
   const spaces: TeamlySpace[] = [];
@@ -74,13 +89,24 @@ export async function runTeamlySync(
     try {
       const localSpaceId = await upsertSpace(prisma, sp, botId);
       spaceCount++;
+      seenSpaceIds.push(sp.id);
       const res = await syncSpaceArticles(prisma, client, sp.id, localSpaceId, botId, opts);
       articleCount += res.imported;
       skipped += res.skipped;
+      capped = capped || res.capped;
+      synced.push({ teamlySpaceId: sp.id, localSpaceId, seenIds: res.seenIds });
       errors.push(...res.errors);
     } catch (e) {
       errors.push(`space ${sp.id}: ${String(e)}`);
     }
+  }
+
+  // 2. reconcile (propagate TEAMLY deletions) — only on a clean, complete,
+  // uncapped run, and SCOPED carefully so a silent empty/partial API response
+  // can never mass-archive real content.
+  const cleanFull = errors.length === 0 && !opts.signal?.aborted && !capped && seenSpaceIds.length > 0;
+  if (opts.reconcile && cleanFull) {
+    archived = await reconcile(prisma, seenSpaceIds, synced, errors);
   }
 
   return {
@@ -88,9 +114,64 @@ export async function runTeamlySync(
     spaces: spaceCount,
     articles: articleCount,
     skipped,
+    archived,
     errors: errors.slice(0, 50),
     durationMs: Date.now() - start,
   };
+}
+
+/** Circuit breaker: refuse to archive an implausibly large fraction of spaces
+ * in one run — guards a silently-truncated listSpaces. */
+const MAX_SPACE_ARCHIVE_FRACTION = 0.3;
+
+/**
+ * Safe reconcile. Space-archival is gated by a fraction circuit-breaker; article
+ * archival is PER-SPACE and only for spaces whose tree was NON-EMPTY this run
+ * (so one space's silent-empty 200 can't DRAFT its whole content, nor anyone
+ * else's). Also self-heals: a seen article a prior false-positive left DRAFT is
+ * restored to PUBLISHED.
+ */
+async function reconcile(
+  prisma: PrismaClient,
+  seenSpaceIds: string[],
+  synced: { teamlySpaceId: string; localSpaceId: string; seenIds: string[] }[],
+  errors: string[],
+): Promise<number> {
+  let archived = 0;
+
+  // Spaces removed from TEAMLY → archivedAt, with a circuit breaker.
+  const liveSpaces = await prisma.knowledgeSpace.count({ where: { externalSource: SOURCE, archivedAt: null } });
+  const toArchive = await prisma.knowledgeSpace.findMany({
+    where: { externalSource: SOURCE, archivedAt: null, externalId: { notIn: seenSpaceIds } },
+    select: { id: true },
+  });
+  if (toArchive.length > 0) {
+    if (liveSpaces > 0 && toArchive.length / liveSpaces > MAX_SPACE_ARCHIVE_FRACTION) {
+      errors.push(
+        `reconcile: refused to archive ${toArchive.length}/${liveSpaces} spaces ` +
+          `(> ${Math.round(MAX_SPACE_ARCHIVE_FRACTION * 100)}% — likely a partial sync)`,
+      );
+    } else {
+      await prisma.knowledgeSpace.updateMany({ where: { id: { in: toArchive.map((s) => s.id) } }, data: { archivedAt: new Date() } });
+      archived += toArchive.length;
+    }
+  }
+
+  // Articles — per space, non-empty trees only; restore-then-archive.
+  for (const s of synced) {
+    if (s.seenIds.length === 0) continue; // empty tree → ambiguous, skip
+    await prisma.knowledgeArticle.updateMany({
+      where: { externalSource: SOURCE, spaceId: s.localSpaceId, status: 'DRAFT', externalId: { in: s.seenIds } },
+      data: { status: 'PUBLISHED' },
+    });
+    const drafted = await prisma.knowledgeArticle.updateMany({
+      where: { externalSource: SOURCE, spaceId: s.localSpaceId, status: 'PUBLISHED', externalId: { notIn: s.seenIds } },
+      data: { status: 'DRAFT' },
+    });
+    archived += drafted.count;
+  }
+
+  return archived;
 }
 
 async function upsertSpace(prisma: PrismaClient, sp: TeamlySpace, botId: string): Promise<string> {
@@ -121,7 +202,7 @@ async function upsertSpace(prisma: PrismaClient, sp: TeamlySpace, botId: string)
   return created.id;
 }
 
-type ArticleResult = { imported: number; skipped: number; errors: string[] };
+type ArticleResult = { imported: number; skipped: number; errors: string[]; seenIds: string[]; capped: boolean };
 
 async function syncSpaceArticles(
   prisma: PrismaClient,
@@ -134,6 +215,7 @@ async function syncSpaceArticles(
   const errors: string[] = [];
   let imported = 0;
   let skipped = 0;
+  let capped = false;
 
   // collect tree items (articles only)
   const items: TeamlyTreeItem[] = [];
@@ -142,7 +224,10 @@ async function syncSpaceArticles(
     const { items: pageItems, lastPage } = await client.getSpaceTree(teamlySpaceId, page, 60);
     items.push(...pageItems.filter((i) => i.type === 'article' && !i.isArchived));
     if (page >= lastPage) break;
-    if (opts.maxArticlesPerSpace && items.length >= opts.maxArticlesPerSpace) break;
+    if (opts.maxArticlesPerSpace && items.length >= opts.maxArticlesPerSpace) {
+      capped = true;
+      break;
+    }
   }
 
   // existing externalUpdatedAt for incremental skip
@@ -239,5 +324,5 @@ async function syncSpaceArticles(
       .catch(() => {});
   }
 
-  return { imported, skipped, errors };
+  return { imported, skipped, errors, seenIds: items.map((i) => i.id), capped };
 }

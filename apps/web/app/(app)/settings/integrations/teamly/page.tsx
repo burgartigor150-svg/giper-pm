@@ -43,6 +43,38 @@ export default async function TeamlyIntegrationPage({
         </CardContent>
       </Card>
 
+      {status.connected && status.lastRuns.length > 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">История синхронизаций</CardTitle>
+          </CardHeader>
+          <CardContent className="overflow-x-auto p-0">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
+                <tr>
+                  <th className="px-3 py-2 font-medium">Начало</th>
+                  <th className="px-3 py-2 font-medium">Статус</th>
+                  <th className="px-3 py-2 font-medium">Статей</th>
+                  <th className="px-3 py-2 font-medium">Ошибки</th>
+                </tr>
+              </thead>
+              <tbody>
+                {status.lastRuns.map((r) => (
+                  <tr key={r.id} className="border-t border-border">
+                    <td className="whitespace-nowrap px-3 py-2">
+                      {new Date(r.startedAt).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' })}
+                    </td>
+                    <td className="px-3 py-2">{r.status}</td>
+                    <td className="px-3 py-2 text-muted-foreground">{r.itemsProcessed}</td>
+                    <td className="px-3 py-2 text-muted-foreground">{r.errors || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
+      ) : null}
+
       <p className="text-xs text-muted-foreground">
         Одностороннее зеркало: пространства и статьи TEAMLY импортируются в базу знаний (контент конвертируется из
         формата TEAMLY в markdown). Повторный запуск обновляет уже импортированные статьи. Умные таблицы и вложения —
