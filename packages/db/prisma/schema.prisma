@@ -2647,9 +2647,26 @@ model KnowledgeArticle {
   createdAt   DateTime           @default(now())
   updatedAt   DateTime           @updatedAt
   favorites   KnowledgeFavorite[]
+  versions    KnowledgeArticleVersion[]
 
   @@index([spaceId, parentId, order])
   @@index([status])
+}
+
+/// A point-in-time snapshot of an article's title/content (TEAMLY «Предыдущие
+/// версии»). Captured on each meaningful edit so changes can be reviewed and
+/// restored.
+model KnowledgeArticleVersion {
+  id         String           @id @default(cuid())
+  articleId  String
+  article    KnowledgeArticle @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  title      String
+  content    String
+  icon       String?
+  editedById String?
+  createdAt  DateTime         @default(now())
+
+  @@index([articleId, createdAt])
 }
 
 /// A user's starred space or article (exactly one of spaceId/articleId set).
