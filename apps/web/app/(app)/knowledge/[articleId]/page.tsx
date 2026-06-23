@@ -39,21 +39,26 @@ export default async function KnowledgeArticlePage({
   const headings = extractHeadings(article.content);
 
   // Resolve embedded smart tables ([[table:ID]]), access-checked per space so a
-  // private table never renders to someone who can't view it.
-  const tableIds = extractTableIds(article.content);
+  // private table never renders to someone who can't view it. Capped + resolved
+  // in parallel so author-controlled token count can't blow up render latency
+  // (tokens beyond the cap degrade to the placeholder via renderMarkdown).
+  const MAX_EMBEDS = 20;
+  const tableIds = extractTableIds(article.content).slice(0, MAX_EMBEDS);
   const tableEmbeds: Record<string, React.ReactNode> = {};
-  for (const tid of tableIds) {
-    const t = await getTable(tid);
-    if (!t) continue;
-    const tAcc = await getSpaceAccessById(me, t.spaceId);
-    tableEmbeds[tid] = tAcc.canView ? (
-      <KbEmbeddedTable name={t.name} icon={t.icon} columns={t.columns} rows={t.rows} />
-    ) : (
-      <p className="my-3 rounded-md border border-dashed border-neutral-300 p-3 text-xs text-muted-foreground dark:border-neutral-700">
-        Нет доступа к встроенной таблице.
-      </p>
-    );
-  }
+  await Promise.all(
+    tableIds.map(async (tid) => {
+      const t = await getTable(tid);
+      if (!t) return;
+      const tAcc = await getSpaceAccessById(me, t.spaceId);
+      tableEmbeds[tid] = tAcc.canView ? (
+        <KbEmbeddedTable name={t.name} icon={t.icon} columns={t.columns} rows={t.rows} />
+      ) : (
+        <p className="my-3 rounded-md border border-dashed border-neutral-300 p-3 text-xs text-muted-foreground dark:border-neutral-700">
+          Нет доступа к встроенной таблице.
+        </p>
+      );
+    }),
+  );
   const spaceTables = canEdit ? await listSpaceTables(article.spaceId) : [];
 
   return (
