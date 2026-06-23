@@ -111,6 +111,34 @@ describe('runKaitenSync', () => {
     expect(links).toBe(1);
   });
 
+  it('org scope matches a Bitrix twin in a DIFFERENT project; project scope does not', async () => {
+    const owner = await makeUser();
+    const importProject = await makeProject({ ownerId: owner.id });
+    const otherProject = await makeProject({ ownerId: owner.id });
+
+    // The twin lives in a sibling project (the remote board spans several).
+    const twin = await makeTask({ projectId: otherProject.id, creatorId: owner.id, title: 'Интеграция с Uzum' });
+    await prisma.task.update({ where: { id: twin.id }, data: { externalSource: 'bitrix24', externalId: 'B-UZ' } });
+
+    // project scope: no candidates in importProject → no link.
+    const proj = await runKaitenSync(
+      prisma,
+      fakeClient([[card({ id: 401, title: 'Интеграция с UZUM' })]]),
+      { projectId: importProject.id, boardId: 7, matchScope: 'project' },
+    );
+    expect(proj.autoLinked).toBe(0);
+
+    // org scope: finds the twin in the sibling project and links it.
+    const org = await runKaitenSync(
+      prisma,
+      fakeClient([[card({ id: 402, title: 'Интеграция с UZUM' })]]),
+      { projectId: importProject.id, boardId: 7, matchScope: 'org' },
+    );
+    expect(org.autoLinked).toBe(1);
+    const linked = await prisma.taskDependency.findFirst({ where: { toTaskId: twin.id, linkType: 'DUPLICATES' } });
+    expect(linked).not.toBeNull();
+  });
+
   it('does not let two cards both claim the same Bitrix twin in one run', async () => {
     const owner = await makeUser();
     const project = await makeProject({ ownerId: owner.id });

@@ -40,6 +40,7 @@ export async function connectKaitenAction(input: {
   token: string;
   boardId: number;
   spaceId?: number;
+  matchScope?: 'project' | 'org';
 }): Promise<ConnectResult> {
   const gated = await gateProject(input.projectKey);
   if (!gated.ok) return { ok: false, error: gated.error };
@@ -69,6 +70,7 @@ export async function connectKaitenAction(input: {
     token,
     boardId,
     spaceId: input.spaceId,
+    matchScope: input.matchScope === 'org' ? 'org' : 'project',
   });
   if (err) return { ok: false, error: err };
 

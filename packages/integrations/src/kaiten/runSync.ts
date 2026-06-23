@@ -20,7 +20,12 @@ export type RunKaitenSyncResult = {
   durationMs: number;
 };
 
-export type RunKaitenSyncParams = { projectId: string; boardId: number };
+/** Which Bitrix-mirrored tasks a card is matched against for the DUPLICATES link.
+ *  'project' = only the connected project's tasks; 'org' = every project's (the
+ *  remote team's board often spans several Bitrix projects). */
+export type KaitenMatchScope = 'project' | 'org';
+
+export type RunKaitenSyncParams = { projectId: string; boardId: number; matchScope?: KaitenMatchScope };
 export type RunKaitenSyncOptions = { signal?: AbortSignal; now?: Date };
 
 /** Kaiten card state → local TaskStatus. We only fetch live (on-board) cards. */
@@ -66,10 +71,15 @@ export async function runKaitenSync(
 
   const botId = await getKaitenBotUserId(prisma);
 
-  // Bitrix-mirrored tasks in this project are the match candidates. Pre-normalize
-  // once so we don't re-normalize the same titles for every card (O(n+m), not O(n*m)).
+  // Bitrix-mirrored tasks are the match candidates — scoped to this project, or
+  // org-wide when the board's twins live across several Bitrix projects.
+  // Pre-normalize once so we don't re-normalize the same titles for every card
+  // (O(n+m), not O(n*m)).
   const bitrixTasks = await prisma.task.findMany({
-    where: { projectId: params.projectId, externalSource: 'bitrix24' },
+    where:
+      params.matchScope === 'org'
+        ? { externalSource: 'bitrix24' }
+        : { projectId: params.projectId, externalSource: 'bitrix24' },
     select: { id: true, title: true },
   });
   const candidates = prepareCandidates(bitrixTasks);

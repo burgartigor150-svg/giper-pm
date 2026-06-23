@@ -6,6 +6,7 @@ import {
   runKaitenSync,
   normalizeKaitenDomain,
   type RunKaitenSyncResult,
+  type KaitenMatchScope,
 } from '@giper/integrations/kaiten';
 
 /**
@@ -24,6 +25,7 @@ export type KaitenProjectConfig = {
   tokenHint: string;
   boardId: number;
   spaceId?: number;
+  matchScope?: KaitenMatchScope;
   lastSyncAt?: string;
   lastSyncStatus?: string;
   lastSyncSummary?: string;
@@ -34,6 +36,7 @@ export type KaitenStatus = {
   domain?: string;
   boardId?: number;
   spaceId?: number;
+  matchScope?: KaitenMatchScope;
   tokenHint?: string;
   lastSyncAt?: string;
   lastSyncStatus?: string;
@@ -67,6 +70,7 @@ export async function getKaitenStatus(projectId: string): Promise<KaitenStatus> 
     domain: c.domain,
     boardId: c.boardId,
     spaceId: c.spaceId,
+    matchScope: c.matchScope ?? 'project',
     tokenHint: c.tokenHint,
     lastSyncAt: c.lastSyncAt,
     lastSyncStatus: c.lastSyncStatus,
@@ -74,7 +78,14 @@ export async function getKaitenStatus(projectId: string): Promise<KaitenStatus> 
   };
 }
 
-export type SaveKaitenInput = { projectId: string; domain: string; token: string; boardId: number; spaceId?: number };
+export type SaveKaitenInput = {
+  projectId: string;
+  domain: string;
+  token: string;
+  boardId: number;
+  spaceId?: number;
+  matchScope?: KaitenMatchScope;
+};
 
 /** Persist (or replace) the project's Kaiten connection. Returns a validation error string or null. */
 export async function saveKaitenConnection(input: SaveKaitenInput): Promise<string | null> {
@@ -90,6 +101,7 @@ export async function saveKaitenConnection(input: SaveKaitenInput): Promise<stri
     tokenHint: maskToken(token),
     boardId: input.boardId,
     spaceId: input.spaceId && input.spaceId > 0 ? input.spaceId : undefined,
+    matchScope: input.matchScope === 'org' ? 'org' : 'project',
   };
 
   const integrationId = await ensureKaitenIntegrationId();
@@ -154,7 +166,12 @@ export async function runKaitenSyncNow(projectId: string, opts?: { signal?: Abor
   };
 
   try {
-    const result = await runKaitenSync(prisma, client, { projectId, boardId: c.boardId }, { signal: opts?.signal });
+    const result = await runKaitenSync(
+      prisma,
+      client,
+      { projectId, boardId: c.boardId, matchScope: c.matchScope ?? 'project' },
+      { signal: opts?.signal },
+    );
     const summary =
       `Карточек: ${result.cards} (новых: ${result.created}, обновлено: ${result.updated}), ` +
       `связано дублей: ${result.autoLinked}, кандидатов: ${result.suggestions}` +
