@@ -11,7 +11,8 @@ import {
   deleteRowAction,
   updateCellAction,
 } from '@/actions/knowledgeTables';
-import type { KbColumn, KbRow, KbColumnType } from '@/lib/knowledge/getTables';
+import type { KbColumn, KbRow, KbColumnType, KbRelationOption } from '@/lib/knowledge/getTables';
+import { computeFormula, formatNumber, displayCellValue, cellNumber, type KbRelationMap } from '@/lib/knowledge/tableCompute';
 
 const TYPE_LABELS: Record<KbColumnType, string> = {
   TEXT: 'Текст',
@@ -20,7 +21,12 @@ const TYPE_LABELS: Record<KbColumnType, string> = {
   CHECKBOX: 'Чек-бокс',
   SELECT: 'Список',
   URL: 'Ссылка',
+  RELATION: 'Связь',
+  FORMULA: 'Формула',
 };
+
+/** Table the user can pick as a RELATION target. */
+export type KbTableRef = { id: string; name: string };
 
 /**
  * Editable smart-table grid. Structural changes (add/remove column or row) come
@@ -38,6 +44,8 @@ export function KbTableGrid({
   canEdit,
   filter,
   sort,
+  relations = {},
+  spaceTables = [],
 }: {
   tableId: string;
   columns: KbColumn[];
@@ -45,6 +53,8 @@ export function KbTableGrid({
   canEdit: boolean;
   filter?: KbGridFilter;
   sort?: KbGridSort;
+  relations?: KbRelationMap;
+  spaceTables?: KbTableRef[];
 }) {
   // Include a hash of server cell values so a refetch with changed values (a
   // concurrent edit, another tab) remounts the body and re-seeds local state.
@@ -55,7 +65,7 @@ export function KbTableGrid({
     .map((r) => `${r.id}:${JSON.stringify(r.values)}`)
     .join(',')}`;
   return (
-    <GridInner key={structureKey} tableId={tableId} columns={columns} rows={rows} canEdit={canEdit} filter={filter} sort={sort} />
+    <GridInner key={structureKey} tableId={tableId} columns={columns} rows={rows} canEdit={canEdit} filter={filter} sort={sort} relations={relations} spaceTables={spaceTables} />
   );
 }
 
@@ -66,6 +76,8 @@ function GridInner({
   canEdit,
   filter,
   sort,
+  relations,
+  spaceTables,
 }: {
   tableId: string;
   columns: KbColumn[];
@@ -73,6 +85,8 @@ function GridInner({
   canEdit: boolean;
   filter?: KbGridFilter;
   sort?: KbGridSort;
+  relations: KbRelationMap;
+  spaceTables: KbTableRef[];
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -84,26 +98,48 @@ function GridInner({
   const [adding, setAdding] = useState(false);
   const [newColName, setNewColName] = useState('');
   const [newColType, setNewColType] = useState<KbColumnType>('TEXT');
+  const [newColRelation, setNewColRelation] = useState('');
+  const [newColFormula, setNewColFormula] = useState('');
+
+  // Tables that can be a RELATION target (same space, excluding this one).
+  const relationTargets = spaceTables.filter((t) => t.id !== tableId);
 
   // Filter/sort applied at render over LOCAL values (so just-saved edits are
   // reflected and nothing remounts). Editing always targets the real row id.
+  // Resolve filter/sort against the DISPLAYED value (relation label, computed
+  // formula) over LIVE local edits — so RELATION/FORMULA columns filter & sort
+  // by what the user sees, not the raw stored id / absent value.
+  const liveRow = (row: KbRow): KbRow => ({ ...row, values: values[row.id] ?? row.values });
   const displayRows = useMemo(() => {
+    const byId = new Map(columns.map((c) => [c.id, c]));
     let r = rows;
     if (filter?.colId && filter.text.trim()) {
       const q = filter.text.trim().toLowerCase();
-      r = r.filter((row) => (values[row.id]?.[filter.colId] ?? '').toLowerCase().includes(q));
+      const col = byId.get(filter.colId);
+      r = r.filter((row) =>
+        col
+          ? displayCellValue(col, liveRow(row), columns, relations).toLowerCase().includes(q)
+          : (values[row.id]?.[filter.colId] ?? '').toLowerCase().includes(q),
+      );
     }
     if (sort?.colId) {
-      const col = columns.find((c) => c.id === sort.colId);
+      const col = byId.get(sort.colId);
       r = [...r].sort((a, b) => {
-        const av = values[a.id]?.[sort.colId] ?? '';
-        const bv = values[b.id]?.[sort.colId] ?? '';
-        const cmp = col?.type === 'NUMBER' ? (parseFloat(av) || 0) - (parseFloat(bv) || 0) : av.localeCompare(bv, 'ru');
+        let cmp: number;
+        if (col && (col.type === 'NUMBER' || col.type === 'FORMULA')) {
+          cmp = cellNumber(col, liveRow(a), columns) - cellNumber(col, liveRow(b), columns);
+        } else if (col) {
+          cmp = displayCellValue(col, liveRow(a), columns, relations).localeCompare(
+            displayCellValue(col, liveRow(b), columns, relations),
+            'ru',
+          );
+        } else cmp = 0;
         return sort.dir === 'asc' ? cmp : -cmp;
       });
     }
     return r;
-  }, [rows, values, filter, sort, columns]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, values, filter, sort, columns, relations]);
 
   function setCell(rowId: string, colId: string, value: string) {
     setValues((v) => ({ ...v, [rowId]: { ...(v[rowId] ?? {}), [colId]: value } }));
@@ -115,17 +151,25 @@ function GridInner({
 
   function addColumn() {
     const name = newColName.trim() || TYPE_LABELS[newColType];
-    let options: string[] | undefined;
+    const config: { options?: string[]; relationTableId?: string; formulaExpr?: string } = {};
     if (newColType === 'SELECT') {
       const raw = prompt('Варианты списка через запятую', 'Вариант 1, Вариант 2');
-      options = (raw ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+      config.options = (raw ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+    } else if (newColType === 'RELATION') {
+      if (!newColRelation) { alert('Выберите связанную таблицу'); return; }
+      config.relationTableId = newColRelation;
+    } else if (newColType === 'FORMULA') {
+      if (!newColFormula.trim()) { alert('Введите формулу, напр. {Цена} * {Кол-во}'); return; }
+      config.formulaExpr = newColFormula.trim();
     }
     startTransition(async () => {
-      const res = await addColumnAction(tableId, name, newColType, options);
+      const res = await addColumnAction(tableId, name, newColType, config);
       if (res.ok) {
         setAdding(false);
         setNewColName('');
         setNewColType('TEXT');
+        setNewColRelation('');
+        setNewColFormula('');
         router.refresh();
       } else alert(res.error.message);
     });
@@ -147,6 +191,17 @@ function GridInner({
     const options = raw.split(',').map((s) => s.trim()).filter(Boolean);
     startTransition(async () => {
       const res = await updateColumnAction(col.id, { options });
+      if (res.ok) router.refresh();
+      else alert(res.error.message);
+    });
+  }
+
+  function editFormula(col: KbColumn) {
+    const raw = prompt('Формула (напр. {Цена} * {Кол-во})', col.formulaExpr ?? '');
+    if (raw === null) return;
+    if (!raw.trim()) { alert('Формула не может быть пустой'); return; }
+    startTransition(async () => {
+      const res = await updateColumnAction(col.id, { formulaExpr: raw.trim() });
       if (res.ok) router.refresh();
       else alert(res.error.message);
     });
@@ -205,6 +260,11 @@ function GridInner({
                           ⋯
                         </button>
                       ) : null}
+                      {col.type === 'FORMULA' ? (
+                        <button type="button" onClick={() => editFormula(col)} className="rounded px-1 text-xs text-muted-foreground hover:text-foreground" title="Изменить формулу">
+                          ƒ
+                        </button>
+                      ) : null}
                       <button type="button" onClick={() => removeColumn(col)} className="rounded text-muted-foreground hover:text-red-600" title="Удалить столбец">
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
@@ -216,7 +276,7 @@ function GridInner({
             {canEdit ? (
               <th scope="col" className="border border-neutral-300 bg-muted px-2 py-1.5 dark:border-neutral-700">
                 {adding ? (
-                  <div className="flex items-center gap-1">
+                  <div className="flex flex-wrap items-center gap-1">
                     <input
                       value={newColName}
                       onChange={(e) => setNewColName(e.target.value)}
@@ -228,12 +288,36 @@ function GridInner({
                       onChange={(e) => setNewColType(e.target.value as KbColumnType)}
                       className="rounded border border-neutral-300 px-1 py-0.5 text-xs dark:border-neutral-700 dark:bg-neutral-900"
                     >
-                      {(Object.keys(TYPE_LABELS) as KbColumnType[]).map((t) => (
-                        <option key={t} value={t}>
-                          {TYPE_LABELS[t]}
-                        </option>
-                      ))}
+                      {(Object.keys(TYPE_LABELS) as KbColumnType[])
+                        .filter((t) => t !== 'RELATION' || relationTargets.length > 0)
+                        .map((t) => (
+                          <option key={t} value={t}>
+                            {TYPE_LABELS[t]}
+                          </option>
+                        ))}
                     </select>
+                    {newColType === 'RELATION' ? (
+                      <select
+                        value={newColRelation}
+                        onChange={(e) => setNewColRelation(e.target.value)}
+                        aria-label="Связанная таблица"
+                        className="rounded border border-neutral-300 px-1 py-0.5 text-xs dark:border-neutral-700 dark:bg-neutral-900"
+                      >
+                        <option value="">таблица…</option>
+                        {relationTargets.map((t) => (
+                          <option key={t.id} value={t.id}>{t.name}</option>
+                        ))}
+                      </select>
+                    ) : null}
+                    {newColType === 'FORMULA' ? (
+                      <input
+                        value={newColFormula}
+                        onChange={(e) => setNewColFormula(e.target.value)}
+                        placeholder="{Цена} * {Кол-во}"
+                        aria-label="Формула"
+                        className="w-36 rounded border border-neutral-300 px-1 py-0.5 text-xs dark:border-neutral-700 dark:bg-neutral-900"
+                      />
+                    ) : null}
                     <button type="button" onClick={addColumn} disabled={pending} className="rounded bg-neutral-900 px-1.5 py-0.5 text-xs text-white dark:bg-white dark:text-neutral-900">
                       ОК
                     </button>
@@ -250,18 +334,30 @@ function GridInner({
         <tbody>
           {displayRows.map((row, rowIndex) => (
             <tr key={row.id} className="group">
-              {columns.map((col) => (
-                <td key={col.id} className="border border-neutral-300 p-0 align-top dark:border-neutral-700">
-                  <Cell
-                    type={col.type}
-                    options={col.options}
-                    value={values[row.id]?.[col.id] ?? ''}
-                    label={`${col.name}, строка ${rowIndex + 1}`}
-                    disabled={!canEdit || pending}
-                    onCommit={(v) => setCell(row.id, col.id, v)}
-                  />
-                </td>
-              ))}
+              {columns.map((col) => {
+                // FORMULA reads the row's LIVE local values so it recomputes as
+                // sibling cells are edited; RELATION resolves the target rows.
+                const liveRow = { ...row, values: values[row.id] ?? row.values };
+                const computed =
+                  col.type === 'FORMULA'
+                    ? (() => { const v = computeFormula(col, liveRow, columns); return v === null ? '—' : formatNumber(v); })()
+                    : undefined;
+                const relationOptions = col.type === 'RELATION' ? relations[col.relationTableId ?? ''] ?? [] : [];
+                return (
+                  <td key={col.id} className="border border-neutral-300 p-0 align-top dark:border-neutral-700">
+                    <Cell
+                      type={col.type}
+                      options={col.options}
+                      relationOptions={relationOptions}
+                      computed={computed}
+                      value={values[row.id]?.[col.id] ?? ''}
+                      label={`${col.name}, строка ${rowIndex + 1}`}
+                      disabled={!canEdit || pending}
+                      onCommit={(v) => setCell(row.id, col.id, v)}
+                    />
+                  </td>
+                );
+              })}
               {canEdit ? (
                 <td className="border border-neutral-300 px-1 text-center align-middle dark:border-neutral-700">
                   <button type="button" onClick={() => removeRow(row.id)} className="text-muted-foreground opacity-0 transition hover:text-red-600 group-hover:opacity-100" title="Удалить строку">
@@ -292,6 +388,8 @@ function GridInner({
 function Cell({
   type,
   options,
+  relationOptions,
+  computed,
   value,
   label,
   disabled,
@@ -299,6 +397,8 @@ function Cell({
 }: {
   type: KbColumnType;
   options: string[] | null;
+  relationOptions: KbRelationOption[];
+  computed?: string;
   value: string;
   label: string;
   disabled: boolean;
@@ -306,6 +406,27 @@ function Cell({
 }) {
   const base = 'w-full bg-transparent px-2 py-1.5 text-sm outline-none focus:bg-muted/50 disabled:opacity-100';
 
+  if (type === 'FORMULA') {
+    // Computed, never editable. Right-aligned numeric, muted when no result.
+    return (
+      <div className="px-2 py-1.5 text-right text-sm tabular-nums text-muted-foreground" aria-label={label} title="Вычисляемое поле">
+        {computed ?? '—'}
+      </div>
+    );
+  }
+  if (type === 'RELATION') {
+    // The stored value is a target row id; show its label, pick from siblings.
+    const known = relationOptions.some((o) => o.id === value);
+    return (
+      <select aria-label={label} value={value} disabled={disabled} onChange={(e) => onCommit(e.target.value)} className={base}>
+        <option value="">—</option>
+        {!known && value ? <option value={value}>(удалённая запись)</option> : null}
+        {relationOptions.map((o) => (
+          <option key={o.id} value={o.id}>{o.label}</option>
+        ))}
+      </select>
+    );
+  }
   if (type === 'CHECKBOX') {
     return (
       <div className="flex items-center justify-center py-1.5">

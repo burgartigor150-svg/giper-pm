@@ -14,15 +14,16 @@ const nextConfig = {
   // this, `next build` warns about multiple lockfiles and may copy
   // wrong dependencies.
   outputFileTracingRoot: new URL('../..', import.meta.url).pathname,
-  // ESLint is enforced in CI/dev (`pnpm lint`); the production image
-  // installs only runtime deps so the eslint plugin set is incomplete.
-  // Skipping during `next build` keeps the prod image small without
-  // weakening pre-merge checks.
+  // Run ESLint locally with `pnpm lint`. It is NOT gated in CI today (the
+  // test workflow runs vitest/playwright only), and the production image
+  // installs only runtime deps so the eslint plugin set is incomplete —
+  // hence skipping it during `next build` to keep the prod image small.
   eslint: { ignoreDuringBuilds: true },
-  // Type errors are enforced via `pnpm exec tsc --noEmit` (run in CI's
-  // test workflow). The monorepo carries some type-only mismatches from
-  // React 19 RC + next-auth beta that don't affect runtime; isolating
-  // them from the build keeps deploys flowing while we converge versions.
+  // Type-check locally with `pnpm exec tsc --noEmit`. It is NOT yet gated
+  // in CI: the monorepo still carries ~50 type-only mismatches from
+  // React 19 RC + next-auth beta + strict test files that don't affect
+  // runtime, so a repo-wide tsc gate would fail until versions converge.
+  // Isolating type errors from the build keeps deploys flowing meanwhile.
   typescript: { ignoreBuildErrors: true },
   experimental: {
     typedRoutes: false,

@@ -2578,6 +2578,8 @@ enum KnowledgeColumnType {
   CHECKBOX
   SELECT
   URL
+  RELATION
+  FORMULA
 }
 
 /// A smart table (TEAMLY «Умная таблица») — a lightweight database living in a
