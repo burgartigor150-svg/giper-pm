@@ -2510,6 +2510,7 @@ model KnowledgeSpace {
   articles    KnowledgeArticle[]
   favorites   KnowledgeFavorite[]
   templates   KnowledgeTemplate[]
+  tables      KnowledgeTable[]
 
   @@index([archivedAt, order])
 }
@@ -2537,6 +2538,63 @@ model KnowledgeTemplate {
   updatedAt   DateTime               @updatedAt
 
   @@index([scope, spaceId, order])
+}
+
+/// Smart-table column types (TEAMLY «свойства»). v1 subset: the property kinds
+/// that don't need relations/rollup/formula.
+enum KnowledgeColumnType {
+  TEXT
+  NUMBER
+  DATE
+  CHECKBOX
+  SELECT
+  URL
+}
+
+/// A smart table (TEAMLY «Умная таблица») — a lightweight database living in a
+/// space: typed columns + rows. Cell values are stored as a JSON map on the row
+/// (columnId → string), updated atomically per-cell via jsonb_set.
+model KnowledgeTable {
+  id          String                 @id @default(cuid())
+  spaceId     String
+  space       KnowledgeSpace         @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  name        String                 @default("Новая таблица")
+  icon        String?
+  order       Int                    @default(0)
+  createdById String?
+  createdAt   DateTime               @default(now())
+  updatedAt   DateTime               @updatedAt
+  columns     KnowledgeTableColumn[]
+  rows        KnowledgeTableRow[]
+
+  @@index([spaceId, order])
+}
+
+model KnowledgeTableColumn {
+  id        String             @id @default(cuid())
+  tableId   String
+  table     KnowledgeTable     @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  name      String             @default("Столбец")
+  type      KnowledgeColumnType @default(TEXT)
+  /// For SELECT: JSON array of option strings. Null otherwise.
+  options   Json?
+  order     Int                @default(0)
+  createdAt DateTime           @default(now())
+
+  @@index([tableId, order])
+}
+
+model KnowledgeTableRow {
+  id        String         @id @default(cuid())
+  tableId   String
+  table     KnowledgeTable @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  /// columnId → cell value (always stored as string; typed on render).
+  values    Json           @default("{}")
+  order     Int            @default(0)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  @@index([tableId, order])
 }
 
 /// A Knowledge Base article (TEAMLY «Статья»). Markdown content, nested in a
