@@ -33,6 +33,7 @@ export function KbArticleEditor({
   initialFavorite,
   canEdit,
   tableEmbeds,
+  spaceTables = [],
 }: {
   id: string;
   spaceId: string;
@@ -43,6 +44,7 @@ export function KbArticleEditor({
   initialFavorite: boolean;
   canEdit: boolean;
   tableEmbeds?: Record<string, React.ReactNode>;
+  spaceTables?: { id: string; name: string }[];
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -56,12 +58,6 @@ export function KbArticleEditor({
   const [saved, setSaved] = useState(false);
 
   const dirty = title !== initialTitle || content !== initialContent;
-
-  // The WYSIWYG editor round-trips through markdown and would corrupt our custom
-  // blocks (:::callouts/spoilers, [[table:ID]] embeds) on save. Until those are
-  // native visual nodes, articles that already contain them stay in the Markdown
-  // editor so nothing is lost; everything else gets the visual editor.
-  const richSafe = !/:::|\[\[table:/.test(initialContent);
 
   function save() {
     startTransition(async () => {
@@ -222,21 +218,7 @@ export function KbArticleEditor({
 
       {mode === 'edit' && canEdit ? (
         <>
-          {richSafe ? (
-            <KbRichEditor initialMarkdown={content} onChange={setContent} />
-          ) : (
-            <div className="flex flex-col gap-1">
-              <p className="text-xs text-muted-foreground">
-                В статье есть спец-блоки (инфоблоки/спойлеры или встроенные таблицы) — она редактируется в Markdown,
-                чтобы не потерять их. Визуальный редактор работает для остальных статей.
-              </p>
-              <textarea
-                value={content}
-                onChange={(e) => setContent(e.target.value)}
-                className="min-h-[420px] w-full resize-y rounded-md border border-neutral-300 p-3 font-mono text-sm outline-none focus:border-neutral-500 dark:border-neutral-700 dark:bg-neutral-900"
-              />
-            </div>
-          )}
+          <KbRichEditor initialMarkdown={content} onChange={setContent} spaceTables={spaceTables} />
           <div className="flex items-center gap-3">
             <button
               type="button"

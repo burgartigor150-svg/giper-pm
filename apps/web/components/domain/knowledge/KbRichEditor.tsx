@@ -12,9 +12,10 @@ import TableHeader from '@tiptap/extension-table-header';
 import TableCell from '@tiptap/extension-table-cell';
 import { Markdown } from 'tiptap-markdown';
 import {
-  Bold, Code, Heading1, Heading2, Heading3, Image as ImageIcon, Italic, Link2,
-  List, ListChecks, ListOrdered, Minus, Quote, Redo2, Strikethrough, Table as TableIcon, Undo2,
+  Bold, ChevronDown, Code, Database, Heading1, Heading2, Heading3, Image as ImageIcon, Info, Italic, Link2,
+  List, ListChecks, ListOrdered, Minus, Quote, Redo2, Strikethrough, Table as TableIcon, TriangleAlert, Undo2,
 } from 'lucide-react';
+import { KbCallout, KbSpoiler, KbTableEmbedNode } from './tiptap/kbBlocks';
 
 /**
  * Visual (WYSIWYG) article editor — TEAMLY/Notion-style. No raw markdown syntax
@@ -25,9 +26,11 @@ import {
 export function KbRichEditor({
   initialMarkdown,
   onChange,
+  spaceTables = [],
 }: {
   initialMarkdown: string;
   onChange: (markdown: string) => void;
+  spaceTables?: { id: string; name: string }[];
 }) {
   const editor = useEditor({
     immediatelyRender: false,
@@ -44,6 +47,9 @@ export function KbRichEditor({
       TableRow,
       TableHeader,
       TableCell,
+      KbCallout,
+      KbSpoiler,
+      KbTableEmbedNode,
       Markdown.configure({ html: false, transformPastedText: true, linkify: true }),
     ],
     content: initialMarkdown,
@@ -65,7 +71,7 @@ export function KbRichEditor({
 
   return (
     <div className="flex flex-col gap-2">
-      <Toolbar editor={editor} />
+      <Toolbar editor={editor} spaceTables={spaceTables} />
       <EditorContent editor={editor} />
       <style>{`
         .kb-rte ul[data-type="taskList"]{list-style:none;padding-left:0}
@@ -76,12 +82,22 @@ export function KbRichEditor({
         .dark .kb-rte-table td,.dark .kb-rte-table th{border-color:#404040}
         .kb-rte-table th{background:rgba(0,0,0,.04);font-weight:600}
         .kb-rte p.is-editor-empty:first-child::before{content:attr(data-placeholder);color:#9ca3af;float:left;height:0;pointer-events:none}
+        .kb-rte .kb-callout{border-left:4px solid;border-radius:.375rem;padding:.6rem .75rem;margin:.6rem 0}
+        .kb-rte .kb-callout-info{border-color:#60a5fa;background:rgba(59,130,246,.08)}
+        .kb-rte .kb-callout-success{border-color:#34d399;background:rgba(16,185,129,.08)}
+        .kb-rte .kb-callout-warning{border-color:#fbbf24;background:rgba(245,158,11,.08)}
+        .kb-rte .kb-callout-danger{border-color:#f87171;background:rgba(239,68,68,.08)}
+        .kb-rte .kb-callout[data-title]::before{content:attr(data-title);display:block;font-weight:600;margin-bottom:.25rem}
+        .kb-rte .kb-spoiler{border:1px solid #d4d4d4;border-radius:.375rem;padding:.6rem .75rem;margin:.6rem 0}
+        .dark .kb-rte .kb-spoiler{border-color:#404040}
+        .kb-rte .kb-spoiler::before{content:"▸ " attr(data-summary);display:block;font-weight:600;margin-bottom:.25rem;color:#6b7280}
+        .kb-rte .kb-embed-chip{display:inline-flex;align-items:center;gap:.35rem;border:1px dashed #a3a3a3;border-radius:.375rem;padding:.3rem .6rem;margin:.4rem 0;color:#6b7280;font-size:.85em;user-select:none}
       `}</style>
     </div>
   );
 }
 
-function Toolbar({ editor }: { editor: Editor }) {
+function Toolbar({ editor, spaceTables }: { editor: Editor; spaceTables: { id: string; name: string }[] }) {
   const Btn = ({ on, active, label, children }: { on: () => void; active?: boolean; label: string; children: React.ReactNode }) => (
     <button
       type="button"
@@ -108,6 +124,16 @@ function Toolbar({ editor }: { editor: Editor }) {
     const url = prompt('URL изображения', 'https://');
     if (url) editor.chain().focus().setImage({ src: url }).run();
   }
+  function addCallout(kind: string) {
+    editor.chain().focus().insertContent({ type: 'kbCallout', attrs: { kind }, content: [{ type: 'paragraph' }] }).run();
+  }
+  function addSpoiler() {
+    const title = prompt('Заголовок спойлера', 'Подробнее') ?? 'Подробнее';
+    editor.chain().focus().insertContent({ type: 'kbSpoiler', attrs: { title }, content: [{ type: 'paragraph' }] }).run();
+  }
+  function addTableEmbed(id: string) {
+    if (id) editor.chain().focus().insertContent({ type: 'kbTableEmbed', attrs: { tableId: id } }).run();
+  }
 
   return (
     <div className="flex flex-wrap items-center gap-0.5 rounded-md border border-neutral-200 p-1 dark:border-neutral-800">
@@ -130,6 +156,24 @@ function Toolbar({ editor }: { editor: Editor }) {
       <Btn on={addImage} label="Изображение"><ImageIcon className="h-4 w-4" /></Btn>
       <Btn on={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()} label="Таблица"><TableIcon className="h-4 w-4" /></Btn>
       <Btn on={() => editor.chain().focus().setHorizontalRule().run()} label="Разделитель"><Minus className="h-4 w-4" /></Btn>
+      {sep}
+      <Btn on={() => addCallout('info')} label="Инфоблок"><Info className="h-4 w-4" /></Btn>
+      <Btn on={() => addCallout('warning')} label="Предупреждение"><TriangleAlert className="h-4 w-4" /></Btn>
+      <Btn on={addSpoiler} label="Спойлер"><ChevronDown className="h-4 w-4" /></Btn>
+      {spaceTables.length > 0 ? (
+        <div className="relative inline-flex">
+          <select
+            value=""
+            onChange={(e) => { addTableEmbed(e.target.value); e.target.value = ''; }}
+            aria-label="Встроить таблицу"
+            className="h-7 rounded border border-neutral-300 pl-6 pr-1 text-xs dark:border-neutral-700 dark:bg-neutral-900"
+          >
+            <option value="">Таблица…</option>
+            {spaceTables.map((t) => (<option key={t.id} value={t.id}>{t.name}</option>))}
+          </select>
+          <Database className="pointer-events-none absolute left-1.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+        </div>
+      ) : null}
       {sep}
       <Btn on={() => editor.chain().focus().undo().run()} label="Отменить"><Undo2 className="h-4 w-4" /></Btn>
       <Btn on={() => editor.chain().focus().redo().run()} label="Повторить"><Redo2 className="h-4 w-4" /></Btn>
