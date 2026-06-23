@@ -2650,9 +2650,26 @@ model KnowledgeArticle {
   versions    KnowledgeArticleVersion[]
   comments    KnowledgeComment[]
   reactions   KnowledgeReaction[]
+  views       KnowledgeArticleView[]
 
   @@index([spaceId, parentId, order])
   @@index([status])
+}
+
+/// One row per (article, user, day) — dedups views so the count is "unique
+/// readers per day", not refresh spam. `userId` is a soft ref (no FK).
+model KnowledgeArticleView {
+  id        String           @id @default(cuid())
+  articleId String
+  article   KnowledgeArticle @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  userId    String
+  /// 'YYYY-MM-DD' bucket for daily dedup + time-series.
+  day       String
+  createdAt DateTime         @default(now())
+
+  @@unique([articleId, userId, day])
+  @@index([articleId])
+  @@index([day])
 }
 
 /// A comment on an article (TEAMLY обсуждение). One-level replies via parentId.
