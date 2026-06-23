@@ -118,7 +118,17 @@ export function KbTableViews({
       </div>
 
       {view === 'table' ? (
-        <KbTableGrid tableId={tableId} columns={columns} rows={viewRows} canEdit={canEdit} />
+        // Pass the FULL rows + filter/sort descriptors so the grid's structureKey
+        // stays stable across filter/sort (no remount → in-progress/just-saved
+        // cell edits are preserved); the grid applies filter/sort at render time.
+        <KbTableGrid
+          tableId={tableId}
+          columns={columns}
+          rows={rows}
+          canEdit={canEdit}
+          filter={{ colId: filterCol, text: filterText }}
+          sort={{ colId: sortCol, dir: sortDir }}
+        />
       ) : view === 'board' ? (
         selectCols.length === 0 ? (
           <Empty text="Добавьте столбец типа «Список», чтобы построить доску." />

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useMemo, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Plus, Trash2 } from 'lucide-react';
 import {
@@ -28,25 +28,34 @@ const TYPE_LABELS: Record<KbColumnType, string> = {
  * local state and persist atomically (jsonb_set) so concurrent edits to other
  * cells aren't clobbered.
  */
+export type KbGridFilter = { colId: string; text: string };
+export type KbGridSort = { colId: string; dir: 'asc' | 'desc' };
+
 export function KbTableGrid({
   tableId,
   columns,
   rows,
   canEdit,
+  filter,
+  sort,
 }: {
   tableId: string;
   columns: KbColumn[];
   rows: KbRow[];
   canEdit: boolean;
+  filter?: KbGridFilter;
+  sort?: KbGridSort;
 }) {
   // Include a hash of server cell values so a refetch with changed values (a
   // concurrent edit, another tab) remounts the body and re-seeds local state.
   // Local cell edits don't touch the `rows` prop, so typing isn't interrupted.
+  // Filter/sort are applied INSIDE GridInner (render-time) so they never change
+  // structureKey → no remount → no stale re-seed of just-saved edits.
   const structureKey = `${columns.map((c) => c.id).join(',')}|${rows
     .map((r) => `${r.id}:${JSON.stringify(r.values)}`)
     .join(',')}`;
   return (
-    <GridInner key={structureKey} tableId={tableId} columns={columns} rows={rows} canEdit={canEdit} />
+    <GridInner key={structureKey} tableId={tableId} columns={columns} rows={rows} canEdit={canEdit} filter={filter} sort={sort} />
   );
 }
 
@@ -55,11 +64,15 @@ function GridInner({
   columns,
   rows,
   canEdit,
+  filter,
+  sort,
 }: {
   tableId: string;
   columns: KbColumn[];
   rows: KbRow[];
   canEdit: boolean;
+  filter?: KbGridFilter;
+  sort?: KbGridSort;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -71,6 +84,26 @@ function GridInner({
   const [adding, setAdding] = useState(false);
   const [newColName, setNewColName] = useState('');
   const [newColType, setNewColType] = useState<KbColumnType>('TEXT');
+
+  // Filter/sort applied at render over LOCAL values (so just-saved edits are
+  // reflected and nothing remounts). Editing always targets the real row id.
+  const displayRows = useMemo(() => {
+    let r = rows;
+    if (filter?.colId && filter.text.trim()) {
+      const q = filter.text.trim().toLowerCase();
+      r = r.filter((row) => (values[row.id]?.[filter.colId] ?? '').toLowerCase().includes(q));
+    }
+    if (sort?.colId) {
+      const col = columns.find((c) => c.id === sort.colId);
+      r = [...r].sort((a, b) => {
+        const av = values[a.id]?.[sort.colId] ?? '';
+        const bv = values[b.id]?.[sort.colId] ?? '';
+        const cmp = col?.type === 'NUMBER' ? (parseFloat(av) || 0) - (parseFloat(bv) || 0) : av.localeCompare(bv, 'ru');
+        return sort.dir === 'asc' ? cmp : -cmp;
+      });
+    }
+    return r;
+  }, [rows, values, filter, sort, columns]);
 
   function setCell(rowId: string, colId: string, value: string) {
     setValues((v) => ({ ...v, [rowId]: { ...(v[rowId] ?? {}), [colId]: value } }));
@@ -215,7 +248,7 @@ function GridInner({
           </tr>
         </thead>
         <tbody>
-          {rows.map((row, rowIndex) => (
+          {displayRows.map((row, rowIndex) => (
             <tr key={row.id} className="group">
               {columns.map((col) => (
                 <td key={col.id} className="border border-neutral-300 p-0 align-top dark:border-neutral-700">
@@ -238,10 +271,10 @@ function GridInner({
               ) : null}
             </tr>
           ))}
-          {rows.length === 0 ? (
+          {displayRows.length === 0 ? (
             <tr>
               <td colSpan={columns.length + 1} className="border border-neutral-300 px-2 py-3 text-center text-xs text-muted-foreground dark:border-neutral-700">
-                Нет строк.
+                {rows.length === 0 ? 'Нет строк.' : 'Ничего не найдено.'}
               </td>
             </tr>
           ) : null}
