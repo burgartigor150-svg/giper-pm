@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { FileText } from 'lucide-react';
+import { requireAuth } from '@/lib/auth';
 import {
   listKnowledgeSpaces,
   searchKnowledge,
@@ -15,11 +16,12 @@ export default async function KnowledgeHome({
 }: {
   searchParams: Promise<{ q?: string }>;
 }) {
+  const me = await requireAuth();
   const { q } = await searchParams;
   const query = (q ?? '').trim();
   const [spaces, results] = await Promise.all([
-    listKnowledgeSpaces(),
-    query.length >= 2 ? searchKnowledge(query) : Promise.resolve([]),
+    listKnowledgeSpaces(me),
+    query.length >= 2 ? searchKnowledge(query, me) : Promise.resolve([]),
   ]);
 
   return (

@@ -19,6 +19,7 @@ const TABLES_IN_DELETE_ORDER = [
   'KnowledgeTable',
   'KnowledgeFavorite',
   'KnowledgeTemplate',
+  'KnowledgeSpaceMember',
   'KnowledgeArticle',
   'KnowledgeSpace',
   // Custom roles (join tables before CustomRole; all before User/Project).

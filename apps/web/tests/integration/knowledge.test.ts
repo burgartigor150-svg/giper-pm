@@ -97,21 +97,21 @@ describe('knowledge — spaces & articles', () => {
 
 describe('knowledge — draft/published & search', () => {
   it('drafts are excluded from search; published are found', async () => {
-    await asUser('ADMIN');
+    const admin = await asUser('ADMIN');
     const sp = await createSpaceAction('Поиск');
     const spaceId = sp.ok ? sp.data!.id : '';
     const a = await createArticleAction(spaceId, null, 'Уникслово123');
     const id = a.ok ? a.data!.id : '';
     await updateArticleAction(id, { content: 'тело статьи' });
 
-    expect((await searchKnowledge('Уникслово123')).length).toBe(1);
+    expect((await searchKnowledge('Уникслово123', admin)).length).toBe(1);
 
     const toDraft = await setArticleStatusAction(id, 'DRAFT');
     expect(toDraft.ok).toBe(true);
-    expect((await searchKnowledge('Уникслово123')).length).toBe(0);
+    expect((await searchKnowledge('Уникслово123', admin)).length).toBe(0);
 
     await setArticleStatusAction(id, 'PUBLISHED');
-    expect((await searchKnowledge('Уникслово123')).length).toBe(1);
+    expect((await searchKnowledge('Уникслово123', admin)).length).toBe(1);
   });
 });
 

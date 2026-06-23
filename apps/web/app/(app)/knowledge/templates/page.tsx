@@ -11,7 +11,7 @@ export default async function KnowledgeTemplatesPage() {
   const canManage = me.role === 'ADMIN' || me.role === 'PM';
   if (!canManage) redirect('/knowledge');
 
-  const [templates, spaces] = await Promise.all([listAllTemplates(), listKnowledgeSpaces()]);
+  const [templates, spaces] = await Promise.all([listAllTemplates(), listKnowledgeSpaces(me)]);
 
   return (
     <div className="flex flex-col gap-5">

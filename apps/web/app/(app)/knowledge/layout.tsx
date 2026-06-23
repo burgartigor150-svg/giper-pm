@@ -18,8 +18,8 @@ export default async function KnowledgeLayout({
 }) {
   const me = await requireAuth();
   const [spaces, articles, favorites] = await Promise.all([
-    listKnowledgeSpaces(),
-    getAllArticlesForSidebar(),
+    listKnowledgeSpaces(me),
+    getAllArticlesForSidebar(me),
     getFavoriteIds(me.id),
   ]);
 

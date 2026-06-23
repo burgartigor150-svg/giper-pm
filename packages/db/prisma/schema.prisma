@@ -2495,24 +2495,53 @@ enum KnowledgeArticleStatus {
   PUBLISHED
 }
 
+/// Space visibility. PUBLIC: any authenticated user can read (default —
+/// preserves the org-wide model). PRIVATE: only members + global ADMIN/PM.
+enum KnowledgeSpaceVisibility {
+  PUBLIC
+  PRIVATE
+}
+
+/// Per-space role. EDITOR: read + write content. MANAGER: + manage settings,
+/// members and visibility. Global ADMIN/PM act as MANAGER on every space.
+enum KnowledgeSpaceRole {
+  EDITOR
+  MANAGER
+}
+
 model KnowledgeSpace {
-  id          String              @id @default(cuid())
+  id          String                   @id @default(cuid())
   name        String
   description String?
   /// Emoji or short icon for the space.
   icon        String?
   color       String?
-  order       Int                 @default(0)
+  visibility  KnowledgeSpaceVisibility @default(PUBLIC)
+  order       Int                      @default(0)
   archivedAt  DateTime?
   createdById String?
-  createdAt   DateTime            @default(now())
-  updatedAt   DateTime            @updatedAt
+  createdAt   DateTime                 @default(now())
+  updatedAt   DateTime                 @updatedAt
   articles    KnowledgeArticle[]
   favorites   KnowledgeFavorite[]
   templates   KnowledgeTemplate[]
   tables      KnowledgeTable[]
+  members     KnowledgeSpaceMember[]
 
   @@index([archivedAt, order])
+}
+
+/// Membership of a (typically PRIVATE) space. `userId` is a soft ref (no FK).
+model KnowledgeSpaceMember {
+  id        String             @id @default(cuid())
+  spaceId   String
+  space     KnowledgeSpace     @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  userId    String
+  role      KnowledgeSpaceRole @default(EDITOR)
+  createdAt DateTime           @default(now())
+
+  @@unique([spaceId, userId])
+  @@index([userId])
 }
 
 /// Article templates (TEAMLY «Шаблоны статей»). ACCOUNT templates apply in any
