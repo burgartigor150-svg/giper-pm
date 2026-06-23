@@ -9,7 +9,7 @@ import {
 } from '@/lib/knowledge/getKnowledge';
 import { getSpaceAccessById } from '@/lib/knowledge/access';
 import { getArticleComments, getArticleReactions } from '@/lib/knowledge/getComments';
-import { getTable, listSpaceTables } from '@/lib/knowledge/getTables';
+import { getTable } from '@/lib/knowledge/getTables';
 import { extractHeadings, extractTableIds } from '@/lib/knowledge/renderMarkdown';
 import { KbArticleEditor } from '@/components/domain/knowledge/KbArticleEditor';
 import { KbToc } from '@/components/domain/knowledge/KbToc';
@@ -59,8 +59,6 @@ export default async function KnowledgeArticlePage({
       );
     }),
   );
-  const spaceTables = canEdit ? await listSpaceTables(article.spaceId) : [];
-
   return (
     <div className="flex gap-8">
       <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-1 flex-col gap-5">
@@ -96,7 +94,6 @@ export default async function KnowledgeArticlePage({
           initialFavorite={favorite}
           canEdit={canEdit}
           tableEmbeds={tableEmbeds}
-          spaceTables={spaceTables.map((t) => ({ id: t.id, name: t.name, icon: t.icon }))}
         />
 
         <KbComments
