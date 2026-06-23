@@ -211,6 +211,7 @@ export function renderMarkdown(
   let i = 0;
 
   while (i < lines.length) {
+    const iStart = i;
     const line = at(i);
 
     // blank
@@ -282,19 +283,23 @@ export function renderMarkdown(
       continue;
     }
 
-    // image block on its own line: ![alt](url)
+    // image block on its own line: ![alt](url). Always advances i — when the src
+    // is rejected by safeImgSrc we still consume the line (render the alt text),
+    // never falling through, so the parser can't stall.
     const img = /^!\[([^\]]*)\]\(([^)\s]+)\)$/.exec(line.trim());
     if (img && img[2]) {
       const alt = img[1] ?? '';
       const src = safeImgSrc(img[2]);
-      if (src) {
-        blocks.push(
+      blocks.push(
+        src ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img key={k()} src={src} alt={alt} className="my-3 max-w-full rounded-md border border-neutral-200 dark:border-neutral-800" />,
-        );
-        i++;
-        continue;
-      }
+          <img key={k()} src={src} alt={alt} className="my-3 max-w-full rounded-md border border-neutral-200 dark:border-neutral-800" />
+        ) : (
+          <p key={k()} className="my-2 text-sm text-muted-foreground">{alt || 'изображение'}</p>
+        ),
+      );
+      i++;
+      continue;
     }
 
     // heading
@@ -423,11 +428,28 @@ export function renderMarkdown(
       buf.push(at(i));
       i++;
     }
+    // Forward-progress guard: a line that some stop-predicate flagged but no
+    // block branch consumed (e.g. a stray ':::', or an image with a rejected
+    // src) leaves buf empty — render it as a literal line and advance so the
+    // outer loop can never spin on the same index (was a hard browser hang).
+    if (buf.length === 0) {
+      blocks.push(
+        <p key={k()} className="my-2 leading-relaxed">
+          {renderInline(at(i))}
+        </p>,
+      );
+      i++;
+      continue;
+    }
     blocks.push(
       <p key={k()} className="my-2 leading-relaxed">
         {renderInline(buf.join('\n'))}
       </p>,
     );
+
+    // Absolute backstop: no branch should leave i unchanged, but if one ever
+    // does, force progress rather than hang the render thread.
+    if (i === iStart) i++;
   }
 
   return <>{blocks}</>;

@@ -134,6 +134,24 @@ describe('blocks (callout / toggle / image / code)', () => {
   });
 });
 
+describe('parser never hangs (forward-progress guard)', () => {
+  // A real infinite loop would blow the per-test timeout → these double as
+  // hang detectors for the stray-:::/rejected-image regressions.
+  test('stray or malformed ::: lines render without hanging', () => {
+    expect(() => html(':::')).not.toThrow();
+    expect(html('::: note\nтекст')).toContain('текст');
+    expect(html(':::!\nx')).toContain('x');
+    expect(html('before\n:::\nafter')).toContain('after');
+  });
+
+  test('image lines with rejected/relative src render (as alt) without hanging', () => {
+    expect(html('![подпись](/uploads/x.png)')).toContain('подпись');
+    expect(html('![y](ftp://h/f.png)')).not.toContain('<img');
+    expect(html('![z](javascript:alert(1))')).not.toContain('<img');
+    expect(html('text\n![a](/rel.png)\nmore')).toContain('more');
+  });
+});
+
 describe('table embeds', () => {
   test('extractTableIds finds [[table:ID]] tokens, dedups, skips fences', () => {
     expect(extractTableIds('text\n[[table:abc123]]\nmore\n[[table:abc123]]')).toEqual(['abc123']);
