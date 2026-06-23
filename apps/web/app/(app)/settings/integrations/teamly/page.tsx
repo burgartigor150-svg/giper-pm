@@ -6,9 +6,18 @@ import { TeamlyIntegrationPanel } from '@/components/domain/integrations/TeamlyI
 
 export const dynamic = 'force-dynamic';
 
-export default async function TeamlyIntegrationPage() {
+export default async function TeamlyIntegrationPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ code?: string; slug?: string }>;
+}) {
   const me = await requireAuth();
   if (me.role !== 'ADMIN') notFound();
+
+  // TEAMLY redirects back here with ?code=… after authorizing the integration;
+  // pre-fill the connect form so the (long) code isn't copy-pasted by hand.
+  const sp = await searchParams;
+  const prefill = { code: typeof sp.code === 'string' ? sp.code : '', slug: typeof sp.slug === 'string' ? sp.slug : '' };
 
   const status = await getTeamlyStatus();
 
@@ -30,7 +39,7 @@ export default async function TeamlyIntegrationPage() {
           <CardTitle className="text-base">Импорт базы знаний</CardTitle>
         </CardHeader>
         <CardContent>
-          <TeamlyIntegrationPanel status={status} />
+          <TeamlyIntegrationPanel status={status} prefill={prefill} />
         </CardContent>
       </Card>
 
