@@ -9,10 +9,12 @@ import {
 } from '@/lib/knowledge/getKnowledge';
 import { getSpaceAccessById } from '@/lib/knowledge/access';
 import { getArticleComments, getArticleReactions } from '@/lib/knowledge/getComments';
-import { extractHeadings } from '@/lib/knowledge/renderMarkdown';
+import { getTable, listSpaceTables } from '@/lib/knowledge/getTables';
+import { extractHeadings, extractTableIds } from '@/lib/knowledge/renderMarkdown';
 import { KbArticleEditor } from '@/components/domain/knowledge/KbArticleEditor';
 import { KbToc } from '@/components/domain/knowledge/KbToc';
 import { KbComments } from '@/components/domain/knowledge/KbComments';
+import { KbEmbeddedTable } from '@/components/domain/knowledge/KbEmbeddedTable';
 
 export default async function KnowledgeArticlePage({
   params,
@@ -35,6 +37,24 @@ export default async function KnowledgeArticlePage({
   ]);
   const canEdit = access.canEdit;
   const headings = extractHeadings(article.content);
+
+  // Resolve embedded smart tables ([[table:ID]]), access-checked per space so a
+  // private table never renders to someone who can't view it.
+  const tableIds = extractTableIds(article.content);
+  const tableEmbeds: Record<string, React.ReactNode> = {};
+  for (const tid of tableIds) {
+    const t = await getTable(tid);
+    if (!t) continue;
+    const tAcc = await getSpaceAccessById(me, t.spaceId);
+    tableEmbeds[tid] = tAcc.canView ? (
+      <KbEmbeddedTable name={t.name} icon={t.icon} columns={t.columns} rows={t.rows} />
+    ) : (
+      <p className="my-3 rounded-md border border-dashed border-neutral-300 p-3 text-xs text-muted-foreground dark:border-neutral-700">
+        Нет доступа к встроенной таблице.
+      </p>
+    );
+  }
+  const spaceTables = canEdit ? await listSpaceTables(article.spaceId) : [];
 
   return (
     <div className="flex gap-8">
@@ -70,6 +90,8 @@ export default async function KnowledgeArticlePage({
           initialStatus={article.status}
           initialFavorite={favorite}
           canEdit={canEdit}
+          tableEmbeds={tableEmbeds}
+          spaceTables={spaceTables.map((t) => ({ id: t.id, name: t.name, icon: t.icon }))}
         />
 
         <KbComments

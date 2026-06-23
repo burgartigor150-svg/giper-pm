@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { createElement, Fragment } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { renderMarkdown, extractHeadings, slugifyBase } from './renderMarkdown';
+import { renderMarkdown, extractHeadings, slugifyBase, extractTableIds } from './renderMarkdown';
 
 /** Render the markdown node tree to a static HTML string for assertions. */
 function html(md: string): string {
@@ -99,6 +99,25 @@ describe('renderMarkdown', () => {
     const slug = slugifyBase('Привет Мир');
     expect(slug).toBe('привет-мир');
     expect(out).toContain(`id="${slug}"`);
+  });
+});
+
+describe('table embeds', () => {
+  test('extractTableIds finds [[table:ID]] tokens, dedups, skips fences', () => {
+    expect(extractTableIds('text\n[[table:abc123]]\nmore\n[[table:abc123]]')).toEqual(['abc123']);
+    expect(extractTableIds('[[table:a1]]\n[[table:b2]]')).toEqual(['a1', 'b2']);
+    expect(extractTableIds('```\n[[table:nope]]\n```')).toEqual([]);
+    expect(extractTableIds('no tokens here')).toEqual([]);
+  });
+
+  test('renders provided embed node for a token, else a placeholder', () => {
+    const withEmbed = renderToStaticMarkup(
+      createElement(Fragment, null, renderMarkdown('[[table:t1]]', { tableEmbeds: { t1: createElement('div', null, 'EMBED-OK') } })),
+    );
+    expect(withEmbed).toContain('EMBED-OK');
+
+    const withoutEmbed = renderToStaticMarkup(createElement(Fragment, null, renderMarkdown('[[table:t1]]')));
+    expect(withoutEmbed).toContain('отобразится в статье');
   });
 });
 

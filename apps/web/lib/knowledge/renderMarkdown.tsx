@@ -1,4 +1,26 @@
 import type { ReactNode } from 'react';
+import { KbEmbeddedTablePlaceholder } from '@/components/domain/knowledge/KbEmbeddedTable';
+
+const TABLE_TOKEN_RE = /^\[\[table:([A-Za-z0-9_-]+)\]\]$/;
+
+/** Extract embedded smart-table ids (`[[table:ID]]` lines) — skips fenced code. */
+export function extractTableIds(src: string | null | undefined): string[] {
+  if (!src) return [];
+  const ids: string[] = [];
+  let inFence = false;
+  for (const raw of src.replace(/\r\n/g, '\n').split('\n')) {
+    if (raw.startsWith('```')) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue;
+    const m = TABLE_TOKEN_RE.exec(raw.trim());
+    if (m && m[1]) ids.push(m[1]);
+  }
+  return [...new Set(ids)];
+}
+
+export type RenderMarkdownOptions = { tableEmbeds?: Record<string, ReactNode> };
 
 /**
  * Lightweight, dependency-free Markdown → React renderer for Knowledge Base
@@ -160,7 +182,10 @@ function splitRow(line: string): string[] {
 
 // ---- main -----------------------------------------------------------------
 
-export function renderMarkdown(src: string | null | undefined): ReactNode {
+export function renderMarkdown(
+  src: string | null | undefined,
+  options: RenderMarkdownOptions = {},
+): ReactNode {
   if (!src || !src.trim()) return null;
   const lines = src.replace(/\r\n/g, '\n').split('\n');
   const at = (idx: number): string => lines[idx] ?? '';
@@ -173,6 +198,18 @@ export function renderMarkdown(src: string | null | undefined): ReactNode {
 
     // blank
     if (!line.trim()) {
+      i++;
+      continue;
+    }
+
+    // embedded smart-table token: [[table:ID]] on its own line
+    const tableTok = TABLE_TOKEN_RE.exec(line.trim());
+    if (tableTok && tableTok[1]) {
+      const id = tableTok[1];
+      const embed = options.tableEmbeds?.[id];
+      blocks.push(
+        <div key={k()}>{embed !== undefined ? embed : <KbEmbeddedTablePlaceholder id={id} />}</div>,
+      );
       i++;
       continue;
     }
