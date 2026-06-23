@@ -21,6 +21,7 @@ const TABLES_IN_DELETE_ORDER = [
   'KnowledgeComment',
   'KnowledgeArticleView',
   'KnowledgeArticleReview',
+  'KnowledgeAttachment',
   'KnowledgeFavorite',
   'KnowledgeTemplate',
   'KnowledgeSpaceMember',
