@@ -1,7 +1,6 @@
 import { notFound } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@giper/ui/components/Card';
 import { requireAuth } from '@/lib/auth';
-import { canSeeSettings } from '@/lib/permissions';
 import { getTeamlyStatus } from '@/lib/integrations/teamly';
 import { TeamlyIntegrationPanel } from '@/components/domain/integrations/TeamlyIntegrationPanel';
 
@@ -9,7 +8,7 @@ export const dynamic = 'force-dynamic';
 
 export default async function TeamlyIntegrationPage() {
   const me = await requireAuth();
-  if (!canSeeSettings(me)) notFound();
+  if (me.role !== 'ADMIN') notFound();
 
   const status = await getTeamlyStatus();
 

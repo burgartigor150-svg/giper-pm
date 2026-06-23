@@ -102,6 +102,33 @@ describe('proseMirrorToMarkdown', () => {
     expect(proseMirrorToMarkdown(json)).toBe('всё равно сохранён\n');
   });
 
+  it('neutralizes structural tokens that come from text (no fabricated embed/callout)', () => {
+    const embed = proseMirrorToMarkdown(doc(p(t('[[table:SECRET]]'))));
+    expect(embed).not.toMatch(/^\[\[table:SECRET\]\]/m); // would render as a live embed
+    expect(embed).toContain('table:SECRET'); // text preserved (with ZWSP)
+
+    const callout = proseMirrorToMarkdown(doc(p(t(':::danger')), p(t('evil')), p(t(':::'))));
+    expect(callout).not.toMatch(/^:::danger$/m);
+    expect(callout).not.toMatch(/^:::$/m);
+
+    const heading = proseMirrorToMarkdown(doc(p(t('# не заголовок'))));
+    expect(heading).not.toMatch(/^# не заголовок/m);
+
+    const fence = proseMirrorToMarkdown(doc(p(t('```js'))));
+    expect(fence).not.toMatch(/^```js/m);
+  });
+
+  it('still emits REAL callout/heading/table structure (escaping is text-only)', () => {
+    const md = proseMirrorToMarkdown(
+      doc(
+        { type: 'heading', attrs: { level: 1 }, content: [t('Реальный')] },
+        { type: 'callout', attrs: { kind: 'info' }, content: [p(t('текст'))] },
+      ),
+    );
+    expect(md).toMatch(/^# Реальный/m);
+    expect(md).toMatch(/^:::info$/m);
+  });
+
   it('round-trips a realistic mixed document without throwing', () => {
     const md = proseMirrorToMarkdown(
       doc(

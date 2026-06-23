@@ -35,7 +35,8 @@ type Article = {
   created_at: null;
 };
 
-function mockClient(over?: { treeUpdatedAt?: string }): TeamlyClient {
+function mockClient(over?: { treeUpdatedAt?: string; hiddenIds?: string[] }): TeamlyClient {
+  const hidden = new Set(over?.hiddenIds ?? []);
   const updatedAt = over?.treeUpdatedAt ?? '2025-01-11 10:00:00';
   const tree = [
     { id: 'ta1', title: 'Корень', parentSpaceId: 'tsp1', type: 'article', isArchived: false, createdAt: '2025-01-10 10:00:00', updatedAt: '2025-01-10 10:00:00', publishedAt: updatedAt, createdBy: null },
@@ -57,7 +58,11 @@ function mockClient(over?: { treeUpdatedAt?: string }): TeamlyClient {
   return {
     listSpaces: async () => ({ items: [{ id: 'tsp1', title: 'Пространство A', description: 'описание', main_article: null }], lastPage: 1 }),
     getSpaceTree: async () => ({ items: tree, lastPage: 1 }),
-    getArticle: async (id: string) => articles[id] ?? null,
+    getArticle: async (id: string) => {
+      const a = articles[id];
+      if (!a) return null;
+      return { ...a, is_hidden: hidden.has(id) } as Article;
+    },
   } as unknown as TeamlyClient;
 }
 
@@ -98,5 +103,11 @@ describe('runTeamlySync', () => {
     await runTeamlySync(prisma, mockClient());
     const res = await runTeamlySync(prisma, mockClient({ treeUpdatedAt: '2025-02-01 10:00:00' }), { incremental: true });
     expect(res.articles).toBeGreaterThanOrEqual(1);
+  });
+
+  it('skips source-hidden articles (not imported)', async () => {
+    const res = await runTeamlySync(prisma, mockClient({ hiddenIds: ['ta2'] }));
+    expect(res.articles).toBe(1); // only ta1
+    expect(await prisma.knowledgeArticle.count({ where: { externalSource: 'teamly', externalId: 'ta2' } })).toBe(0);
   });
 });

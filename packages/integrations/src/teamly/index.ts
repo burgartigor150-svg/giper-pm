@@ -3,6 +3,7 @@ export {
   TeamlyClient,
   teamlyAuthorize,
   teamlyRefresh,
+  isValidTeamlySlug,
   type TeamlyTokens,
   type TeamlyAuthInput,
   type TeamlyClientOptions,

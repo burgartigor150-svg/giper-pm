@@ -22,7 +22,15 @@ export type TeamlyAuthInput = {
   redirectUri: string;
 };
 
+/** TEAMLY account slug — a single DNS label. Validated so it can't rewrite the
+ * request host (e.g. "evil.com/" → host evil.com) and exfiltrate the secret. */
+const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,62}$/i;
+export function isValidTeamlySlug(slug: string): boolean {
+  return SLUG_RE.test(slug);
+}
+
 function authBase(slug: string): string {
+  if (!isValidTeamlySlug(slug)) throw new Error('invalid teamly slug');
   return `https://${slug}.teamly.ru`;
 }
 

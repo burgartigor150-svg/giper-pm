@@ -8,10 +8,17 @@ import { getTeamlyBotUserId } from './botUser';
  * article tree, fetching article bodies (ProseMirror → Markdown) and upserting
  * by external id so re-runs update in place. Hierarchy is rebuilt from each
  * article's breadcrumbs in a second pass (parents may import after children).
- * Author is matched to a local user by email, else the synthetic TEAMLY bot.
  *
- * Smart tables (`inlineDatabaseArticle`) and nested sub-spaces are skipped in
- * this slice — handled by later TEAMLY slices.
+ * Attribution: imported articles are owned by the synthetic TEAMLY bot — the
+ * TEAMLY article author exposes no email, so we can't match it to a real user.
+ *
+ * KNOWN GAPS (handled by later slices):
+ *  - Smart tables (`inlineDatabaseArticle`) and nested sub-spaces are skipped.
+ *  - Hidden/archived source articles are skipped (not imported).
+ *  - Deletions/archival in TEAMLY are NOT propagated: an article/space removed
+ *    in the source after first import lingers locally. A guarded "soft-archive
+ *    rows whose externalId wasn't seen this run" reconcile is a future addition
+ *    (must only run on complete, non-capped syncs to avoid mass-archiving).
  */
 
 const SOURCE = 'teamly';
@@ -45,20 +52,9 @@ export async function runTeamlySync(
 ): Promise<RunTeamlySyncResult> {
   const start = Date.now();
   const errors: string[] = [];
+  // All imported content is owned by the synthetic TEAMLY bot — the source
+  // article author carries no email to match against a real local user.
   const botId = await getTeamlyBotUserId(prisma);
-
-  const userCache = new Map<string, string>();
-  async function resolveAuthor(email: string | null | undefined, fullName?: string | null): Promise<string> {
-    void fullName;
-    if (!email) return botId;
-    const key = email.toLowerCase();
-    const cached = userCache.get(key);
-    if (cached) return cached;
-    const u = await prisma.user.findFirst({ where: { email: { equals: email, mode: 'insensitive' } }, select: { id: true } });
-    const id = u?.id ?? botId;
-    userCache.set(key, id);
-    return id;
-  }
 
   let spaceCount = 0;
   let articleCount = 0;
@@ -78,7 +74,7 @@ export async function runTeamlySync(
     try {
       const localSpaceId = await upsertSpace(prisma, sp, botId);
       spaceCount++;
-      const res = await syncSpaceArticles(prisma, client, sp.id, localSpaceId, resolveAuthor, opts);
+      const res = await syncSpaceArticles(prisma, client, sp.id, localSpaceId, botId, opts);
       articleCount += res.imported;
       skipped += res.skipped;
       errors.push(...res.errors);
@@ -132,7 +128,7 @@ async function syncSpaceArticles(
   client: TeamlyClient,
   teamlySpaceId: string,
   localSpaceId: string,
-  resolveAuthor: (email: string | null | undefined, fullName?: string | null) => Promise<string>,
+  authorId: string,
   opts: RunTeamlySyncOptions,
 ): Promise<ArticleResult> {
   const errors: string[] = [];
@@ -173,9 +169,14 @@ async function syncSpaceArticles(
         errors.push(`article ${item.id}: not found`);
         continue;
       }
+      // Don't mirror source-hidden/archived articles into a PUBLIC space (they'd
+      // become org-wide searchable + surface in KB AI answers).
+      if (article.is_hidden || article.archived) {
+        skipped++;
+        continue;
+      }
       const md = proseMirrorToMarkdown(article.editorContentObject?.content ?? null);
       const title = article.title || item.title || 'Без названия';
-      const authorId = await resolveAuthor(null, article.author?.full_name);
       const externalUpdatedAt = parseDate(item.updatedAt) ?? (article.updated_at ? new Date(article.updated_at * 1000) : null);
 
       // parent = the breadcrumb just before this article, if it's an article
@@ -213,19 +214,29 @@ async function syncSpaceArticles(
     }
   }
 
-  // second pass: resolve parents (all articles now exist locally)
+  // second pass: resolve parents + normalise sibling order per parent. Walking
+  // `items` (tree order) keeps order contiguous from 0 within each parent group
+  // and deterministic across runs — fixing the root-counter collision that an
+  // incrementally-added child would otherwise get.
   const localByExt = new Map<string, string>();
   const fresh = await prisma.knowledgeArticle.findMany({
     where: { externalSource: SOURCE, spaceId: localSpaceId, externalId: { in: items.map((i) => i.id) } },
     select: { id: true, externalId: true },
   });
   for (const a of fresh) if (a.externalId) localByExt.set(a.externalId, a.id);
-  for (const [extId, parent] of parentExt.entries()) {
-    const localId = localByExt.get(extId);
-    const localParent = parent ? localByExt.get(parent) ?? null : null;
-    if (localId) {
-      await prisma.knowledgeArticle.update({ where: { id: localId }, data: { parentId: localParent } }).catch(() => {});
-    }
+
+  const orderByParent = new Map<string, number>();
+  for (const item of items) {
+    const localId = localByExt.get(item.id);
+    if (!localId) continue; // hidden/archived/skipped — not imported
+    const parentExtId = parentExt.get(item.id) ?? null;
+    const localParent = parentExtId ? localByExt.get(parentExtId) ?? null : null;
+    const key = localParent ?? '__root__';
+    const order = orderByParent.get(key) ?? 0;
+    orderByParent.set(key, order + 1);
+    await prisma.knowledgeArticle
+      .update({ where: { id: localId }, data: { parentId: localParent, order } })
+      .catch(() => {});
   }
 
   return { imported, skipped, errors };

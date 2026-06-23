@@ -3,8 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
-import { canSeeSettings } from '@/lib/permissions';
-import { teamlyAuthorize, runTeamlySync } from '@giper/integrations/teamly';
+import { teamlyAuthorize, runTeamlySync, isValidTeamlySlug } from '@giper/integrations/teamly';
 import { saveTeamlyConnection, disconnectTeamly, recordTeamlySync, buildTeamlyClient } from '@/lib/integrations/teamly';
 
 type ActionResult<T = unknown> =
@@ -12,10 +11,12 @@ type ActionResult<T = unknown> =
   | { ok: false; error: { code: string; message: string } };
 
 const PATH = '/settings/integrations/teamly';
+const DENY: ActionResult<never> = { ok: false, error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Только ADMIN' } };
 
 /**
  * Connect TEAMLY by exchanging an OAuth authorization code for tokens, then
- * persisting them (encrypted). ADMIN-only org-level integration.
+ * persisting them (encrypted). ADMIN-only — it stores an org-level secret and
+ * triggers org-wide writes (matches the Bitrix integration's gate).
  */
 export async function connectTeamlyAction(input: {
   slug: string;
@@ -25,9 +26,7 @@ export async function connectTeamlyAction(input: {
   code: string;
 }): Promise<ActionResult> {
   const me = await requireAuth();
-  if (!canSeeSettings(me)) {
-    return { ok: false, error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' } };
-  }
+  if (me.role !== 'ADMIN') return DENY;
   const slug = input.slug.trim();
   const clientId = input.clientId.trim();
   const clientSecret = input.clientSecret.trim();
@@ -35,6 +34,9 @@ export async function connectTeamlyAction(input: {
   const code = input.code.trim();
   if (!slug || !clientId || !clientSecret || !redirectUri || !code) {
     return { ok: false, error: { code: 'VALIDATION', message: 'Заполните все поля' } };
+  }
+  if (!isValidTeamlySlug(slug)) {
+    return { ok: false, error: { code: 'VALIDATION', message: 'Некорректный slug (только буквы, цифры, дефис)' } };
   }
   try {
     const tokens = await teamlyAuthorize({ slug, clientId, clientSecret, redirectUri }, code);
@@ -51,9 +53,7 @@ export async function connectTeamlyAction(input: {
 
 export async function disconnectTeamlyAction(): Promise<ActionResult> {
   const me = await requireAuth();
-  if (!canSeeSettings(me)) {
-    return { ok: false, error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' } };
-  }
+  if (me.role !== 'ADMIN') return DENY;
   await disconnectTeamly();
   revalidatePath(PATH);
   return { ok: true };
@@ -65,9 +65,7 @@ export async function disconnectTeamlyAction(): Promise<ActionResult> {
  */
 export async function runTeamlySyncAction(): Promise<ActionResult<{ summary: string }>> {
   const me = await requireAuth();
-  if (!canSeeSettings(me)) {
-    return { ok: false, error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' } };
-  }
+  if (me.role !== 'ADMIN') return DENY;
   const client = await buildTeamlyClient();
   if (!client) {
     return { ok: false, error: { code: 'NOT_CONNECTED', message: 'TEAMLY не подключён' } };

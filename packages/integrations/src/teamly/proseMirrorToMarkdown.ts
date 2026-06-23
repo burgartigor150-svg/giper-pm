@@ -73,8 +73,22 @@ function markRank(type?: string): number {
   return 5;
 }
 
+const ZWSP = '​';
+
+/**
+ * Neutralize giper-pm structural tokens that appear inside TEAMLY *text* (not
+ * real structure nodes) so imported prose can't fabricate a smart-table embed
+ * or a callout/details block when rendered. A zero-width space is visually
+ * invisible but breaks the renderer's anchored token regexes.
+ */
+function escapeText(text: string): string {
+  return text
+    .replace(/\[\[table:/g, `[${ZWSP}[table:`) // smart-table embed token
+    .replace(/:::/g, `:${ZWSP}::`); // callout / :::details directive
+}
+
 function inlineToMd(node: PMNode): string {
-  if (node.type === 'text') return applyMarks(node.text ?? '', node.marks);
+  if (node.type === 'text') return applyMarks(escapeText(node.text ?? ''), node.marks);
   if (node.type === 'hardBreak' || node.type === 'hard_break') return '  \n';
   if (node.type === 'image') return imageMd(node); // inline image
   if (Array.isArray(node.content)) return node.content.map(inlineToMd).join('');
@@ -173,8 +187,14 @@ function blockToMd(node: PMNode): string {
       return '#'.repeat(level) + ' ' + inlineChildren(node);
     }
     case 'paragraph':
-    case 'text':
-      return node.type === 'text' ? inlineToMd(node) : inlineChildren(node);
+    case 'text': {
+      if (node.type === 'text') return inlineToMd(node);
+      const line = inlineChildren(node);
+      // A paragraph whose literal text begins with a block marker (#, list/quote
+      // marker, ``` fence, --- rule, | table) would be reinterpreted as that
+      // structure by the reader — prefix an invisible ZWSP to keep it as text.
+      return /^(#{1,6}\s|>|\s*[-*+]\s|\s*\d+\.\s|```|~~~|---|\||={2,}\s*$)/.test(line) ? ZWSP + line : line;
+    }
     case 'bulletList':
     case 'bullet_list':
       return listToMd(node, false);
