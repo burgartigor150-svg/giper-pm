@@ -81,6 +81,9 @@ export default async function SettingsPage() {
               <Link href="/integrations/telegram" className="text-sm underline">
                 Telegram (личные боты PM) →
               </Link>
+              <Link href="/settings/integrations/teamly" className="text-sm underline">
+                TEAMLY (импорт базы знаний) →
+              </Link>
             </CardContent>
           </Card>
           <Card>

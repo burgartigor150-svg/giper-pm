@@ -30,3 +30,4 @@ export {
   vertexJson,
 } from './vertex';
 export { askKnowledgeBase, type KbSource, type AskKbResult } from './askKb';
+export { proseMirrorToMarkdown, type PMNode, type PMMark } from './teamly/proseMirrorToMarkdown';
