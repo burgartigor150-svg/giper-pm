@@ -35,8 +35,9 @@ type Article = {
   created_at: null;
 };
 
-function mockClient(over?: { treeUpdatedAt?: string; hiddenIds?: string[] }): TeamlyClient {
+function mockClient(over?: { treeUpdatedAt?: string; hiddenIds?: string[]; omitIds?: string[]; errorId?: string }): TeamlyClient {
   const hidden = new Set(over?.hiddenIds ?? []);
+  const omit = new Set(over?.omitIds ?? []);
   const updatedAt = over?.treeUpdatedAt ?? '2025-01-11 10:00:00';
   const tree = [
     { id: 'ta1', title: 'Корень', parentSpaceId: 'tsp1', type: 'article', isArchived: false, createdAt: '2025-01-10 10:00:00', updatedAt: '2025-01-10 10:00:00', publishedAt: updatedAt, createdBy: null },
@@ -57,8 +58,9 @@ function mockClient(over?: { treeUpdatedAt?: string; hiddenIds?: string[] }): Te
   };
   return {
     listSpaces: async () => ({ items: [{ id: 'tsp1', title: 'Пространство A', description: 'описание', main_article: null }], lastPage: 1 }),
-    getSpaceTree: async () => ({ items: tree, lastPage: 1 }),
+    getSpaceTree: async () => ({ items: tree.filter((i) => !omit.has(i.id)), lastPage: 1 }),
     getArticle: async (id: string) => {
+      if (over?.errorId === id) throw new Error('boom');
       const a = articles[id];
       if (!a) return null;
       return { ...a, is_hidden: hidden.has(id) } as Article;
@@ -109,5 +111,26 @@ describe('runTeamlySync', () => {
     const res = await runTeamlySync(prisma, mockClient({ hiddenIds: ['ta2'] }));
     expect(res.articles).toBe(1); // only ta1
     expect(await prisma.knowledgeArticle.count({ where: { externalSource: 'teamly', externalId: 'ta2' } })).toBe(0);
+  });
+
+  it('reconcile soft-archives an article removed from TEAMLY (DRAFT)', async () => {
+    await runTeamlySync(prisma, mockClient());
+    // ta2 disappears from the source tree → reconcile should DRAFT it
+    const res = await runTeamlySync(prisma, mockClient({ omitIds: ['ta2'] }), { reconcile: true });
+    expect(res.archived).toBeGreaterThanOrEqual(1);
+    const ta2 = await prisma.knowledgeArticle.findFirstOrThrow({ where: { externalSource: 'teamly', externalId: 'ta2' } });
+    expect(ta2.status).toBe('DRAFT');
+    const ta1 = await prisma.knowledgeArticle.findFirstOrThrow({ where: { externalSource: 'teamly', externalId: 'ta1' } });
+    expect(ta1.status).toBe('PUBLISHED'); // still present → untouched
+  });
+
+  it('reconcile does NOT archive when the run had errors (partial run guard)', async () => {
+    await runTeamlySync(prisma, mockClient());
+    // ta2 omitted AND ta1 errors → run has errors → reconcile must NOT fire
+    const res = await runTeamlySync(prisma, mockClient({ omitIds: ['ta2'], errorId: 'ta1' }), { reconcile: true });
+    expect(res.errors.length).toBeGreaterThanOrEqual(1);
+    expect(res.archived).toBe(0);
+    const ta2 = await prisma.knowledgeArticle.findFirstOrThrow({ where: { externalSource: 'teamly', externalId: 'ta2' } });
+    expect(ta2.status).toBe('PUBLISHED'); // NOT archived despite being absent
   });
 });

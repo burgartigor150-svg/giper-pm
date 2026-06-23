@@ -1,7 +1,7 @@
 import 'server-only';
 import { prisma } from '@giper/db';
 import { encryptToken, decryptToken } from '@/lib/tgTokenCrypto';
-import { TeamlyClient, teamlyRefresh, type TeamlyTokens } from '@giper/integrations/teamly';
+import { TeamlyClient, teamlyRefresh, runTeamlySync, type TeamlyTokens, type RunTeamlySyncResult } from '@giper/integrations/teamly';
 
 /**
  * Persistence + client factory for the single TEAMLY integration. Secrets
@@ -28,6 +28,15 @@ export type TeamlyConfig = {
   lastSyncSummary?: string;
 };
 
+export type TeamlySyncRun = {
+  id: string;
+  startedAt: Date;
+  finishedAt: Date | null;
+  status: string;
+  itemsProcessed: number;
+  errors: number;
+};
+
 export type TeamlyStatus = {
   connected: boolean;
   slug?: string;
@@ -36,6 +45,7 @@ export type TeamlyStatus = {
   lastSyncAt?: string;
   lastSyncStatus?: string;
   lastSyncSummary?: string;
+  lastRuns: TeamlySyncRun[];
 };
 
 export async function getTeamlyIntegration() {
@@ -44,8 +54,14 @@ export async function getTeamlyIntegration() {
 
 export async function getTeamlyStatus(): Promise<TeamlyStatus> {
   const row = await getTeamlyIntegration();
-  if (!row) return { connected: false };
+  if (!row) return { connected: false, lastRuns: [] };
   const c = row.config as unknown as TeamlyConfig;
+  const runs = await prisma.integrationSyncLog.findMany({
+    where: { integrationId: row.id },
+    orderBy: { startedAt: 'desc' },
+    take: 10,
+    select: { id: true, startedAt: true, finishedAt: true, status: true, itemsProcessed: true, errors: true },
+  });
   return {
     connected: !!c.refreshTokenEnc && row.isActive,
     slug: c.slug,
@@ -54,6 +70,14 @@ export async function getTeamlyStatus(): Promise<TeamlyStatus> {
     lastSyncAt: c.lastSyncAt,
     lastSyncStatus: c.lastSyncStatus,
     lastSyncSummary: c.lastSyncSummary,
+    lastRuns: runs.map((r) => ({
+      id: r.id,
+      startedAt: r.startedAt,
+      finishedAt: r.finishedAt,
+      status: r.status,
+      itemsProcessed: r.itemsProcessed,
+      errors: Array.isArray(r.errors) ? r.errors.length : 0,
+    })),
   };
 }
 
@@ -96,6 +120,58 @@ export async function recordTeamlySync(summary: string, status: string): Promise
     where: { id: row.id },
     data: { config: { ...c, lastSyncAt: new Date().toISOString(), lastSyncStatus: status, lastSyncSummary: summary } as unknown as object },
   });
+}
+
+const STALE_LOCK_MS = 15 * 60 * 1000;
+
+export type TeamlySyncOutcome = { ok: boolean; skipped?: boolean; summary: string; result?: RunTeamlySyncResult };
+
+/**
+ * Run a sync end-to-end: a distributed lock (refuse if a recent RUNNING log
+ * exists) → IntegrationSyncLog row → runTeamlySync (incremental + reconcile) →
+ * update the log + connection summary. Shared by the manual button and the cron.
+ */
+export async function runTeamlySyncNow(opts?: { force?: boolean; signal?: AbortSignal }): Promise<TeamlySyncOutcome> {
+  const row = await getTeamlyIntegration();
+  if (!row || !row.isActive) return { ok: false, summary: 'TEAMLY не подключён' };
+
+  const inflight = await prisma.integrationSyncLog.findFirst({
+    where: { integrationId: row.id, status: 'RUNNING', startedAt: { gte: new Date(Date.now() - STALE_LOCK_MS) } },
+    select: { id: true },
+  });
+  if (inflight) return { ok: false, skipped: true, summary: 'Синхронизация уже выполняется' };
+
+  const client = await buildTeamlyClient(opts?.signal);
+  if (!client) return { ok: false, summary: 'TEAMLY не подключён' };
+
+  const log = await prisma.integrationSyncLog.create({
+    data: { integrationId: row.id, direction: 'IN', status: 'RUNNING' },
+    select: { id: true },
+  });
+  try {
+    const result = await runTeamlySync(prisma, client, { incremental: !opts?.force, reconcile: true, signal: opts?.signal });
+    const summary =
+      `Пространств: ${result.spaces}, статей: ${result.articles}, пропущено: ${result.skipped}, ` +
+      `архивировано: ${result.archived}${result.errors.length ? `, ошибок: ${result.errors.length}` : ''}`;
+    await prisma.integrationSyncLog.update({
+      where: { id: log.id },
+      data: {
+        status: result.ok ? 'SUCCESS' : 'PARTIAL',
+        finishedAt: new Date(),
+        itemsProcessed: result.articles,
+        errors: result.errors.length ? result.errors : undefined,
+      },
+    });
+    await recordTeamlySync(summary, result.ok ? 'SUCCESS' : 'PARTIAL');
+    return { ok: result.ok, summary, result };
+  } catch (e) {
+    const msg = String(e).slice(0, 300);
+    await prisma.integrationSyncLog
+      .update({ where: { id: log.id }, data: { status: 'FAILED', finishedAt: new Date(), errors: [msg] } })
+      .catch(() => {});
+    await recordTeamlySync(`Ошибка: ${msg}`, 'FAILED');
+    return { ok: false, summary: msg };
+  }
 }
 
 /**

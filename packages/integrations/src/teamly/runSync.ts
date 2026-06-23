@@ -27,6 +27,14 @@ export type RunTeamlySyncOptions = {
   signal?: AbortSignal;
   /** Only re-fetch articles whose TEAMLY updatedAt is newer than what we stored. */
   incremental?: boolean;
+  /**
+   * After a CLEAN full run (no errors, not aborted, not capped), soft-archive
+   * local teamly-sourced rows whose externalId wasn't seen this run — i.e.
+   * propagate deletions/archival from TEAMLY (spaces → archivedAt, articles →
+   * status DRAFT, hiding them from search/AI). Guarded so a partial/failed run
+   * never mass-archives.
+   */
+  reconcile?: boolean;
   maxArticlesPerSpace?: number;
 };
 
@@ -35,6 +43,7 @@ export type RunTeamlySyncResult = {
   spaces: number;
   articles: number;
   skipped: number;
+  archived: number;
   errors: string[];
   durationMs: number;
 };
@@ -59,6 +68,10 @@ export async function runTeamlySync(
   let spaceCount = 0;
   let articleCount = 0;
   let skipped = 0;
+  let archived = 0;
+  let capped = false;
+  const seenSpaceIds: string[] = [];
+  const seenArticleIds: string[] = [];
 
   // 1. enumerate spaces (paginated)
   const spaces: TeamlySpace[] = [];
@@ -74,13 +87,34 @@ export async function runTeamlySync(
     try {
       const localSpaceId = await upsertSpace(prisma, sp, botId);
       spaceCount++;
+      seenSpaceIds.push(sp.id);
       const res = await syncSpaceArticles(prisma, client, sp.id, localSpaceId, botId, opts);
       articleCount += res.imported;
       skipped += res.skipped;
+      capped = capped || res.capped;
+      seenArticleIds.push(...res.seenIds);
       errors.push(...res.errors);
     } catch (e) {
       errors.push(`space ${sp.id}: ${String(e)}`);
     }
+  }
+
+  // 2. reconcile (propagate deletions) — only on a clean, complete, uncapped run
+  // with non-empty results, so a partial/auth-failed run can't archive the KB.
+  const cleanFull = errors.length === 0 && !opts.signal?.aborted && !capped && seenSpaceIds.length > 0;
+  if (opts.reconcile && cleanFull) {
+    const sp = await prisma.knowledgeSpace.updateMany({
+      where: { externalSource: SOURCE, archivedAt: null, externalId: { notIn: seenSpaceIds } },
+      data: { archivedAt: new Date() },
+    });
+    let art = { count: 0 };
+    if (seenArticleIds.length > 0) {
+      art = await prisma.knowledgeArticle.updateMany({
+        where: { externalSource: SOURCE, status: 'PUBLISHED', externalId: { notIn: seenArticleIds } },
+        data: { status: 'DRAFT' },
+      });
+    }
+    archived = sp.count + art.count;
   }
 
   return {
@@ -88,6 +122,7 @@ export async function runTeamlySync(
     spaces: spaceCount,
     articles: articleCount,
     skipped,
+    archived,
     errors: errors.slice(0, 50),
     durationMs: Date.now() - start,
   };
@@ -121,7 +156,7 @@ async function upsertSpace(prisma: PrismaClient, sp: TeamlySpace, botId: string)
   return created.id;
 }
 
-type ArticleResult = { imported: number; skipped: number; errors: string[] };
+type ArticleResult = { imported: number; skipped: number; errors: string[]; seenIds: string[]; capped: boolean };
 
 async function syncSpaceArticles(
   prisma: PrismaClient,
@@ -134,6 +169,7 @@ async function syncSpaceArticles(
   const errors: string[] = [];
   let imported = 0;
   let skipped = 0;
+  let capped = false;
 
   // collect tree items (articles only)
   const items: TeamlyTreeItem[] = [];
@@ -142,7 +178,10 @@ async function syncSpaceArticles(
     const { items: pageItems, lastPage } = await client.getSpaceTree(teamlySpaceId, page, 60);
     items.push(...pageItems.filter((i) => i.type === 'article' && !i.isArchived));
     if (page >= lastPage) break;
-    if (opts.maxArticlesPerSpace && items.length >= opts.maxArticlesPerSpace) break;
+    if (opts.maxArticlesPerSpace && items.length >= opts.maxArticlesPerSpace) {
+      capped = true;
+      break;
+    }
   }
 
   // existing externalUpdatedAt for incremental skip
@@ -239,5 +278,5 @@ async function syncSpaceArticles(
       .catch(() => {});
   }
 
-  return { imported, skipped, errors };
+  return { imported, skipped, errors, seenIds: items.map((i) => i.id), capped };
 }

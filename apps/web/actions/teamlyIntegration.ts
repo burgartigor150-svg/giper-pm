@@ -1,10 +1,9 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
-import { teamlyAuthorize, runTeamlySync, isValidTeamlySlug } from '@giper/integrations/teamly';
-import { saveTeamlyConnection, disconnectTeamly, recordTeamlySync, buildTeamlyClient } from '@/lib/integrations/teamly';
+import { teamlyAuthorize, isValidTeamlySlug } from '@giper/integrations/teamly';
+import { saveTeamlyConnection, disconnectTeamly, runTeamlySyncNow } from '@/lib/integrations/teamly';
 
 type ActionResult<T = unknown> =
   | { ok: true; data?: T }
@@ -66,21 +65,11 @@ export async function disconnectTeamlyAction(): Promise<ActionResult> {
 export async function runTeamlySyncAction(): Promise<ActionResult<{ summary: string }>> {
   const me = await requireAuth();
   if (me.role !== 'ADMIN') return DENY;
-  const client = await buildTeamlyClient();
-  if (!client) {
-    return { ok: false, error: { code: 'NOT_CONNECTED', message: 'TEAMLY не подключён' } };
+  const res = await runTeamlySyncNow();
+  if (!res.ok && !res.skipped) {
+    return { ok: false, error: { code: 'SYNC_FAILED', message: res.summary } };
   }
-  try {
-    const res = await runTeamlySync(prisma, client, { incremental: true });
-    const summary = `Пространств: ${res.spaces}, статей: ${res.articles}, пропущено: ${res.skipped}${
-      res.errors.length ? `, ошибок: ${res.errors.length}` : ''
-    }`;
-    await recordTeamlySync(summary, res.ok ? 'SUCCESS' : 'PARTIAL');
-    revalidatePath(PATH);
-    revalidatePath('/knowledge');
-    return { ok: true, data: { summary } };
-  } catch (e) {
-    await recordTeamlySync(`Ошибка: ${String(e).slice(0, 200)}`, 'FAILED');
-    return { ok: false, error: { code: 'SYNC_FAILED', message: String(e).slice(0, 200) } };
-  }
+  revalidatePath(PATH);
+  revalidatePath('/knowledge');
+  return { ok: true, data: { summary: res.summary } };
 }
