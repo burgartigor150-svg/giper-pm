@@ -145,6 +145,7 @@ export async function pushComment(
         select: {
           externalId: true,
           externalSource: true,
+          bitrixChatId: true,
         },
       },
       author: {
@@ -159,6 +160,28 @@ export async function pushComment(
   }
   // Already synced — don't double-post on retries.
   if (comment.externalId) return { pushed: false };
+
+  // Collab tasks: the team's discussion lives in the IM chat, not the legacy
+  // task comment forum. Post into the chat so they see it where they talk.
+  // We post as the webhook owner (im.message.add has no per-user author), so the
+  // giper-pm author name is prefixed. Stamp externalId in the SAME `chat:<id>`
+  // scheme the inbound syncChat uses → the next inbound run dedupes it.
+  if (comment.task.bitrixChatId) {
+    const rendered = await renderMentionsForBitrix(prisma, comment.body);
+    const name = comment.author.name?.trim();
+    const message = name ? `${name}: ${rendered}` : rendered;
+    const res = await client.call<number | string>('im.message.add', {
+      DIALOG_ID: `chat${comment.task.bitrixChatId}`,
+      MESSAGE: message,
+    });
+    const msgId = res.result != null ? String(res.result) : null;
+    if (!msgId) throw new Error('Bitrix did not return a chat message id');
+    await prisma.comment.update({
+      where: { id: comment.id },
+      data: { externalSource: 'bitrix24', externalId: `chat:${msgId}` },
+    });
+    return { pushed: true };
+  }
 
   // Authorship is non-negotiable for outbound: Bitrix-side recipients
   // need to see who actually wrote the message (not the webhook owner).
