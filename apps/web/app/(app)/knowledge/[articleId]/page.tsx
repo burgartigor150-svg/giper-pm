@@ -11,7 +11,10 @@ import { getSpaceAccessById } from '@/lib/knowledge/access';
 import { getArticleComments, getArticleReactions } from '@/lib/knowledge/getComments';
 import { getTable, listSpaceTables } from '@/lib/knowledge/getTables';
 import { getArticleViewCount } from '@/lib/knowledge/getAnalytics';
+import { getLatestReview } from '@/lib/knowledge/getReview';
+import { listUsers } from '@/lib/users/listUsers';
 import { KbViewTracker } from '@/components/domain/knowledge/KbViewTracker';
+import { KbArticleReview } from '@/components/domain/knowledge/KbArticleReview';
 import { extractHeadings, extractTableIds } from '@/lib/knowledge/renderMarkdown';
 import { KbArticleEditor } from '@/components/domain/knowledge/KbArticleEditor';
 import { KbToc } from '@/components/domain/knowledge/KbToc';
@@ -63,6 +66,9 @@ export default async function KnowledgeArticlePage({
     }),
   );
   const spaceTables = canEdit ? await listSpaceTables(article.spaceId) : [];
+  const review = await getLatestReview(articleId);
+  // Reviewer picker only needs the user list when the viewer can request review.
+  const reviewUsers = canEdit ? await listUsers() : [];
 
   return (
     <div className="flex gap-8">
@@ -89,6 +95,17 @@ export default async function KnowledgeArticlePage({
           })}
           <span className="ml-1 shrink-0">· 👁 {viewCount}</span>
         </nav>
+
+        <KbArticleReview
+          key={article.id}
+          articleId={article.id}
+          articleStatus={article.status}
+          review={review}
+          meId={me.id}
+          canEdit={canEdit}
+          canManage={access.canManage}
+          users={reviewUsers.map((u) => ({ id: u.id, name: u.name, email: u.email }))}
+        />
 
         <KbArticleEditor
           key={article.id}
