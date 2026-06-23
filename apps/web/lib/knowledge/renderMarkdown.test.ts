@@ -102,6 +102,38 @@ describe('renderMarkdown', () => {
   });
 });
 
+describe('blocks (callout / toggle / image / code)', () => {
+  test('renders a fenced code block with language label + copy', () => {
+    const out = html('```js\nconst x = 1;\n```');
+    expect(out).toContain('const x = 1;');
+    expect(out.toLowerCase()).toContain('js');
+    expect(out).toContain('Копировать');
+  });
+
+  test('renders an info callout with title + body', () => {
+    const out = html(':::info Важно\nтекст инфоблока\n:::');
+    expect(out).toContain('Важно');
+    expect(out).toContain('текст инфоблока');
+  });
+
+  test('renders a details/toggle block', () => {
+    const out = html(':::details Подробнее\nскрытое\n:::');
+    expect(out).toContain('<details');
+    expect(out).toContain('<summary');
+    expect(out).toContain('Подробнее');
+    expect(out).toContain('скрытое');
+  });
+
+  test('renders an image block; drops unsafe src', () => {
+    const ok = html('![котик](https://example.com/cat.png)');
+    expect(ok).toContain('<img');
+    expect(ok).toContain('src="https://example.com/cat.png"');
+    expect(ok).toContain('alt="котик"');
+    const bad = html('![x](javascript:alert(1))');
+    expect(bad).not.toContain('<img');
+  });
+});
+
 describe('table embeds', () => {
   test('extractTableIds finds [[table:ID]] tokens, dedups, skips fences', () => {
     expect(extractTableIds('text\n[[table:abc123]]\nmore\n[[table:abc123]]')).toEqual(['abc123']);

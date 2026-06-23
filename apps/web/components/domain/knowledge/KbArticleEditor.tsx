@@ -1,9 +1,26 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Check, Eye, History, Pencil, Plus, Star, Trash2 } from 'lucide-react';
+
+// Block snippets for the "+" insert menu. {c} marks where the caret lands isn't
+// tracked; we just drop a sensible template the author fills in.
+const BLOCK_SNIPPETS: { label: string; snippet: string }[] = [
+  { label: 'Заголовок', snippet: '## Заголовок\n' },
+  { label: 'Список', snippet: '- пункт\n- пункт\n' },
+  { label: 'Чек-лист', snippet: '- [ ] задача\n- [x] сделано\n' },
+  { label: 'Нумерация', snippet: '1. первый\n2. второй\n' },
+  { label: 'Цитата', snippet: '> цитата\n' },
+  { label: 'Инфоблок', snippet: ':::info Заголовок\nтекст\n:::\n' },
+  { label: 'Предупреждение', snippet: ':::warning Внимание\nтекст\n:::\n' },
+  { label: 'Спойлер', snippet: ':::details Подробнее\nскрытый текст\n:::\n' },
+  { label: 'Код', snippet: '```js\nconst x = 1;\n```\n' },
+  { label: 'Таблица', snippet: '| Колонка | Колонка |\n| --- | --- |\n| a | b |\n' },
+  { label: 'Изображение', snippet: '![подпись](https://…)\n' },
+  { label: 'Разделитель', snippet: '\n---\n' },
+];
 import { renderMarkdown } from '@/lib/knowledge/renderMarkdown';
 import {
   updateArticleAction,
@@ -45,6 +62,20 @@ export function KbArticleEditor({
   spaceTables?: { id: string; name: string; icon: string | null }[];
 }) {
   const router = useRouter();
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  function insertAtCursor(snippet: string) {
+    const ta = textareaRef.current;
+    setContent((c) => {
+      const pos = ta?.selectionStart ?? c.length;
+      const before = c.slice(0, pos);
+      const after = c.slice(pos);
+      const sep = before && !before.endsWith('\n') ? '\n' : '';
+      return `${before}${sep}${snippet}${after}`;
+    });
+    // refocus after the controlled update
+    requestAnimationFrame(() => ta?.focus());
+  }
   const [pending, startTransition] = useTransition();
   const [title, setTitle] = useState(initialTitle);
   const [content, setContent] = useState(initialContent);
@@ -216,29 +247,40 @@ export function KbArticleEditor({
 
       {mode === 'edit' && canEdit ? (
         <>
-          {spaceTables.length > 0 ? (
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              Вставить таблицу:
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="inline-flex items-center gap-0.5 text-xs text-muted-foreground"><Plus className="h-3.5 w-3.5" /> Блок:</span>
+            {BLOCK_SNIPPETS.map((b) => (
+              <button
+                key={b.label}
+                type="button"
+                onClick={() => insertAtCursor(b.snippet)}
+                className="rounded border border-neutral-300 px-1.5 py-0.5 text-xs hover:bg-muted dark:border-neutral-700"
+              >
+                {b.label}
+              </button>
+            ))}
+            {spaceTables.length > 0 ? (
               <select
                 value=""
                 onChange={(e) => {
                   if (!e.target.value) return;
-                  setContent((c) => `${c}${c.endsWith('\n') || c === '' ? '' : '\n'}\n[[table:${e.target.value}]]\n`);
+                  insertAtCursor(`[[table:${e.target.value}]]\n`);
                   e.target.value = '';
                 }}
-                className="rounded border border-neutral-300 px-1 py-1 text-xs text-foreground dark:border-neutral-700 dark:bg-neutral-900"
+                className="rounded border border-neutral-300 px-1 py-0.5 text-xs text-foreground dark:border-neutral-700 dark:bg-neutral-900"
               >
-                <option value="">— выберите —</option>
+                <option value="">Таблица…</option>
                 {spaceTables.map((t) => (
                   <option key={t.id} value={t.id}>{t.name}</option>
                 ))}
               </select>
-            </div>
-          ) : null}
+            ) : null}
+          </div>
           <textarea
+            ref={textareaRef}
             value={content}
             onChange={(e) => setContent(e.target.value)}
-            placeholder="Текст статьи в Markdown… (## заголовки, списки, таблицы, `код`, [[table:ID]] — встроить умную таблицу)"
+            placeholder="Текст статьи в Markdown. Блоки сверху вставляют шаблоны: ## заголовки, :::info инфоблоки, :::details спойлеры, ``` код, ![](url) картинки, [[table:ID]] таблицы"
             className="min-h-[420px] w-full resize-y rounded-md border border-neutral-300 p-3 font-mono text-sm outline-none focus:border-neutral-500 dark:border-neutral-700 dark:bg-neutral-900"
           />
           <div className="flex items-center gap-3">
