@@ -29,6 +29,7 @@ export {
   pushTaskStatus,
   pushTaskDeadline,
   pushComment,
+  pushCollabChatMessage,
   pushTaskResultFromComment,
   pushProjectAsWorkgroup,
   pushTaskAsBitrix,

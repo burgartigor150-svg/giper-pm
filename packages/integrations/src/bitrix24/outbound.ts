@@ -21,6 +21,12 @@ import type { Bitrix24Client } from './client';
  *   - Task creation / deletion (mirror is one-way for these)
  */
 
+/** Prisma unique-constraint violation (P2002), detected without importing the
+ *  runtime Prisma namespace into this package. */
+function isUniqueViolation(e: unknown): boolean {
+  return typeof e === 'object' && e !== null && (e as { code?: unknown }).code === 'P2002';
+}
+
 // Local TaskStatus → Bitrix24 STATUS code. Inverse of mapBitrixStatus.
 // We collapse some local states (BACKLOG → 6 "deferred", BLOCKED → 6 too)
 // because Bitrix doesn't have a direct equivalent and "deferred" is the
@@ -225,6 +231,90 @@ export async function pushComment(
       externalSource: 'bitrix24',
     },
   });
+  return { pushed: true };
+}
+
+/**
+ * Push a giper-pm messenger message — posted into a collab's mirrored group-chat
+ * Channel (slug `bitrix-collab`) — outbound into the Bitrix24 collab group chat
+ * (`DIALOG_ID = sg<groupId>`, derived from the project's externalId). This is the
+ * outbound half of the two-way collab-chat mirror; syncCollabChat is the inbound.
+ *
+ * Echo guard: only messages that originated in giper-pm (externalSource null) are
+ * pushed — inbound-mirrored messages already carry externalSource='bitrix24'. We
+ * post as the webhook owner (im.message.add has no per-user author), so the
+ * giper-pm author name is prefixed. After the push we stamp the local row with
+ * externalId=`bxchat:<id>` in the SAME scheme syncCollabChat reads, so the next
+ * inbound run dedupes it (its high-water cutoff + upsert-by-externalId both treat
+ * it as already mirrored). The stamp is conditional (externalId still null) so a
+ * concurrent inbound run can't be clobbered.
+ */
+export async function pushCollabChatMessage(
+  prisma: PrismaClient,
+  client: Bitrix24Client,
+  messageId: string,
+): Promise<{ pushed: boolean }> {
+  const message = await prisma.message.findUnique({
+    where: { id: messageId },
+    select: {
+      id: true,
+      body: true,
+      externalSource: true,
+      externalId: true,
+      author: { select: { name: true } },
+      channel: {
+        select: {
+          slug: true,
+          project: { select: { externalSource: true, externalId: true } },
+        },
+      },
+    },
+  });
+  if (!message) return { pushed: false };
+  // Only the collab group-chat channel; never a regular messenger channel.
+  if (message.channel?.slug !== 'bitrix-collab') return { pushed: false };
+  // Mirrored or already-pushed → don't echo back / double-post.
+  if (message.externalSource || message.externalId) return { pushed: false };
+  const project = message.channel.project;
+  if (!project || project.externalSource !== 'bitrix24' || !project.externalId) {
+    return { pushed: false };
+  }
+  const body = message.body.trim();
+  if (!body) return { pushed: false };
+
+  const rendered = await renderMentionsForBitrix(prisma, body);
+  const name = message.author?.name?.trim();
+  const text = name ? `${name}: ${rendered}` : rendered;
+  const res = await client.call<number | string>('im.message.add', {
+    DIALOG_ID: `sg${project.externalId}`,
+    MESSAGE: text,
+  });
+  const msgId = res.result != null ? String(res.result) : null;
+  if (!msgId) throw new Error('Bitrix did not return a chat message id');
+
+  // Stamp the local row so the inbound sync treats it as already mirrored. CAS
+  // on externalId:null so a concurrent inbound run that already stamped THIS row
+  // is a harmless no-op. If the hourly inbound sync raced us in the sub-second
+  // gap and mirrored the same Bitrix message into a SEPARATE row (carrying the
+  // same bxchat:<id>), the unique index trips P2002 — drop that redundant mirror
+  // and stamp the original (the row the user already sees live), so no duplicate
+  // survives.
+  const externalId = `bxchat:${msgId}`;
+  try {
+    await prisma.message.updateMany({
+      where: { id: message.id, externalId: null },
+      data: { externalSource: 'bitrix24', externalId },
+    });
+  } catch (e) {
+    if (!isUniqueViolation(e)) throw e;
+    await prisma.message.deleteMany({
+      where: { externalSource: 'bitrix24', externalId, NOT: { id: message.id } },
+    });
+    await prisma.message.updateMany({
+      where: { id: message.id, externalId: null },
+      data: { externalSource: 'bitrix24', externalId },
+    });
+  }
   return { pushed: true };
 }
 

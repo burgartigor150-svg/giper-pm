@@ -44,21 +44,26 @@ export async function syncCollabChat(
 ): Promise<void> {
   const botId = await getBitrixBotUserId(prisma);
 
-  // Race-safe channel ensure (concurrent runs can't double-create).
-  const channel = await prisma.channel.upsert({
+  // Don't create a channel yet: the webhook owner isn't a member of every
+  // collab's chat, and a 403 on pull must not leave an empty orphan channel
+  // behind. Look one up if it exists — we materialize only after a readable
+  // pull (step 2 below).
+  const existing = await prisma.channel.findUnique({
     where: { projectId_slug: { projectId: project.id, slug: CHANNEL_SLUG } },
-    update: {},
-    create: { kind: 'PRIVATE', slug: CHANNEL_SLUG, name: 'Чат коллаба (Bitrix24)', projectId: project.id, createdById: botId },
     select: { id: true },
   });
 
-  // High-water mark: only fetch messages newer than what we already mirrored.
-  const newest = await prisma.message.findFirst({
-    where: { channelId: channel.id, externalSource: 'bitrix24' },
-    orderBy: { createdAt: 'desc' },
-    select: { externalId: true },
-  });
-  const highWater = parseBxChatId(newest?.externalId ?? null);
+  // High-water mark: only fetch messages newer than what we already mirrored
+  // (0 when no channel exists yet → the first run backfills the history).
+  let highWater = 0;
+  if (existing) {
+    const newest = await prisma.message.findFirst({
+      where: { channelId: existing.id, externalSource: 'bitrix24' },
+      orderBy: { createdAt: 'desc' },
+      select: { externalId: true },
+    });
+    highWater = parseBxChatId(newest?.externalId ?? null);
+  }
 
   // 1. Pull newer messages (newest→oldest, walk LAST_ID; stop once we reach the
   //    high-water mark or run out).
@@ -92,17 +97,32 @@ export async function syncCollabChat(
     stats.truncated++;
     console.warn('bitrix24 syncCollabChat: MAX_PAGES reached, older history truncated for sg', project.externalId);
   }
-  if (all.length === 0) return;
 
-  // 2. Resolve authors (bitrixUserId → local user); bot fallback.
+  // 2. Pull succeeded → this collab IS readable. Materialize the channel now
+  //    (race-safe upsert; reuse an existing one). Inaccessible collabs returned
+  //    above on the 403, so they never accrue an empty channel.
+  if (signal?.aborted) return;
+  const channel =
+    existing ??
+    (await prisma.channel.upsert({
+      where: { projectId_slug: { projectId: project.id, slug: CHANNEL_SLUG } },
+      update: {},
+      create: { kind: 'PRIVATE', slug: CHANNEL_SLUG, name: 'Чат коллаба (Bitrix24)', projectId: project.id, createdById: botId },
+      select: { id: true },
+    }));
+
+  // 3. Resolve authors (bitrixUserId → local user); bot fallback. Empty set when
+  //    there are no new messages this run.
   const authorBxIds = Array.from(new Set(all.map((m) => String(m.author_id)).filter((x) => x && x !== '0')));
   const localAuthors = authorBxIds.length
     ? await prisma.user.findMany({ where: { bitrixUserId: { in: authorBxIds } }, select: { id: true, bitrixUserId: true } })
     : [];
   const userByBxId = new Map(localAuthors.filter((u) => u.bitrixUserId).map((u) => [u.bitrixUserId as string, u.id]));
 
-  // 3. Membership: the project's members + the mapped authors who post here, so
+  // 4. Membership: the project's members + the mapped authors who post here, so
   //    a PRIVATE channel is visible to the right people (never the whole org).
+  //    Refreshed on every readable run so a quiet-but-accessible collab still
+  //    surfaces to its members — and they can post outbound into it.
   const memberIds = new Set<string>(userByBxId.values());
   const projMembers = await prisma.projectMember.findMany({ where: { projectId: project.id }, select: { userId: true } });
   for (const m of projMembers) memberIds.add(m.userId);
@@ -112,7 +132,9 @@ export async function syncCollabChat(
       .catch((e) => console.error('bitrix24 syncCollabChat: member add failed', e));
   }
 
-  // 4. Upsert each new message (oldest first for sane order), race-safe.
+  if (all.length === 0) return; // channel + members are ready; nothing new to write
+
+  // 5. Upsert each new message (oldest first for sane order), race-safe.
   for (const m of all.slice().reverse()) {
     if (signal?.aborted) return;
     const externalId = `bxchat:${m.id}`;

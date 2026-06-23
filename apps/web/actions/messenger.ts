@@ -549,6 +549,14 @@ export async function postMessageAction(input: {
     { notifyUserIds: validMentions.map((u) => u.id) },
   );
 
+  // Two-way collab chat: if this channel mirrors a Bitrix24 collab's group chat,
+  // fan the message out to that chat. Self-filtering (only `bitrix-collab`
+  // channels of bitrix24 projects) + best-effort — never blocks the send.
+  void (async () => {
+    const { pushCollabChatMessageBestEffort } = await import('@/lib/integrations/bitrixCollabChat');
+    await pushCollabChatMessageBestEffort(created.id);
+  })();
+
   // Push to mentioned users — minus the author (who already saw
   // what they typed).
   if (validMentions.length > 0) {

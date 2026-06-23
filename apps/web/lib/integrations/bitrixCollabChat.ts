@@ -1,5 +1,5 @@
 import { prisma } from '@giper/db';
-import { syncCollabChat, type SyncCollabChatResult } from '@giper/integrations/bitrix24';
+import { syncCollabChat, pushCollabChatMessage, type SyncCollabChatResult } from '@giper/integrations/bitrix24';
 import { getBitrix24Client } from '@/lib/integrations/bitrix24';
 
 /**
@@ -33,4 +33,21 @@ export async function runCollabChatSync(opts?: { signal?: AbortSignal }): Promis
     }
   }
   return { projects: seen, messages: stats.messages, created: stats.created, errors: stats.errors, truncated: stats.truncated };
+}
+
+/**
+ * Best-effort outbound: mirror a giper-pm messenger message posted in a collab's
+ * group-chat Channel into the Bitrix24 collab chat. Fire-and-forget from
+ * postMessageAction — a Bitrix outage or a non-collab channel must never block
+ * or fail the user's send. The underlying push self-filters (wrong slug,
+ * already-mirrored, non-bitrix project) so calling it for every message is safe.
+ */
+export async function pushCollabChatMessageBestEffort(messageId: string): Promise<void> {
+  try {
+    if (!process.env.BITRIX24_WEBHOOK_URL?.trim()) return;
+    const client = getBitrix24Client();
+    await pushCollabChatMessage(prisma, client, messageId);
+  } catch (e) {
+    console.warn('[messenger] collab chat outbound push failed:', e);
+  }
 }
