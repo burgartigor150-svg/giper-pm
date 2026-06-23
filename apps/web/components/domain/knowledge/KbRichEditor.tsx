@@ -53,8 +53,12 @@ export function KbRichEditor({
           'kb-rte prose prose-sm max-w-none min-h-[420px] rounded-md border border-neutral-300 p-4 text-sm outline-none focus:border-neutral-500 dark:prose-invert dark:border-neutral-700 dark:bg-neutral-900',
       },
     },
-    onUpdate: ({ editor }) =>
-      onChange((editor.storage as unknown as { markdown: { getMarkdown(): string } }).markdown.getMarkdown()),
+    onUpdate: ({ editor }) => {
+      const md = (editor.storage as unknown as { markdown: { getMarkdown(): string } }).markdown.getMarkdown();
+      // Defensive: if a [[table:ID]] token ever slips into the visual editor, the
+      // markdown serializer escapes the brackets — un-escape so the embed survives.
+      onChange(md.replace(/\\\[\\\[table:([A-Za-z0-9_-]+)\\\]\\\]/g, '[[table:$1]]'));
+    },
   });
 
   if (!editor) return <div className="min-h-[420px] rounded-md border border-neutral-300 p-4 text-sm text-muted-foreground dark:border-neutral-700">Загрузка редактора…</div>;
