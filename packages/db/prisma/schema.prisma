@@ -2648,9 +2648,46 @@ model KnowledgeArticle {
   updatedAt   DateTime           @updatedAt
   favorites   KnowledgeFavorite[]
   versions    KnowledgeArticleVersion[]
+  comments    KnowledgeComment[]
+  reactions   KnowledgeReaction[]
 
   @@index([spaceId, parentId, order])
   @@index([status])
+}
+
+/// A comment on an article (TEAMLY обсуждение). One-level replies via parentId.
+/// `authorId` is a soft ref (no FK), consistent with the rest of the KB.
+model KnowledgeComment {
+  id        String              @id @default(cuid())
+  articleId String
+  article   KnowledgeArticle    @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  authorId  String
+  body      String
+  parentId  String?
+  parent    KnowledgeComment?   @relation("KbCommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies   KnowledgeComment[]  @relation("KbCommentReplies")
+  reactions KnowledgeReaction[]
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+
+  @@index([articleId, createdAt])
+}
+
+/// An emoji reaction on an article OR a comment (exactly one target set).
+model KnowledgeReaction {
+  id        String            @id @default(cuid())
+  userId    String
+  emoji     String
+  articleId String?
+  article   KnowledgeArticle? @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  commentId String?
+  comment   KnowledgeComment? @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  createdAt DateTime          @default(now())
+
+  @@unique([userId, articleId, emoji])
+  @@unique([userId, commentId, emoji])
+  @@index([articleId])
+  @@index([commentId])
 }
 
 /// A point-in-time snapshot of an article's title/content (TEAMLY «Предыдущие

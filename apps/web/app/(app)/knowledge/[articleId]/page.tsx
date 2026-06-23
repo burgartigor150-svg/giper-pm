@@ -8,9 +8,11 @@ import {
   isArticleFavorite,
 } from '@/lib/knowledge/getKnowledge';
 import { getSpaceAccessById } from '@/lib/knowledge/access';
+import { getArticleComments, getArticleReactions } from '@/lib/knowledge/getComments';
 import { extractHeadings } from '@/lib/knowledge/renderMarkdown';
 import { KbArticleEditor } from '@/components/domain/knowledge/KbArticleEditor';
 import { KbToc } from '@/components/domain/knowledge/KbToc';
+import { KbComments } from '@/components/domain/knowledge/KbComments';
 
 export default async function KnowledgeArticlePage({
   params,
@@ -25,9 +27,11 @@ export default async function KnowledgeArticlePage({
   const access = await getSpaceAccessById(me, article.spaceId);
   if (!access.canView) notFound();
 
-  const [crumbs, favorite] = await Promise.all([
+  const [crumbs, favorite, comments, articleReactions] = await Promise.all([
     getArticleBreadcrumbs(articleId),
     isArticleFavorite(me.id, articleId),
+    getArticleComments(articleId, me.id),
+    getArticleReactions(articleId, me.id),
   ]);
   const canEdit = access.canEdit;
   const headings = extractHeadings(article.content);
@@ -66,6 +70,16 @@ export default async function KnowledgeArticlePage({
           initialStatus={article.status}
           initialFavorite={favorite}
           canEdit={canEdit}
+        />
+
+        <KbComments
+          key={article.id}
+          articleId={article.id}
+          comments={comments}
+          articleReactions={articleReactions}
+          meId={me.id}
+          canComment={access.canView}
+          canManage={access.canManage}
         />
       </div>
 
