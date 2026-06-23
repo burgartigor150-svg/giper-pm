@@ -17,6 +17,8 @@ const TABLES_IN_DELETE_ORDER = [
   'KnowledgeTableRow',
   'KnowledgeTableColumn',
   'KnowledgeTable',
+  'KnowledgeReaction',
+  'KnowledgeComment',
   'KnowledgeFavorite',
   'KnowledgeTemplate',
   'KnowledgeSpaceMember',
