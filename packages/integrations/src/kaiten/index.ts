@@ -5,10 +5,12 @@ export {
   type KaitenCard,
   type KaitenComment,
   type KaitenFile,
+  type KaitenUser,
   type KaitenBoard,
   type KaitenClientOptions,
 } from './client';
 export { getKaitenBotUserId, KAITEN_BOT_EMAIL } from './botUser';
+export { syncKaitenUsers, buildKaitenUserMap, type SyncKaitenUsersResult } from './syncUsers';
 export {
   normalizeTitle,
   titleSimilarity,

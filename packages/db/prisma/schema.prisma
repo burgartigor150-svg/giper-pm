@@ -44,6 +44,7 @@ model User {
 
   // External integrations
   bitrixUserId  String?   @unique // user.ID in cloud Bitrix24
+  kaitenUserId  String?   @unique // user id in Kaiten (for attribution/assignee)
 
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
