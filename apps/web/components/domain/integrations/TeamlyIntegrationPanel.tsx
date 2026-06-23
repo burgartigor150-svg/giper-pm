@@ -9,13 +9,25 @@ import type { TeamlyStatus } from '@/lib/integrations/teamly';
 const input =
   'w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:border-neutral-500 dark:border-neutral-700';
 
-export function TeamlyIntegrationPanel({ status }: { status: TeamlyStatus }) {
+export function TeamlyIntegrationPanel({
+  status,
+  prefill,
+}: {
+  status: TeamlyStatus;
+  prefill?: { code?: string; slug?: string };
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(status.lastSyncSummary ?? null);
-  const [form, setForm] = useState({ slug: status.slug ?? '', clientId: '', clientSecret: '', redirectUri: '', code: '' });
+  const [form, setForm] = useState({
+    slug: prefill?.slug ?? status.slug ?? '',
+    clientId: '',
+    clientSecret: '',
+    redirectUri: '',
+    code: prefill?.code ?? '',
+  });
 
   function set<K extends keyof typeof form>(k: K, v: string) {
     setForm((f) => ({ ...f, [k]: v }));
@@ -57,6 +69,11 @@ export function TeamlyIntegrationPanel({ status }: { status: TeamlyStatus }) {
           Создайте «Интеграцию» в TEAMLY (Настройки → Интеграции и внешние API), затем вставьте её параметры и
           ключ авторизации (<code>code</code>). Импорт односторонний: TEAMLY → база знаний.
         </p>
+        {prefill?.code ? (
+          <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300">
+            <code>code</code> подхвачен из ссылки перенаправления — заполните остальные поля и нажмите «Подключить».
+          </p>
+        ) : null}
         <div className="grid gap-2 sm:grid-cols-2">
           <label className="flex flex-col gap-1 text-xs text-muted-foreground">
             slug аккаунта
