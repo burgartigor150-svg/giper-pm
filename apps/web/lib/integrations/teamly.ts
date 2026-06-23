@@ -135,6 +135,13 @@ export async function runTeamlySyncNow(opts?: { force?: boolean; signal?: AbortS
   const row = await getTeamlyIntegration();
   if (!row || !row.isActive) return { ok: false, summary: 'TEAMLY не подключён' };
 
+  // Reap orphaned RUNNING logs (a crashed/killed run never hits the catch) so
+  // the history doesn't show phantom RUNNING rows and the lock stays accurate.
+  await prisma.integrationSyncLog.updateMany({
+    where: { integrationId: row.id, status: 'RUNNING', startedAt: { lt: new Date(Date.now() - STALE_LOCK_MS) } },
+    data: { status: 'FAILED', finishedAt: new Date(), errors: ['stale/abandoned run'] },
+  });
+
   const inflight = await prisma.integrationSyncLog.findFirst({
     where: { integrationId: row.id, status: 'RUNNING', startedAt: { gte: new Date(Date.now() - STALE_LOCK_MS) } },
     select: { id: true },

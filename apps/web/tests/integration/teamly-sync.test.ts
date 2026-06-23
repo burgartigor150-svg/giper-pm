@@ -133,4 +133,24 @@ describe('runTeamlySync', () => {
     const ta2 = await prisma.knowledgeArticle.findFirstOrThrow({ where: { externalSource: 'teamly', externalId: 'ta2' } });
     expect(ta2.status).toBe('PUBLISHED'); // NOT archived despite being absent
   });
+
+  it('reconcile does NOT archive a space whose tree came back EMPTY (silent-empty guard)', async () => {
+    await runTeamlySync(prisma, mockClient()); // ta1, ta2 PUBLISHED
+    // a glitchy 200 returns no articles for the space → must NOT DRAFT its content
+    const res = await runTeamlySync(prisma, mockClient({ omitIds: ['ta1', 'ta2'] }), { reconcile: true });
+    expect(res.archived).toBe(0);
+    const ta1 = await prisma.knowledgeArticle.findFirstOrThrow({ where: { externalSource: 'teamly', externalId: 'ta1' } });
+    const ta2 = await prisma.knowledgeArticle.findFirstOrThrow({ where: { externalSource: 'teamly', externalId: 'ta2' } });
+    expect(ta1.status).toBe('PUBLISHED');
+    expect(ta2.status).toBe('PUBLISHED');
+  });
+
+  it('reconcile self-heals a falsely-DRAFTed article on a later run (even incremental)', async () => {
+    await runTeamlySync(prisma, mockClient()); // import
+    await runTeamlySync(prisma, mockClient({ omitIds: ['ta2'] }), { reconcile: true }); // ta2 → DRAFT
+    expect((await prisma.knowledgeArticle.findFirstOrThrow({ where: { externalId: 'ta2' } })).status).toBe('DRAFT');
+    // ta2 reappears; incremental would SKIP its content re-import, reconcile must restore
+    await runTeamlySync(prisma, mockClient(), { incremental: true, reconcile: true });
+    expect((await prisma.knowledgeArticle.findFirstOrThrow({ where: { externalId: 'ta2' } })).status).toBe('PUBLISHED');
+  });
 });

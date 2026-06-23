@@ -71,7 +71,9 @@ export async function runTeamlySync(
   let archived = 0;
   let capped = false;
   const seenSpaceIds: string[] = [];
-  const seenArticleIds: string[] = [];
+  // Per-space sync outcome — drives a SAFE, scoped reconcile (a single space's
+  // silent-empty tree can't archive another space's content).
+  const synced: { teamlySpaceId: string; localSpaceId: string; seenIds: string[] }[] = [];
 
   // 1. enumerate spaces (paginated)
   const spaces: TeamlySpace[] = [];
@@ -92,29 +94,19 @@ export async function runTeamlySync(
       articleCount += res.imported;
       skipped += res.skipped;
       capped = capped || res.capped;
-      seenArticleIds.push(...res.seenIds);
+      synced.push({ teamlySpaceId: sp.id, localSpaceId, seenIds: res.seenIds });
       errors.push(...res.errors);
     } catch (e) {
       errors.push(`space ${sp.id}: ${String(e)}`);
     }
   }
 
-  // 2. reconcile (propagate deletions) — only on a clean, complete, uncapped run
-  // with non-empty results, so a partial/auth-failed run can't archive the KB.
+  // 2. reconcile (propagate TEAMLY deletions) — only on a clean, complete,
+  // uncapped run, and SCOPED carefully so a silent empty/partial API response
+  // can never mass-archive real content.
   const cleanFull = errors.length === 0 && !opts.signal?.aborted && !capped && seenSpaceIds.length > 0;
   if (opts.reconcile && cleanFull) {
-    const sp = await prisma.knowledgeSpace.updateMany({
-      where: { externalSource: SOURCE, archivedAt: null, externalId: { notIn: seenSpaceIds } },
-      data: { archivedAt: new Date() },
-    });
-    let art = { count: 0 };
-    if (seenArticleIds.length > 0) {
-      art = await prisma.knowledgeArticle.updateMany({
-        where: { externalSource: SOURCE, status: 'PUBLISHED', externalId: { notIn: seenArticleIds } },
-        data: { status: 'DRAFT' },
-      });
-    }
-    archived = sp.count + art.count;
+    archived = await reconcile(prisma, seenSpaceIds, synced, errors);
   }
 
   return {
@@ -126,6 +118,60 @@ export async function runTeamlySync(
     errors: errors.slice(0, 50),
     durationMs: Date.now() - start,
   };
+}
+
+/** Circuit breaker: refuse to archive an implausibly large fraction of spaces
+ * in one run — guards a silently-truncated listSpaces. */
+const MAX_SPACE_ARCHIVE_FRACTION = 0.3;
+
+/**
+ * Safe reconcile. Space-archival is gated by a fraction circuit-breaker; article
+ * archival is PER-SPACE and only for spaces whose tree was NON-EMPTY this run
+ * (so one space's silent-empty 200 can't DRAFT its whole content, nor anyone
+ * else's). Also self-heals: a seen article a prior false-positive left DRAFT is
+ * restored to PUBLISHED.
+ */
+async function reconcile(
+  prisma: PrismaClient,
+  seenSpaceIds: string[],
+  synced: { teamlySpaceId: string; localSpaceId: string; seenIds: string[] }[],
+  errors: string[],
+): Promise<number> {
+  let archived = 0;
+
+  // Spaces removed from TEAMLY → archivedAt, with a circuit breaker.
+  const liveSpaces = await prisma.knowledgeSpace.count({ where: { externalSource: SOURCE, archivedAt: null } });
+  const toArchive = await prisma.knowledgeSpace.findMany({
+    where: { externalSource: SOURCE, archivedAt: null, externalId: { notIn: seenSpaceIds } },
+    select: { id: true },
+  });
+  if (toArchive.length > 0) {
+    if (liveSpaces > 0 && toArchive.length / liveSpaces > MAX_SPACE_ARCHIVE_FRACTION) {
+      errors.push(
+        `reconcile: refused to archive ${toArchive.length}/${liveSpaces} spaces ` +
+          `(> ${Math.round(MAX_SPACE_ARCHIVE_FRACTION * 100)}% — likely a partial sync)`,
+      );
+    } else {
+      await prisma.knowledgeSpace.updateMany({ where: { id: { in: toArchive.map((s) => s.id) } }, data: { archivedAt: new Date() } });
+      archived += toArchive.length;
+    }
+  }
+
+  // Articles — per space, non-empty trees only; restore-then-archive.
+  for (const s of synced) {
+    if (s.seenIds.length === 0) continue; // empty tree → ambiguous, skip
+    await prisma.knowledgeArticle.updateMany({
+      where: { externalSource: SOURCE, spaceId: s.localSpaceId, status: 'DRAFT', externalId: { in: s.seenIds } },
+      data: { status: 'PUBLISHED' },
+    });
+    const drafted = await prisma.knowledgeArticle.updateMany({
+      where: { externalSource: SOURCE, spaceId: s.localSpaceId, status: 'PUBLISHED', externalId: { notIn: s.seenIds } },
+      data: { status: 'DRAFT' },
+    });
+    archived += drafted.count;
+  }
+
+  return archived;
 }
 
 async function upsertSpace(prisma: PrismaClient, sp: TeamlySpace, botId: string): Promise<string> {
