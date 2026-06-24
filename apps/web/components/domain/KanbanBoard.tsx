@@ -18,7 +18,7 @@ import {
   type DragStartEvent,
 } from '@dnd-kit/core';
 import { sortableKeyboardCoordinates, arrayMove } from '@dnd-kit/sortable';
-import { GripVertical, Plus, Check, X } from 'lucide-react';
+import { GripVertical, Plus, Check, X, Pencil } from 'lucide-react';
 import type { BoardTask, BoardColumnView, BoardSwimlaneView } from '@/lib/tasks';
 import { changeStatusAction } from '@/actions/tasks';
 import { setInternalStatusAction } from '@/actions/assignments';
@@ -547,17 +547,23 @@ function LaneSection({
             maxLength={60}
             className="h-7 rounded border border-input bg-background px-2 text-sm font-semibold"
           />
-        ) : manageable ? (
-          <button
-            type="button"
-            className="rounded px-1 text-sm font-semibold text-muted-foreground hover:bg-muted hover:text-foreground"
-            onClick={openEditor}
-            title="Нажмите, чтобы переименовать"
-          >
-            {name}
-          </button>
         ) : (
-          <h3 className="text-sm font-semibold text-muted-foreground">{name}</h3>
+          <>
+            {/* Stays a real heading (semantic + relied on by e2e); rename is a
+                separate keyboard-accessible pencil button. */}
+            <h3 className="text-sm font-semibold text-muted-foreground">{name}</h3>
+            {manageable ? (
+              <button
+                type="button"
+                aria-label="Переименовать дорожку"
+                title="Переименовать"
+                onClick={openEditor}
+                className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                <Pencil className="h-3.5 w-3.5" />
+              </button>
+            ) : null}
+          </>
         )}
         <LaneCount total={laneTotal} wipLimit={wipLimit} />
       </div>
