@@ -165,9 +165,11 @@ export default async function ProjectBoardPage({
 
       <KanbanBoard
         projectKey={project.key}
+        projectId={project.id}
         initialTasks={tasks}
         columns={columns}
         swimlanes={swimlanes}
+        canManage={canShare}
       />
     </div>
   );

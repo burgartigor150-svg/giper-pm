@@ -99,6 +99,7 @@ export default async function ProjectSprintsPage({
               <h2 className="mb-2 text-sm font-medium text-muted-foreground">Доска активного спринта</h2>
               <KanbanBoard
                 projectKey={project.key}
+                projectId={project.id}
                 initialTasks={board.tasks}
                 columns={board.columns}
                 swimlanes={board.swimlanes}
