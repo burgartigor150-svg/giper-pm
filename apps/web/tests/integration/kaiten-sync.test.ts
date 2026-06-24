@@ -89,6 +89,13 @@ describe('runKaitenSync', () => {
     expect(imported.find((t) => t.externalId === '101')?.status).toBe('IN_PROGRESS');
     expect(imported.find((t) => t.externalId === '102')?.status).toBe('DONE');
 
+    // S5: the inbound sync dual-writes the dynamic-status FKs alongside the enum.
+    const t101fk = imported.find((t) => t.externalId === '101')!;
+    expect(t101fk.statusId).toBe(`st_${project.id}_IN_PROGRESS`); // mirror FK from Kaiten state
+    expect(t101fk.internalStatusId).toBe(`st_${project.id}_BACKLOG`); // team board starts in backlog
+    expect(t101fk.columnId).toBeNull(); // makeProject seeds statuses, not columns → board fallback
+    expect(imported.find((t) => t.externalId === '102')?.statusId).toBe(`st_${project.id}_DONE`);
+
     // The matching card is linked to the Bitrix twin as a duplicate.
     const card101 = imported.find((t) => t.externalId === '101')!;
     const link = await prisma.taskDependency.findFirst({
@@ -363,5 +370,27 @@ describe('runKaitenSync', () => {
     // Only one of the two identical cards may link to the single twin.
     expect(result.autoLinked).toBe(1);
     expect(await prisma.taskDependency.count({ where: { toTaskId: twin.id, linkType: 'DUPLICATES' } })).toBe(1);
+  });
+
+  it('self-heals a project with no statuses — seeds them before the dual-write (S5)', async () => {
+    const owner = await makeUser();
+    const project = await makeProject({ ownerId: owner.id });
+    // Simulate a Bitrix project created between the S1 backfill and the S5 deploy:
+    // no dynamic statuses, so a dual-write would otherwise dangle the FK.
+    await prisma.status.deleteMany({ where: { projectId: project.id } });
+    expect(await prisma.status.count({ where: { projectId: project.id } })).toBe(0);
+
+    const res = await runKaitenSync(
+      prisma,
+      fakeClient([[card({ id: 201, title: 'Карточка', state: 2 })]]),
+      { projectId: project.id, boardId: 1 },
+    );
+    expect(res.ok).toBe(true);
+    expect(res.created).toBe(1);
+    // The sync seeded the 7 statuses, so the dual-write FK resolves.
+    expect(await prisma.status.count({ where: { projectId: project.id } })).toBe(7);
+    const t = await prisma.task.findFirstOrThrow({ where: { projectId: project.id, externalId: '201' } });
+    expect(t.statusId).toBe(`st_${project.id}_IN_PROGRESS`);
+    expect(t.internalStatusId).toBe(`st_${project.id}_BACKLOG`);
   });
 });

@@ -3,6 +3,7 @@ import type { Bitrix24Client } from './client';
 import { mapBitrixTask } from './mappers';
 import type { BxTask } from './types';
 import { hashTaskState } from './outbound';
+import { mirrorStatusFk, internalStatusFk } from '../status/statusSeed';
 import { ensureProjectForGroup } from './syncProjects';
 import { syncTaskComments, type SyncCommentsResult } from './syncComments';
 import { syncTaskChat } from './syncChat';
@@ -76,6 +77,7 @@ export async function syncOneTask(
     where: { externalSource: 'bitrix24', externalId: mapped.externalId },
     select: {
       id: true,
+      projectId: true,
       status: true,
       updatedAt: true,
       bitrixSyncedAt: true,
@@ -153,6 +155,9 @@ export async function syncOneTask(
     });
     const number = (max._max.number ?? 0) + 1;
     const incomingHashCreate = hashTaskState({ status: mapped.status });
+    // S5 dual-write: mirror-track FK from the Bitrix status, internal-track FKs
+    // for the BACKLOG default a new mirror lands in on the team board.
+    const internalFk = await internalStatusFk(prisma, project.id, 'BACKLOG');
     const created = await prisma.task.create({
       data: {
         projectId: project.id,
@@ -160,6 +165,8 @@ export async function syncOneTask(
         title: mapped.title,
         description: mapped.description,
         status: mapped.status,
+        ...mirrorStatusFk(project.id, mapped.status),
+        ...internalFk,
         priority: mapped.priority,
         dueDate: mapped.dueDate,
         startedAt: mapped.startedAt,
@@ -225,6 +232,7 @@ export async function syncOneTask(
     where: { id: local.id },
     data: {
       status: mapped.status,
+      ...mirrorStatusFk(local.projectId, mapped.status),
       priority: mapped.priority,
       dueDate: mapped.dueDate,
       startedAt: mapped.startedAt,
