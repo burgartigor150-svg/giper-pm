@@ -9,6 +9,7 @@ import {
   fanoutToTaskAudience,
 } from '@/lib/notifications/createNotifications';
 import { autoUnblockDependents } from '@/lib/tasks/autoTransitions';
+import { internalStatusWrite } from '@/lib/status/refs';
 
 type ActionResult = { ok: true } | { ok: false; error: { code: string; message: string } };
 
@@ -51,7 +52,11 @@ export async function approveTaskAction(
   }
   await prisma.task.update({
     where: { id: taskId },
-    data: { internalStatus: 'DONE', completedAt: new Date() },
+    data: {
+      internalStatus: 'DONE',
+      ...(await internalStatusWrite(prisma, task.projectId, 'DONE')),
+      completedAt: new Date(),
+    },
   });
   // Internal comment so the timeline records the decision. We've
   // already validated authorization above (reviewer/ADMIN/PM), so we
@@ -141,7 +146,10 @@ export async function rejectTaskAction(
   }
   await prisma.task.update({
     where: { id: taskId },
-    data: { internalStatus: 'IN_PROGRESS' },
+    data: {
+      internalStatus: 'IN_PROGRESS',
+      ...(await internalStatusWrite(prisma, task.projectId, 'IN_PROGRESS')),
+    },
   });
   // Same reasoning as approveTaskAction — the action gate is the
   // authority for review decisions; addComment's per-stake check would

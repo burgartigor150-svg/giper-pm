@@ -6,6 +6,7 @@ import { canCreateTask, type SessionUser } from '../permissions';
 import { auditTask } from '../audit';
 import { runTaskCreatedAutomations } from '../automations/runTaskCreatedAutomations';
 import { dispatchWebhooks } from '../webhooks/dispatchWebhooks';
+import { internalStatusWrite, mirrorStatusWrite } from '../status/refs';
 
 /**
  * Creates a task with auto-incremented `number` (per project).
@@ -62,6 +63,13 @@ export async function createTask(input: CreateTaskInput, user: SessionUser) {
     }
   }
 
+  // S2 dual-write: a new task defaults to BACKLOG on both tracks — stamp the
+  // matching Status FKs + board column alongside the enum defaults.
+  const statusFk = {
+    ...mirrorStatusWrite(project.id, 'BACKLOG'),
+    ...(await internalStatusWrite(prisma, project.id, 'BACKLOG')),
+  };
+
   let lastErr: unknown;
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     const max = await prisma.task.aggregate({
@@ -85,6 +93,7 @@ export async function createTask(input: CreateTaskInput, user: SessionUser) {
           dueDate: input.dueDate ?? null,
           tags: input.tags ?? [],
           parentId: input.parentId ?? null,
+          ...statusFk,
         },
         select: {
           id: true,
