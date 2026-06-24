@@ -32,6 +32,7 @@ import {
   reorderBoardColumnsAction,
   setTaskColumnAction,
   updateBoardColumnsAction,
+  setFreeFormColumnsEnabledAction,
 } from '@/actions/board';
 import { makeUser, makeProject, makeTask } from './helpers/factories';
 
@@ -214,6 +215,65 @@ describe('setTaskColumnAction — move card into a free-form column', () => {
     const res = await setTaskColumnAction(task.id, col.data!.columnId);
     expect(res.ok).toBe(false);
     expect((await prisma.task.findUniqueOrThrow({ where: { id: task.id } })).columnId).toBeNull();
+  });
+});
+
+describe('setFreeFormColumnsEnabledAction — flag toggle + materialization (S6b)', () => {
+  it('enabling materializes the 6 default columns and sets the flag', async () => {
+    const admin = await makeUser({ role: 'ADMIN' });
+    mockMe.id = admin.id;
+    const project = await makeProject({ ownerId: admin.id });
+    // Fresh project has no BoardColumn rows (board synthesizes defaults).
+    expect(await columnsOf(project.id)).toHaveLength(0);
+
+    const res = await setFreeFormColumnsEnabledAction(project.id, true);
+    expect(res.ok).toBe(true);
+    // 6 real columns now exist (DEFAULT_BOARD_COLUMNS), each with a statusId.
+    const cols = await columnsOf(project.id);
+    expect(cols).toHaveLength(6);
+    expect(cols.every((c) => c.statusId)).toBe(true);
+    expect(
+      (await prisma.project.findUniqueOrThrow({ where: { id: project.id } })).freeFormColumnsEnabled,
+    ).toBe(true);
+  });
+
+  it('is idempotent — re-enabling does not duplicate columns', async () => {
+    const admin = await makeUser({ role: 'ADMIN' });
+    mockMe.id = admin.id;
+    const project = await makeProject({ ownerId: admin.id });
+    expect((await setFreeFormColumnsEnabledAction(project.id, true)).ok).toBe(true);
+    expect(await columnsOf(project.id)).toHaveLength(6);
+    // Re-enable: materialization must not re-add the defaults.
+    expect((await setFreeFormColumnsEnabledAction(project.id, true)).ok).toBe(true);
+    expect(await columnsOf(project.id)).toHaveLength(6);
+  });
+
+  it('refuses to disable while a status backs more than one column', async () => {
+    const admin = await makeUser({ role: 'ADMIN' });
+    mockMe.id = admin.id;
+    const project = await makeProject({ ownerId: admin.id });
+    await setFreeFormColumnsEnabledAction(project.id, true);
+    const extra = await createBoardColumnAction(project.id, 'Доп', 'IN_PROGRESS');
+    if (!extra.ok) throw new Error('setup');
+
+    // Two IN_PROGRESS columns → disabling would collide the status-keyed board.
+    expect((await setFreeFormColumnsEnabledAction(project.id, false)).ok).toBe(false);
+    // Remove the extra → back to ≤1 per status → disabling is allowed.
+    expect((await deleteBoardColumnAction(extra.data!.columnId)).ok).toBe(true);
+    expect((await setFreeFormColumnsEnabledAction(project.id, false)).ok).toBe(true);
+    expect(
+      (await prisma.project.findUniqueOrThrow({ where: { id: project.id } })).freeFormColumnsEnabled,
+    ).toBe(false);
+  });
+
+  it('forbids a non-editor', async () => {
+    const owner = await makeUser({ role: 'ADMIN' });
+    const project = await makeProject({ ownerId: owner.id });
+    const stranger = await makeUser({ role: 'MEMBER' });
+    mockMe.id = stranger.id;
+    mockMe.role = 'MEMBER';
+    expect((await setFreeFormColumnsEnabledAction(project.id, true)).ok).toBe(false);
+    expect(await columnsOf(project.id)).toHaveLength(0);
   });
 });
 

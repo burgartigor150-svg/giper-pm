@@ -87,6 +87,7 @@ export async function listTasksForBoard(
       ownerId: true,
       externalSource: true,
       wipLimits: true,
+      freeFormColumnsEnabled: true,
       members: {
         select: {
           userId: true,

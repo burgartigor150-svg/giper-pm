@@ -7,6 +7,7 @@ import { listTasksForBoard } from '@/lib/tasks';
 import { DomainError } from '@/lib/errors';
 import { getT } from '@/lib/i18n';
 import { KanbanBoard } from '@/components/domain/KanbanBoard';
+import { FreeFormColumnsToggle } from '@/components/domain/FreeFormColumnsToggle';
 import { KanbanFilters } from '@/components/domain/KanbanFilters';
 import { SavedFilterBar } from '@/components/domain/SavedFilterBar';
 import { TemplatePicker } from '@/components/domain/TemplatePicker';
@@ -132,10 +133,18 @@ export default async function ProjectBoardPage({
           </Link>
           <h1 className="text-xl font-semibold">{t('title')}</h1>
         </div>
-        <TemplatePicker
-          projectKey={project.key}
-          templates={cardTemplates.map((tpl) => ({ id: tpl.id, name: tpl.name }))}
-        />
+        <div className="flex items-center gap-2">
+          {canShare ? (
+            <FreeFormColumnsToggle
+              projectId={project.id}
+              enabled={project.freeFormColumnsEnabled}
+            />
+          ) : null}
+          <TemplatePicker
+            projectKey={project.key}
+            templates={cardTemplates.map((tpl) => ({ id: tpl.id, name: tpl.name }))}
+          />
+        </div>
       </div>
 
       <Card className="space-y-3 p-4">
@@ -170,6 +179,8 @@ export default async function ProjectBoardPage({
         columns={columns}
         swimlanes={swimlanes}
         canManage={canShare}
+        freeFormColumns={project.freeFormColumnsEnabled}
+        canManageColumns={canShare && project.freeFormColumnsEnabled}
       />
     </div>
   );
