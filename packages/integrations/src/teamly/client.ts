@@ -88,7 +88,34 @@ async function safeText(res: Response): Promise<string> {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-export type TeamlySpace = { id: string; title: string; description: string | null; main_article?: { id: string } | null };
+/**
+ * A space «свойство» = a smart-table column. A space with a non-empty
+ * schemaProperties (beyond the system title/author/executor/executionDate) is a
+ * TEAMLY smart table; its articles are the rows. (Docs: "Умная таблица является
+ * пространством. Столбцы — свойства пространства, строки — статьи".)
+ */
+export type TeamlySchemaProperty = {
+  id?: string;
+  propertyId?: string;
+  name?: string;
+  /** text | select | multi-select | number | checkbox | date | url | person | title */
+  type?: string;
+  /** key the article's row values are stored under (article.properties.properties[code]) */
+  code?: string;
+  format?: string | null;
+  /** select/multi-select variants — shape varies; parsed defensively in the sync. */
+  options?: unknown;
+  sort?: number | null;
+  hide?: boolean;
+};
+
+export type TeamlySpace = {
+  id: string;
+  title: string;
+  description: string | null;
+  main_article?: { id: string } | null;
+  schemaProperties?: TeamlySchemaProperty[];
+};
 export type TeamlyTreeItem = {
   id: string;
   title: string;
@@ -111,6 +138,8 @@ export type TeamlyArticle = {
   editorContentObject: { content: string; versionAt: number } | null;
   author: { id: string; full_name: string | null; external_id: string | null } | null;
   breadcrumbs?: { sourceId: string; sourceType: string; title: string }[];
+  /** Smart-table row values, keyed by property `code` (T3). Null for plain articles. */
+  properties?: { properties?: Record<string, unknown> | null } | null;
 };
 
 export type TeamlyClientOptions = {
@@ -180,6 +209,18 @@ export class TeamlyClient {
         title: true,
         description: true,
         main_article: { id: true },
+        // Smart-table columns (T3): a non-empty schemaProperties marks a table.
+        schemaProperties: {
+          id: true,
+          propertyId: true,
+          name: true,
+          type: true,
+          code: true,
+          format: true,
+          options: true,
+          sort: true,
+          hide: true,
+        },
       },
     };
     const res = await this.request<{ data: TeamlySpace[]; paginate: { last_page: number } }>('/api/v1/wiki/ql/spaces', { method: 'POST', body });
@@ -210,6 +251,8 @@ export class TeamlyClient {
         editorContentObject: { content: true, versionAt: true },
         author: { id: true, full_name: true, external_id: true },
         breadcrumbs: true,
+        // Smart-table row values (T3), keyed by property code. Empty for plain articles.
+        properties: { properties: true },
       },
     };
     const res = await this.request<TeamlyArticle | null>('/api/v1/wiki/ql/article', { method: 'POST', body });

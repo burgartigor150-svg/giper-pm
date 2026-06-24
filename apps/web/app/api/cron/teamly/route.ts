@@ -32,6 +32,8 @@ export async function POST(req: Request) {
         ? {
             spaces: res.result.spaces,
             articles: res.result.articles,
+            tables: res.result.tables,
+            tableRows: res.result.tableRows,
             archived: res.result.archived,
             durationMs: res.result.durationMs,
             errors: res.result.errors.length,
