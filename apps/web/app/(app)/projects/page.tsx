@@ -2,12 +2,18 @@ import Link from 'next/link';
 import { Button } from '@giper/ui/components/Button';
 import { Card } from '@giper/ui/components/Card';
 import { requireAuth } from '@/lib/auth';
-import { canCreateProject } from '@/lib/permissions';
+import { canCreateProject, canSeeSettings } from '@/lib/permissions';
 import { getEffectiveCaps } from '@/lib/capabilities';
 import { listProjectsForUser, type ListFilter } from '@/lib/projects';
+import { getSpaces } from '@/lib/spaces/getSpaces';
 import { getT } from '@/lib/i18n';
 import { ProjectFilters } from '@/components/domain/ProjectFilters';
 import { StatusBadge } from '@/components/domain/StatusBadge';
+import {
+  ProjectsSpaceBoard,
+  type SpaceBoardGroup,
+  type SpaceBoardProject,
+} from '@/components/domain/ProjectsSpaceBoard';
 import { Avatar } from '@giper/ui/components/Avatar';
 
 const STATUSES = ['ACTIVE', 'ON_HOLD', 'COMPLETED', 'ARCHIVED'] as const;
@@ -30,8 +36,10 @@ export default async function ProjectsPage({
     includeArchived: sp.archived === '1',
   };
 
+  const caps = await getEffectiveCaps({ id: user.id, role: user.role });
   const projects = await listProjectsForUser({ id: user.id, role: user.role }, filter);
-  const canCreate = canCreateProject({ id: user.id, role: user.role }, await getEffectiveCaps({ id: user.id, role: user.role }));
+  const canCreate = canCreateProject({ id: user.id, role: user.role }, caps);
+  const canManageSpaces = canSeeSettings({ id: user.id, role: user.role }, caps);
 
   // Group the ALREADY-visibility-filtered projects by space (purely a display
   // grouping — never a separate query, so it can't widen what the user sees).
@@ -49,6 +57,40 @@ export default async function ProjectsPage({
     .map((items) => ({ name: items[0]!.space!.name, order: items[0]!.space!.order, items }))
     .sort((a, b) => a.order - b.order);
   const hasGroups = spaceGroups.length > 0;
+
+  // Managers (ADMIN/PM) get a drag board: every space is a drop target (even
+  // empty ones), plus a "Без пространства" bucket. Non-managers keep the plain
+  // read-only grouped tables.
+  const allSpaces = canManageSpaces ? await getSpaces() : [];
+  const toRow = (p: Proj): SpaceBoardProject => ({
+    id: p.id,
+    key: p.key,
+    name: p.name,
+    status: p.status,
+    statusLabel: t(`status.${p.status}`),
+    owner: { name: p.owner.name, image: p.owner.image },
+    members: p._count.members,
+    tasks: p._count.tasks,
+    deadline: p.deadline ? new Date(p.deadline).toISOString() : null,
+  });
+  const dragGroups: SpaceBoardGroup[] = [
+    ...allSpaces.map((s) => ({
+      spaceId: s.id,
+      name: s.name,
+      projects: (bySpace.get(s.id) ?? []).map(toRow),
+    })),
+    { spaceId: null, name: 'Без пространства', projects: ungrouped.map(toRow) },
+  ];
+  const dragLabels = {
+    key: t('table.key'),
+    name: t('table.name'),
+    status: t('table.status'),
+    owner: t('table.owner'),
+    members: t('table.members'),
+    tasks: t('table.tasks'),
+    deadline: t('table.deadline'),
+  };
+  const useDragBoard = canManageSpaces && allSpaces.length > 0 && projects.length > 0;
 
   function projectsTable(list: Proj[]) {
     return (
@@ -118,6 +160,8 @@ export default async function ProjectsPage({
         <Card className="overflow-hidden">
           <div className="p-6 text-sm text-muted-foreground">{t('empty')}</div>
         </Card>
+      ) : useDragBoard ? (
+        <ProjectsSpaceBoard groups={dragGroups} labels={dragLabels} />
       ) : !hasGroups ? (
         <Card className="overflow-hidden">{projectsTable(projects)}</Card>
       ) : (
