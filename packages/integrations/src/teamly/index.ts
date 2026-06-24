@@ -15,7 +15,6 @@ export {
 export { getTeamlyBotUserId, TEAMLY_BOT_EMAIL } from './botUser';
 export { runTeamlySync, type RunTeamlySyncOptions, type RunTeamlySyncResult } from './runSync';
 export {
-  isTableSpace,
   tableColumns,
   teamlyTypeToColumnType,
   teamlyValueToString,

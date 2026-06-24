@@ -3,7 +3,6 @@ import { TeamlyClient, type TeamlySpace, type TeamlyTreeItem } from './client';
 import { proseMirrorToMarkdown } from './proseMirrorToMarkdown';
 import { getTeamlyBotUserId } from './botUser';
 import {
-  isTableSpace,
   tableColumns,
   teamlyTypeToColumnType,
   teamlyValueToString,
@@ -104,8 +103,18 @@ export async function runTeamlySync(
       const localSpaceId = await upsertSpace(prisma, sp, botId);
       spaceCount++;
       seenSpaceIds.push(sp.id);
-      if (isTableSpace(sp)) {
-        // Smart table (T3): columns = schemaProperties, rows = articles.
+      // Classify by TREE ITEM TYPE — the only reliable signal. A smart table's
+      // items are `inlineDatabaseArticle` rows; an ordinary space's are
+      // `article`. (schemaProperties can't tell them apart: ordinary spaces also
+      // carry user article-properties.) A table is a space whose content is
+      // database rows and NOT articles; a stray inline row inside an article
+      // space (articleN>0) keeps it an article space.
+      const probe = (await client.getSpaceTree(sp.id, 1, 60)).items.filter((i) => !i.isArchived);
+      const inlineN = probe.filter((i) => i.type === 'inlineDatabaseArticle').length;
+      const articleN = probe.filter((i) => i.type === 'article').length;
+      const isTable = inlineN > 0 && articleN === 0;
+      if (isTable) {
+        // Smart table (T3): columns = schemaProperties, rows = inlineDatabaseArticle.
         const res = await syncSpaceTable(prisma, client, sp, localSpaceId, botId, opts);
         tableCount++;
         tableRowCount += res.rows;

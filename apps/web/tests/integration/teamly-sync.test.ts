@@ -42,7 +42,6 @@ function mockClient(over?: { treeUpdatedAt?: string; hiddenIds?: string[]; omitI
   const tree = [
     { id: 'ta1', title: 'Корень', parentSpaceId: 'tsp1', type: 'article', isArchived: false, createdAt: '2025-01-10 10:00:00', updatedAt: '2025-01-10 10:00:00', publishedAt: updatedAt, createdBy: null },
     { id: 'ta2', title: 'Дочерняя', parentSpaceId: 'tsp1', type: 'article', isArchived: false, createdAt: '2025-01-11 10:00:00', updatedAt, publishedAt: updatedAt, createdBy: null },
-    { id: 'trow', title: 'Строка таблицы', parentSpaceId: 'tsp1', type: 'inlineDatabaseArticle', isArchived: false, createdAt: '2025-01-11 10:00:00', updatedAt, publishedAt: updatedAt, createdBy: null },
   ];
   const articles: Record<string, Article> = {
     ta1: {
@@ -69,11 +68,12 @@ function mockClient(over?: { treeUpdatedAt?: string; hiddenIds?: string[]; omitI
 }
 
 describe('runTeamlySync', () => {
-  it('imports spaces + articles, rebuilds hierarchy, converts content, and skips table rows', async () => {
+  it('imports spaces + articles (article-typed tree), rebuilds hierarchy, converts content', async () => {
     const res = await runTeamlySync(prisma, mockClient());
     expect(res.ok).toBe(true);
     expect(res.spaces).toBe(1);
-    expect(res.articles).toBe(2); // inlineDatabaseArticle skipped
+    expect(res.articles).toBe(2);
+    expect(res.tables).toBe(0); // an article-typed tree is NOT classified as a table
 
     const space = await prisma.knowledgeSpace.findFirstOrThrow({ where: { externalSource: 'teamly', externalId: 'tsp1' } });
     expect(space.name).toBe('Пространство A');
@@ -245,5 +245,41 @@ describe('runTeamlySync — smart tables (T3)', () => {
     expect(res.tableRows).toBe(1); // only the visible row1
     expect(await prisma.knowledgeTableRow.count({ where: { externalSource: 'teamly' } })).toBe(1);
     expect(await prisma.knowledgeTableRow.count({ where: { externalSource: 'teamly', externalId: 'tbl1::row2' } })).toBe(0);
+  });
+
+  it('does NOT classify an article space as a table even with user schemaProperties (prod-bug guard)', async () => {
+    // The prod regression: TEAMLY returns user article-properties on ordinary
+    // spaces too. Classification MUST be by tree item type (article), not by
+    // schemaProperties — otherwise every documentation space becomes a "table".
+    const client = {
+      listSpaces: async () => ({
+        items: [{
+          id: 'docs1', title: 'Документация', description: null, main_article: null,
+          schemaProperties: [
+            { propertyId: 'p1', code: 'title', name: 'Заголовок', type: 'title' },
+            { propertyId: 'p2', code: 'c_block', name: 'Блокирующие', type: 'text' },
+            { propertyId: 'p3', code: 'c_date', name: 'Дата', type: 'date' },
+          ],
+        }],
+        lastPage: 1,
+      }),
+      getSpaceTree: async () => ({
+        items: [
+          { id: 'a1', title: 'Статья 1', parentSpaceId: 'docs1', type: 'article', isArchived: false, createdAt: '2025-01-10 10:00:00', updatedAt: '2025-01-10 10:00:00', publishedAt: '2025-01-10 10:00:00', createdBy: null },
+          { id: 'a2', title: 'Статья 2', parentSpaceId: 'docs1', type: 'article', isArchived: false, createdAt: '2025-01-10 10:00:00', updatedAt: '2025-01-10 10:00:00', publishedAt: '2025-01-10 10:00:00', createdBy: null },
+        ],
+        lastPage: 1,
+      }),
+      getArticle: async (id: string) => ({
+        id, title: id === 'a1' ? 'Статья 1' : 'Статья 2', editorContentObject: null,
+        author: null, breadcrumbs: [], updated_at: null, icon: null, archived: false, is_hidden: false, created_at: null,
+      }),
+    } as unknown as TeamlyClient;
+    const res = await runTeamlySync(prisma, client);
+    expect(res.ok).toBe(true);
+    expect(res.tables).toBe(0); // article-typed tree → article space, NOT a table
+    expect(res.articles).toBe(2);
+    expect(await prisma.knowledgeTable.count({ where: { externalSource: 'teamly', externalId: 'docs1' } })).toBe(0);
+    expect(await prisma.knowledgeArticle.count({ where: { externalSource: 'teamly', externalId: { in: ['a1', 'a2'] } } })).toBe(2);
   });
 });

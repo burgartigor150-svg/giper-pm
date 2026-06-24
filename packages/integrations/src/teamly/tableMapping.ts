@@ -17,25 +17,10 @@ import type { TeamlySchemaProperty, TeamlySpace } from './client';
 /** System property codes dropped from a table's columns (kept: `title` = name). */
 const SYSTEM_CODES = new Set(['author', 'executor', 'executionDate']);
 
-/**
- * Codes TEAMLY exposes on EVERY space — including ordinary article spaces. The
- * API returns these system properties for plain spaces too, so a smart table is
- * detected by the presence of at least one USER-defined property BEYOND these.
- */
-const SYSTEM_SCHEMA_CODES = new Set(['title', 'author', 'executor', 'executionDate']);
-
-/**
- * Is this space a smart table? Only when it exposes a user-defined property (a
- * real column) — NOT merely the system props every space carries. A bare
- * `schemaProperties.length > 0` check misclassifies every article space as a
- * table (TEAMLY returns title/author/executor/executionDate on all spaces),
- * which would convert articles into table rows.
- */
-export function isTableSpace(sp: TeamlySpace): boolean {
-  return (sp.schemaProperties ?? []).some(
-    (p) => !p.hide && !!p.code && !SYSTEM_SCHEMA_CODES.has(p.code),
-  );
-}
+// NOTE: a space is classified as a smart table by its TREE ITEM TYPE
+// (`inlineDatabaseArticle` rows), NOT by schemaProperties — ordinary article
+// spaces also carry user article-properties, so schemaProperties can't tell a
+// table from an article space. That classification lives in runSync.ts.
 
 /** The columns to import: drop hidden + system-metadata properties, keep order. */
 export function tableColumns(sp: TeamlySpace): TeamlySchemaProperty[] {
