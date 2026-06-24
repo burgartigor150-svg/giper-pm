@@ -127,6 +127,37 @@ export async function seedUser(opts: {
   };
 }
 
+// Mirror the S1 status seed (deterministic ids st_<proj>_<CAT>) so projects in
+// the e2e DB have their dynamic statuses — the FK-enforced test DB rejects the
+// S2 dual-write (statusId / internalStatusId) otherwise. Columns are left
+// synthesized (the board renders the default set when a project has none).
+const STATUS_SEED: ReadonlyArray<{ cat: string; name: string; order: number; color: string }> = [
+  { cat: 'BACKLOG', name: 'Бэклог', order: 0, color: '#94a3b8' },
+  { cat: 'TODO', name: 'К выполнению', order: 1, color: '#60a5fa' },
+  { cat: 'IN_PROGRESS', name: 'В работе', order: 2, color: '#fbbf24' },
+  { cat: 'REVIEW', name: 'На проверке', order: 3, color: '#a78bfa' },
+  { cat: 'BLOCKED', name: 'Заблокировано', order: 4, color: '#f87171' },
+  { cat: 'DONE', name: 'Готово', order: 5, color: '#34d399' },
+  { cat: 'CANCELED', name: 'Отменено', order: 6, color: '#6b7280' },
+];
+
+export async function seedProjectStatuses(projectId: string): Promise<void> {
+  const prisma = getPrisma();
+  await prisma.status.createMany({
+    data: STATUS_SEED.map((s) => ({
+      id: `st_${projectId}_${s.cat}`,
+      projectId,
+      name: s.name,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      category: s.cat as any,
+      order: s.order,
+      color: s.color,
+      isDefault: true,
+    })),
+    skipDuplicates: true,
+  });
+}
+
 export async function seedProject(opts: {
   key: string;
   name?: string;
@@ -143,6 +174,7 @@ export async function seedProject(opts: {
       },
     },
   });
+  await seedProjectStatuses(p.id);
   return { id: p.id, key: p.key, name: p.name };
 }
 
