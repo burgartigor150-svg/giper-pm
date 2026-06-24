@@ -2,6 +2,7 @@ import 'server-only';
 import { prisma } from '@giper/db';
 import { encryptToken, decryptToken } from '@/lib/tgTokenCrypto';
 import { TeamlyClient, teamlyRefresh, runTeamlySync, type TeamlyTokens, type RunTeamlySyncResult } from '@giper/integrations/teamly';
+import { syncTeamlyAttachments } from '@/lib/integrations/teamlyAttachments';
 
 /**
  * Persistence + client factory for the single TEAMLY integration. Secrets
@@ -157,22 +158,35 @@ export async function runTeamlySyncNow(opts?: { force?: boolean; signal?: AbortS
   });
   try {
     const result = await runTeamlySync(prisma, client, { incremental: !opts?.force, reconcile: true, signal: opts?.signal });
+    // T4 — localize TEAMLY-hosted images into our S3 (runs AFTER the article
+    // sync, which re-writes the relative urls each cycle). Non-fatal: a download
+    // failure never fails the article sync.
+    let att = { downloaded: 0, reused: 0, pruned: 0, errors: [] as string[] };
+    try {
+      att = await syncTeamlyAttachments(client, { signal: opts?.signal });
+    } catch (e) {
+      att.errors.push(`attachments: ${String(e).slice(0, 200)}`);
+    }
+    const allErrors = [...result.errors, ...att.errors].slice(0, 50);
+    const ok = result.ok && att.errors.length === 0;
+    const status = ok ? 'SUCCESS' : 'PARTIAL';
     const summary =
       `Пространств: ${result.spaces}, статей: ${result.articles}` +
       (result.tables ? `, таблиц: ${result.tables} (строк: ${result.tableRows})` : '') +
+      (att.downloaded || att.pruned ? `, вложений: +${att.downloaded}/−${att.pruned}` : '') +
       `, пропущено: ${result.skipped}, архивировано: ${result.archived}` +
-      (result.errors.length ? `, ошибок: ${result.errors.length}` : '');
+      (allErrors.length ? `, ошибок: ${allErrors.length}` : '');
     await prisma.integrationSyncLog.update({
       where: { id: log.id },
       data: {
-        status: result.ok ? 'SUCCESS' : 'PARTIAL',
+        status,
         finishedAt: new Date(),
         itemsProcessed: result.articles,
-        errors: result.errors.length ? result.errors : undefined,
+        errors: allErrors.length ? allErrors : undefined,
       },
     });
-    await recordTeamlySync(summary, result.ok ? 'SUCCESS' : 'PARTIAL');
-    return { ok: result.ok, summary, result };
+    await recordTeamlySync(summary, status);
+    return { ok, summary, result };
   } catch (e) {
     const msg = String(e).slice(0, 300);
     await prisma.integrationSyncLog

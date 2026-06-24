@@ -101,7 +101,17 @@ function inlineChildren(node: PMNode): string {
 function imageMd(node: PMNode): string {
   const src = str(attr(node, 'src'));
   const alt = str(attr(node, 'alt')) || str(attr(node, 'title'));
-  return src ? `![${alt}](${src})` : '';
+  return src ? `![${alt}](${mdUrl(src)})` : '';
+}
+
+/**
+ * Make a url safe inside markdown `(...)`: a literal space, `(` or `)` in a
+ * filename (e.g. `screenshot (1).png`) would otherwise break parsing — and the
+ * T4 image-localizer regex would truncate/miss it. Percent-encode just those
+ * three (idempotent: a pre-encoded `%28` is untouched). Decoders restore them.
+ */
+function mdUrl(src: string): string {
+  return src.replace(/[() ]/g, (c) => (c === '(' ? '%28' : c === ')' ? '%29' : '%20'));
 }
 
 // ---- block ------------------------------------------------------------------

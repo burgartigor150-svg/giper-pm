@@ -2808,7 +2808,12 @@ model KnowledgeAttachment {
   storageKey   String
   uploadedById String?
   uploadedAt   DateTime         @default(now())
+  /// External mirror provenance (T4): 'teamly' + a stable per-article id so a
+  /// re-sync dedupes instead of re-downloading. Null for user uploads.
+  externalSource String?
+  externalId     String?
 
+  @@unique([externalSource, externalId])
   @@index([articleId])
 }
 

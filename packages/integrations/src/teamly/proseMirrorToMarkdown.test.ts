@@ -75,6 +75,14 @@ describe('proseMirrorToMarkdown', () => {
     expect(md).toBe('> цитата\n\n```js\nconst x = 1;\n```\n\n---\n\n![картинка](https://e.com/a.png)\n');
   });
 
+  it('percent-encodes spaces and parens in an image src (else markdown / the T4 localizer would break)', () => {
+    const md = proseMirrorToMarkdown(
+      doc({ type: 'image', attrs: { src: '/attachments/download/1/screenshot (1).png', alt: 'a' } }),
+    );
+    // No raw space/paren survives inside the (...) — the url is one unbroken token.
+    expect(md).toBe('![a](/attachments/download/1/screenshot%20%281%29.png)\n');
+  });
+
   it('table → markdown pipe table (first row is header)', () => {
     const cell = (text: string): PMNode => ({ type: 'tableCell', content: [p(t(text))] });
     const row = (...cells: string[]): PMNode => ({ type: 'tableRow', content: cells.map(cell) });

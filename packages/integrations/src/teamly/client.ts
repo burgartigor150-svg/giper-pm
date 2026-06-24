@@ -198,6 +198,127 @@ export class TeamlyClient {
     throw new Error(`teamly ${path} → exhausted retries`);
   }
 
+  /**
+   * Download a TEAMLY-hosted file referenced by a SAME-ORIGIN relative path from
+   * article content (e.g. `/attachments/download/123/x.png`) → bytes, authed with
+   * the same bearer + slug as the API. SSRF guard: only relative paths are
+   * accepted, so the request always starts at the configured cluster domain — an
+   * absolute/external `src` (a CDN image, googleusercontent, …) returns null and
+   * is left as-is. Streams with a hard byte cap (decompression-bomb safe).
+   */
+  async downloadFile(
+    path: string,
+    opts: { maxBytes?: number; timeoutMs?: number } = {},
+  ): Promise<{ bytes: Buffer; contentType: string } | null> {
+    if (typeof path !== 'string' || !path.startsWith('/') || path.startsWith('//')) return null;
+    const maxBytes = opts.maxBytes ?? 50 * 1024 * 1024;
+    const timeoutMs = opts.timeoutMs ?? 30_000;
+    let clusterHost: string;
+    try {
+      clusterHost = new URL(this.clusterDomain).host.toLowerCase();
+    } catch {
+      return null;
+    }
+
+    // Per-download deadline, combined with the run-level abort signal.
+    const controller = new AbortController();
+    const onAbort = () => controller.abort();
+    if (this.signal?.aborted) return null;
+    this.signal?.addEventListener('abort', onAbort);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      let refreshed = false;
+      for (let attempt = 0; attempt < 4; attempt++) {
+        // controller.signal is the same runtime AbortSignal fetch accepts; the
+        // cast bridges the duplicate DOM/node lib declarations.
+        const res = await this.fetchFileSameOrigin(
+          `${this.clusterDomain}${path}`,
+          clusterHost,
+          controller.signal as AbortSignal,
+        );
+        if (!res) return null; // off-origin redirect / too many hops → don't leak the token
+        if (res.status === 401 && this.refresh && !refreshed) {
+          const fresh = await this.refresh();
+          if (fresh) {
+            this.accessToken = fresh;
+            refreshed = true;
+            continue;
+          }
+        }
+        if (res.status === 429 || res.status === 503) {
+          await sleep(1000 * 2 ** attempt + Math.floor(Math.random() * 300));
+          continue;
+        }
+        if (!res.ok) return null;
+        const len = Number(res.headers.get('content-length') ?? '');
+        if (Number.isFinite(len) && len > maxBytes) return null;
+        const contentType = res.headers.get('content-type') || 'application/octet-stream';
+        if (!res.body) {
+          const buf = Buffer.from(await res.arrayBuffer());
+          return buf.length > maxBytes ? null : { bytes: buf, contentType };
+        }
+        const reader = res.body.getReader();
+        const chunks: Uint8Array[] = [];
+        let total = 0;
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (value) {
+            total += value.length;
+            if (total > maxBytes) return null;
+            chunks.push(value);
+          }
+        }
+        return { bytes: Buffer.concat(chunks), contentType };
+      }
+      return null;
+    } catch {
+      return null; // aborted / network error → skip this file, never throw
+    } finally {
+      clearTimeout(timer);
+      this.signal?.removeEventListener('abort', onAbort);
+    }
+  }
+
+  /**
+   * Fetch a TEAMLY file, following 30x redirects MANUALLY and re-validating that
+   * every hop stays on the cluster host. The bearer + slug are only ever sent to
+   * the cluster origin, and a redirect can't steer the authed fetch to an
+   * internal/arbitrary host (SSRF). Returns null on an off-origin hop or > 3 hops.
+   */
+  private async fetchFileSameOrigin(
+    startUrl: string,
+    clusterHost: string,
+    signal: AbortSignal,
+  ): Promise<Response | null> {
+    let current = startUrl;
+    for (let hop = 0; hop <= 3; hop++) {
+      let host: string;
+      try {
+        const u = new URL(current);
+        if (u.protocol !== 'https:' && u.protocol !== 'http:') return null;
+        host = u.host.toLowerCase();
+      } catch {
+        return null;
+      }
+      if (host !== clusterHost) return null;
+      const res = await fetch(current, {
+        method: 'GET',
+        headers: { 'X-Account-Slug': this.slug, Authorization: `Bearer ${this.accessToken}` },
+        redirect: 'manual',
+        signal,
+      });
+      if (res.status >= 300 && res.status < 400) {
+        const loc = res.headers.get('location');
+        if (!loc) return res;
+        current = new URL(loc, current).toString();
+        continue;
+      }
+      return res;
+    }
+    return null;
+  }
+
   /** One page of spaces (default type). */
   async listSpaces(page = 1, perPage = 50): Promise<{ items: TeamlySpace[]; lastPage: number }> {
     const body = {
