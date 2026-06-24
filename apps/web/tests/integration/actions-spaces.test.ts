@@ -31,6 +31,7 @@ import { prisma } from '@giper/db';
 import {
   createSpaceAction,
   deleteSpaceAction,
+  reorderSpacesAction,
   setProjectSpaceAction,
 } from '@/actions/spaces';
 import { getSpaces } from '@/lib/spaces/getSpaces';
@@ -57,6 +58,36 @@ describe('spaces — CRUD & assignment', () => {
     expect(spaces[0]?.projectCount).toBe(1);
     const p = await prisma.project.findUniqueOrThrow({ where: { id: project.id } });
     expect(p.spaceId).toBe(spaceId);
+  });
+
+  it('drag-reorder (reorderSpacesAction) persists the new order', async () => {
+    const admin = await makeUser({ role: 'ADMIN' });
+    mockMe.id = admin.id;
+    const a = await createSpaceAction('Альфа');
+    const b = await createSpaceAction('Бета');
+    const c = await createSpaceAction('Гамма');
+    const ids = [a, b, c].map((r) => (r.ok ? r.data!.id : ''));
+    // Initial order = creation order.
+    expect((await getSpaces()).map((s) => s.id)).toEqual(ids);
+
+    // Drag Гамма to the front (what the DnD onDragEnd sends).
+    const reordered = [ids[2], ids[0], ids[1]] as string[];
+    expect((await reorderSpacesAction(reordered)).ok).toBe(true);
+    expect((await getSpaces()).map((s) => s.id)).toEqual(reordered);
+  });
+
+  it('drag to "Без пространства" (setProjectSpaceAction null) ungroups the project', async () => {
+    const admin = await makeUser({ role: 'ADMIN' });
+    mockMe.id = admin.id;
+    const res = await createSpaceAction('Производство');
+    const spaceId = res.ok ? res.data!.id : '';
+    const project = await makeProject({ ownerId: admin.id });
+    await setProjectSpaceAction(project.key, spaceId);
+    expect((await prisma.project.findUniqueOrThrow({ where: { id: project.id } })).spaceId).toBe(spaceId);
+
+    // Dropping into the "Без пространства" bucket sends spaceId = null.
+    expect((await setProjectSpaceAction(project.key, null)).ok).toBe(true);
+    expect((await prisma.project.findUniqueOrThrow({ where: { id: project.id } })).spaceId).toBeNull();
   });
 
   it('deleting a space ungroups its projects (SetNull), not deletes them', async () => {
