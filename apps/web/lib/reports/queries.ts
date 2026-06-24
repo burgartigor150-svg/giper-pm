@@ -6,6 +6,7 @@ import {
   type ReportsRange,
 } from './filters';
 import type { ScopedQuery } from './scope';
+import { isCanceled, statusCategory } from '../status/category';
 
 /**
  * Time entries with the fields every report needs. Includes the live
@@ -224,7 +225,7 @@ export async function getTopOverrun(scope: ScopedQuery, range: ReportsRange) {
 
   for (const e of entries) {
     if (!e.task) continue;
-    if (e.task.status === 'CANCELED') continue;
+    if (isCanceled(statusCategory(e.task.status))) continue;
     const est = e.task.estimateHours ? Number(e.task.estimateHours) : 0;
     if (est <= 0) continue;
     spent.set(e.task.id, (spent.get(e.task.id) ?? 0) + durationOf(e));

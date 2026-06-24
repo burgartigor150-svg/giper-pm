@@ -3,6 +3,7 @@ import type { TaskStatus } from '@giper/db';
 import { TaskStatusBadge } from './TaskStatusBadge';
 import { Avatar } from '@giper/ui/components/Avatar';
 import { AddSubtaskButton } from './AddSubtaskButton';
+import { isCanceled, isClosing, isTerminal, statusCategory } from '@/lib/status/category';
 
 type Subtask = {
   id: string;
@@ -30,8 +31,8 @@ type Props = {
  * we just open it via a CustomEvent with extra args.
  */
 export function SubtaskList({ projectKey, parentTaskId, subtasks, canAdd }: Props) {
-  const total = subtasks.filter((s) => s.status !== 'CANCELED').length;
-  const done = subtasks.filter((s) => s.status === 'DONE').length;
+  const total = subtasks.filter((s) => !isCanceled(statusCategory(s.status))).length;
+  const done = subtasks.filter((s) => isClosing(statusCategory(s.status))).length;
   const pct = total > 0 ? Math.round((done / total) * 100) : 0;
 
   return (
@@ -69,7 +70,7 @@ export function SubtaskList({ projectKey, parentTaskId, subtasks, canAdd }: Prop
                 <span
                   className={
                     'flex-1 truncate ' +
-                    (s.status === 'DONE' || s.status === 'CANCELED'
+                    (isTerminal(statusCategory(s.status))
                       ? 'text-muted-foreground line-through'
                       : '')
                   }

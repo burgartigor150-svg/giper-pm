@@ -4,7 +4,7 @@ import { useEffect, useState, useTransition } from 'react';
 import { Check, Plus, X } from 'lucide-react';
 import { Avatar } from '@giper/ui/components/Avatar';
 import { Input } from '@giper/ui/components/Input';
-import type { Position } from '@giper/db';
+import type { Position, TaskStatus } from '@giper/db';
 import { EstimateVsActual } from './EstimateVsActual';
 import {
   assignTaskAction,
@@ -17,6 +17,7 @@ import {
   setInternalStatusAction,
 } from '@/actions/assignments';
 import { useT } from '@/lib/useT';
+import { isClosing, statusCategory } from '@/lib/status/category';
 import { UserPicker } from './UserPicker';
 
 const STATUSES = ['BACKLOG', 'TODO', 'IN_PROGRESS', 'REVIEW', 'BLOCKED', 'DONE', 'CANCELED'] as const;
@@ -125,7 +126,7 @@ export function TaskSidebar(props: Props) {
   }
 
   function changeStatus(s: string) {
-    if (s === 'DONE') {
+    if (isClosing(statusCategory(s as TaskStatus))) {
       // Closing requires an итог — collect it in the dialog, then submit.
       setResultText('');
       setCloseOpen(true);

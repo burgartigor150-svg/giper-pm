@@ -4,6 +4,7 @@ import { DomainError } from '../errors';
 import { internalStatusWrite } from '../status/refs';
 import type { SessionUser } from '../permissions';
 import { isTransitionAllowed } from '../workflow/isTransitionAllowed';
+import { isClosing as isClosingCat, isTerminal, statusCategory } from '../status/category';
 import { autoUnblockDependents } from './autoTransitions';
 import { runColumnEnterAutomations } from '../automations/runColumnEnterAutomations';
 import { dispatchWebhooks } from '../webhooks/dispatchWebhooks';
@@ -79,7 +80,8 @@ export async function setInternalStatus(
   // Closing a task (→ DONE) requires a result/итог. Enforced in the core so the
   // UI, the MCP server, and any other caller share the rule. Only reached on a
   // real transition into DONE (the no-op guard above already returned).
-  const isClosing = status === 'DONE';
+  const cat = statusCategory(status as TaskStatus);
+  const isClosing = isClosingCat(cat);
   if (isClosing && !result) {
     throw new DomainError('VALIDATION', 400, 'Нужно указать итог при закрытии задачи');
   }
@@ -114,7 +116,7 @@ export async function setInternalStatus(
     },
   });
 
-  if (status === 'DONE' || status === 'CANCELED') {
+  if (isTerminal(cat)) {
     await autoUnblockDependents(taskId, user.id);
   }
   await runColumnEnterAutomations(taskId, status);

@@ -1,6 +1,7 @@
 import { prisma, type TaskStatus } from '@giper/db';
 import { DomainError } from '../errors';
 import { canViewProject, canViewAllProjectTasks, type SessionUser } from '../permissions';
+import { isClosing, statusCategory } from '../status/category';
 
 export type GanttTask = {
   id: string;
@@ -90,7 +91,7 @@ export async function getGanttData(projectKey: string, user: SessionUser) {
   const tasks: GanttTask[] = rows.map((t) => {
     const start = t.startedAt ?? t.createdAt;
     const end = t.completedAt ?? t.dueDate ?? start;
-    const isOpen = t.internalStatus !== 'DONE';
+    const isOpen = !isClosing(statusCategory(t.internalStatus));
     return {
       id: t.id,
       number: t.number,

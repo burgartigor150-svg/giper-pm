@@ -1,6 +1,5 @@
 import { prisma } from '@giper/db';
-
-const DONE_LIKE = ['DONE', 'CANCELED'] as const;
+import { isTerminal, statusCategory } from '../status/category';
 
 export type SprintBurndown = {
   /** True = the numbers are story points; false = task counts (no points set). */
@@ -43,7 +42,7 @@ export async function getSprintBurndown(sprintId: string): Promise<SprintBurndow
     });
 
     const totalCount = tasks.length;
-    const doneCount = tasks.filter((t) => DONE_LIKE.includes(t.internalStatus as 'DONE')).length;
+    const doneCount = tasks.filter((t) => isTerminal(statusCategory(t.internalStatus))).length;
     const pointsSum = tasks.reduce((s, t) => s + (t.storyPoints ?? 0), 0);
     const usePoints = pointsSum > 0;
 
@@ -52,7 +51,7 @@ export async function getSprintBurndown(sprintId: string): Promise<SprintBurndow
     if (usePoints) {
       committed = pointsSum;
       remaining = tasks
-        .filter((t) => !DONE_LIKE.includes(t.internalStatus as 'DONE'))
+        .filter((t) => !isTerminal(statusCategory(t.internalStatus)))
         .reduce((s, t) => s + (t.storyPoints ?? 0), 0);
     } else {
       committed = totalCount;

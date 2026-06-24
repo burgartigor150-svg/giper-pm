@@ -4,6 +4,7 @@ import { DomainError } from '../errors';
 import { canEditTask, type SessionUser } from '../permissions';
 import { getEffectiveCapsForProject } from '../capabilities';
 import { isTransitionAllowed } from '../workflow/isTransitionAllowed';
+import { isClosing, statusCategory } from '../status/category';
 import { auditTask } from '../audit';
 
 /**
@@ -49,7 +50,7 @@ export async function changeTaskStatus(
   if (
     task.reviewerId &&
     task.status === 'REVIEW' &&
-    newStatus === 'DONE' &&
+    isClosing(statusCategory(newStatus)) &&
     user.role !== 'ADMIN' &&
     task.reviewerId !== user.id
   ) {
@@ -74,8 +75,11 @@ export async function changeTaskStatus(
   const now = new Date();
   const startedAt =
     newStatus === 'IN_PROGRESS' && !task.startedAt ? now : task.startedAt;
-  const completedAt =
-    newStatus === 'DONE' ? now : task.status === 'DONE' ? null : task.completedAt;
+  const completedAt = isClosing(statusCategory(newStatus))
+    ? now
+    : isClosing(statusCategory(task.status))
+      ? null
+      : task.completedAt;
 
   const updated = await prisma.$transaction(async (tx) => {
     const u = await tx.task.update({

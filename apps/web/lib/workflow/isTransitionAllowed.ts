@@ -1,4 +1,5 @@
 import { prisma, type TaskStatus } from '@giper/db';
+import { isCanceled, statusCategory } from '../status/category';
 
 /**
  * Whether moving a card from→to is allowed by the project's configurable
@@ -15,7 +16,7 @@ export async function isTransitionAllowed(
   to: TaskStatus,
 ): Promise<boolean> {
   if (from === to) return true;
-  if (to === 'CANCELED') return true;
+  if (isCanceled(statusCategory(to))) return true;
   const rules = await prisma.workflowTransition.findMany({
     where: { projectId },
     select: { fromStatus: true, toStatus: true },

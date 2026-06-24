@@ -30,6 +30,7 @@ import {
   createBoardSwimlaneAction,
 } from '@/actions/board';
 import { useT } from '@/lib/useT';
+import { isClosing, statusCategory } from '@/lib/status/category';
 import { KanbanCard } from './KanbanCard';
 import { KanbanColumn } from './KanbanColumn';
 
@@ -318,7 +319,7 @@ export function KanbanBoard({
 
     // Closing requires an итог, which we can't collect mid-drag — send the user
     // to the task card (which has the result dialog). Card stays put.
-    if (!sameStatus && newStatus === 'DONE') {
+    if (!sameStatus && isClosing(statusCategory(newStatus))) {
       setError('Чтобы закрыть задачу, откройте её и укажите итог при закрытии.');
       return;
     }

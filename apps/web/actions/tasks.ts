@@ -11,9 +11,10 @@ import {
   type CreateTaskInput,
   type UpdateTaskInput,
 } from '@giper/shared';
-import { prisma } from '@giper/db';
+import { prisma, type TaskStatus } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
 import { DomainError } from '@/lib/errors';
+import { isTerminal, statusCategory } from '@/lib/status/category';
 import {
   addComment,
   assignTask,
@@ -245,7 +246,7 @@ export async function changeStatusAction(
   await pushBitrixStatusBestEffort(taskId);
 
   // If the move closed the task, unblock its downstream dependants.
-  if (parsed.data.status === 'DONE' || parsed.data.status === 'CANCELED') {
+  if (isTerminal(statusCategory(parsed.data.status as TaskStatus))) {
     await autoUnblockDependents(taskId, me.id);
   }
 

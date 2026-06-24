@@ -1,4 +1,4 @@
-import type { PrismaClient, StatusCategory } from '@giper/db';
+import type { PrismaClient, StatusCategory, TaskStatus } from '@giper/db';
 
 /**
  * Status-category semantics. Code reasons about CATEGORIES (a small fixed enum
@@ -23,6 +23,15 @@ export const STATUS_CATEGORIES = [
 
 /** Terminal (closed) categories — excluded from "open task" queries. */
 export const TERMINAL_CATEGORIES: readonly StatusCategory[] = ['DONE', 'CANCELED'];
+
+/**
+ * The legacy TaskStatus enum value IS its category today — the enum is the
+ * denormalized category mirror on Task. This is the ONE place that equivalence
+ * lives (S4 chokepoint): when S10 drops the enum for statusId→Status.category,
+ * only this function changes. Feed it a task's `status`/`internalStatus` to drive
+ * the category predicates below, so done-detection works for dynamic statuses too.
+ */
+export const statusCategory = (s: TaskStatus): StatusCategory => s as StatusCategory;
 
 export const isTerminal = (c: StatusCategory): boolean => c === 'DONE' || c === 'CANCELED';
 /** DONE demands an итог at close; CANCELED is the no-итог escape hatch. */

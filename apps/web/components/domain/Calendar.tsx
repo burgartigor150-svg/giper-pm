@@ -20,6 +20,8 @@ import {
   X,
   Trash2,
 } from 'lucide-react';
+import type { TaskStatus } from '@giper/db';
+import { isCanceled, isClosing, isTerminal, statusCategory } from '@/lib/status/category';
 import {
   DndContext,
   DragOverlay,
@@ -929,7 +931,7 @@ function DayCell({
   const { setNodeRef, isOver } = useDroppable({ id: `day:${ymd(day)}` });
   const isWeekend = day.getDay() === 0 || day.getDay() === 6;
   const overdueOpen =
-    day < today && items.some((i) => i.internalStatus !== 'DONE' && i.internalStatus !== 'CANCELED');
+    day < today && items.some((i) => !isTerminal(statusCategory(i.internalStatus as TaskStatus)));
   const isToday = isSameDay(day, today);
 
   const visible = items.slice(0, CELL_VISIBLE_LIMIT);
@@ -1276,8 +1278,8 @@ function cardClass(item: DeadlineItem, expanded: boolean | undefined): string {
     'cursor-grab select-none touch-none active:cursor-grabbing',
     'flex items-center gap-1 overflow-hidden rounded-sm pl-0 pr-1.5 py-0.5 text-xs',
     'bg-muted/60 hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors duration-150',
-    item.internalStatus === 'DONE' ? 'opacity-60' : '',
-    item.internalStatus === 'CANCELED' ? 'opacity-50 line-through' : '',
+    isClosing(statusCategory(item.internalStatus as TaskStatus)) ? 'opacity-60' : '',
+    isCanceled(statusCategory(item.internalStatus as TaskStatus)) ? 'opacity-50 line-through' : '',
     expanded ? 'py-1' : '',
   ].join(' ');
 }
