@@ -6,6 +6,7 @@ import { syncTaskAttachments, type SyncFilesResult } from './syncFiles';
 import { syncTaskComments, type SyncCommentsResult } from './syncComments';
 import { syncTaskHistory, type SyncHistoryResult } from './syncHistory';
 import { syncTaskChat, type SyncChatResult } from './syncChat';
+import { mirrorStatusFk, internalStatusFk, seedProjectStatuses } from '../status/statusSeed';
 
 export type SyncTasksResult = {
   totalSeen: number;
@@ -75,6 +76,10 @@ export async function syncTasks(
   })) {
     if (p.externalId) projectByExternalId.set(p.externalId, p.id);
   }
+  // S5 self-heal: ensure every existing Bitrix project has its dynamic statuses
+  // before the dual-write runs — projects created between S1's backfill and the
+  // S5 deploy have none, which would dangle the status FKs (idempotent).
+  await seedProjectsStatuses(prisma, [...projectByExternalId.values()]);
 
   const userByBitrixId = new Map<string, string>();
   for (const u of await prisma.user.findMany({
@@ -332,6 +337,7 @@ async function upsertOne(
           title: mapped.title,
           description: mapped.description,
           status: mapped.status,
+          ...mirrorStatusFk(projectId, mapped.status),
           priority: mapped.priority,
           dueDate: mapped.dueDate,
           startedAt: mapped.startedAt,
@@ -357,6 +363,9 @@ async function upsertOne(
     _max: { number: true },
   });
   const number = (max._max.number ?? 0) + 1;
+  // S5 dual-write: mirror FK from the Bitrix status + internal-track FKs for the
+  // BACKLOG default the new mirror lands in on the team board.
+  const internalFk = await internalStatusFk(prisma, projectId, 'BACKLOG');
   const created = await prisma.task.create({
     data: {
       projectId,
@@ -364,6 +373,8 @@ async function upsertOne(
       title: mapped.title,
       description: mapped.description,
       status: mapped.status,
+      ...mirrorStatusFk(projectId, mapped.status),
+      ...internalFk,
       priority: mapped.priority,
       dueDate: mapped.dueDate,
       startedAt: mapped.startedAt,
@@ -570,5 +581,8 @@ async function ensurePersonalProject(
     },
     select: { id: true },
   });
+  // S5: a Bitrix-created project needs its dynamic statuses so mirrored tasks'
+  // status FKs resolve (the app's createProject seeds them; this path didn't).
+  await seedProjectStatuses(prisma, created.id);
   return created.id;
 }

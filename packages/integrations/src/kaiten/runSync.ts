@@ -3,6 +3,7 @@ import { KaitenClient } from './client';
 import { getKaitenBotUserId } from './botUser';
 import { prepareCandidates, bestMatchPrepared } from './match';
 import { syncKaitenUsers, buildKaitenUserMap } from './syncUsers';
+import { mirrorStatusFk, internalStatusFk, seedProjectStatuses } from '../status/statusSeed';
 
 export const KAITEN_SOURCE = 'kaiten';
 
@@ -94,6 +95,10 @@ export async function runKaitenSync(
   const seenLiveIds = new Set<string>();
 
   const botId = await getKaitenBotUserId(prisma);
+  // S5 self-heal: the target project (an app- or Bitrix-created project) may
+  // predate status seeding; ensure its dynamic statuses exist before the
+  // dual-write so the status FKs resolve (idempotent).
+  await seedProjectStatuses(prisma, params.projectId);
 
   // Build the Kaiten-user → local-user map (so card owners become assignees,
   // comment authors are attributed to real users, and involved people become
@@ -156,6 +161,9 @@ export async function runKaitenSync(
       assigneeId?: string | null;
     },
   ): Promise<{ id: string; created: boolean }> {
+    // S5 dual-write: mirror FK from the Kaiten status + internal-track FKs for
+    // the BACKLOG default the new task lands in on the team board.
+    const internalFk = await internalStatusFk(prisma, params.projectId, 'BACKLOG');
     for (let attempt = 0; attempt < 6; attempt++) {
       const agg = await prisma.task.aggregate({ where: { projectId: params.projectId }, _max: { number: true } });
       try {
@@ -166,6 +174,8 @@ export async function runKaitenSync(
             title: data.title,
             description: data.description,
             status: data.status,
+            ...mirrorStatusFk(params.projectId, data.status),
+            ...internalFk,
             dueDate: data.dueDate,
             assigneeId: data.assigneeId ?? null,
             creatorId: botId,
@@ -183,7 +193,10 @@ export async function runKaitenSync(
           select: { id: true },
         });
         if (existing) {
-          await prisma.task.update({ where: { id: existing.id }, data });
+          await prisma.task.update({
+            where: { id: existing.id },
+            data: { ...data, ...mirrorStatusFk(params.projectId, data.status) },
+          });
           return { id: existing.id, created: false };
         }
         // Number collision → recompute max and retry.
@@ -295,7 +308,7 @@ export async function runKaitenSync(
             where: { id: prior.id },
             // Only set the assignee when the owner maps to a local user — never
             // clear a manually-set assignee just because the owner is unmapped.
-            data: { title, description, status, dueDate, ...(ownerLocalId ? { assigneeId: ownerLocalId } : {}) },
+            data: { title, description, status, ...mirrorStatusFk(params.projectId, status), dueDate, ...(ownerLocalId ? { assigneeId: ownerLocalId } : {}) },
           });
           taskId = prior.id;
           updated++;
@@ -411,7 +424,10 @@ export async function runKaitenSync(
           if (!local) continue;
           const target = card.state === 3 ? 'DONE' : 'CANCELED';
           if (local.status !== target) {
-            await prisma.task.update({ where: { id: local.id }, data: { status: target } });
+            await prisma.task.update({
+              where: { id: local.id },
+              data: { status: target, ...mirrorStatusFk(params.projectId, target) },
+            });
             reconciled++;
           }
         } catch (e) {

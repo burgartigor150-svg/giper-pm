@@ -2,6 +2,7 @@ import type { PrismaClient } from '@giper/db';
 import { generateProjectKey } from '@giper/shared';
 import { Bitrix24Client } from './client';
 import type { BxWorkgroup } from './types';
+import { seedProjectStatuses } from '../status/statusSeed';
 
 export type SyncProjectsResult = {
   totalSeen: number;
@@ -166,7 +167,7 @@ export async function syncProjects(
     const baseKey = generateProjectKey(g.NAME);
     const key = await uniqueKey(prisma, baseKey, externalId);
 
-    await prisma.project.create({
+    const createdProject = await prisma.project.create({
       data: {
         key,
         name: g.NAME.slice(0, 80),
@@ -181,7 +182,10 @@ export async function syncProjects(
           create: { userId: desiredOwnerId, role: 'LEAD' },
         },
       },
+      select: { id: true },
     });
+    // S5: seed the dynamic statuses so this project's mirrored tasks' status FKs resolve.
+    await seedProjectStatuses(prisma, createdProject.id);
     stats.created++;
   }
   return stats;
@@ -258,6 +262,8 @@ export async function ensureProjectForGroup(
     },
     select: { id: true },
   });
+  // S5: seed the dynamic statuses so mirrored tasks' status FKs resolve.
+  await seedProjectStatuses(prisma, created.id);
   return created.id;
 }
 
