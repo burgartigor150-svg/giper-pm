@@ -6,7 +6,7 @@ import { requireAuth } from '@/lib/auth';
 import { canEditProject } from '@/lib/permissions';
 import { getEffectiveCapsForProject } from '@/lib/capabilities';
 import { categoryToTaskStatus } from '@/lib/status/category';
-import { STATUS_SEED } from '@/lib/status/backfillStatuses';
+import { STATUS_SEED, materializeProjectColumns } from '@/lib/status/backfillStatuses';
 import { setInternalStatus } from '@/lib/tasks/setInternalStatus';
 import type { ActionResult } from './projects';
 
@@ -664,6 +664,36 @@ export async function setFreeFormColumnsEnabledAction(
 ): Promise<ActionResult> {
   const gate = await editableProjectOrError(projectId);
   if (!gate.ok) return gate;
+  // Free-form DnD addresses columns by their real id, so every column must be a
+  // first-class BoardColumn row. Projects still on the synthesized defaults have
+  // none — materialize the 6 defaults (idempotent; no-op when columns exist)
+  // before flipping the flag on, so the board never shows id-less columns.
+  if (enabled) {
+    try {
+      await materializeProjectColumns(prisma, projectId);
+    } catch (e) {
+      console.error('setFreeFormColumnsEnabledAction:materialize', e);
+      return { ok: false, error: { code: 'INTERNAL', message: 'Не удалось подготовить колонки' } };
+    }
+  } else {
+    // Disabling returns the board to the status-keyed (1:1) DnD path, which can't
+    // address two columns that share a status — their `column-<STATUS>` droppable
+    // ids would collide. Refuse until the project is back to ≤1 column per status.
+    const byStatus = await prisma.boardColumn.groupBy({
+      by: ['status'],
+      where: { projectId },
+      _count: { _all: true },
+    });
+    if (byStatus.some((g) => g._count._all > 1)) {
+      return {
+        ok: false,
+        error: {
+          code: 'VALIDATION',
+          message: 'Сначала удалите лишние колонки — на каждый статус должно остаться не больше одной.',
+        },
+      };
+    }
+  }
   await prisma.project.update({
     where: { id: projectId },
     data: { freeFormColumnsEnabled: Boolean(enabled) },

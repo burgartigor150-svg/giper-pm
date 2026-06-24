@@ -28,7 +28,13 @@ import {
   reorderBoardSwimlanesAction,
   renameBoardSwimlaneAction,
   createBoardSwimlaneAction,
+  createBoardColumnAction,
+  renameBoardColumnAction,
+  deleteBoardColumnAction,
+  reorderBoardColumnsAction,
+  setTaskColumnAction,
 } from '@/actions/board';
+import type { StatusCategory } from '@giper/db';
 import { useT } from '@/lib/useT';
 import { isClosing, statusCategory } from '@/lib/status/category';
 import { KanbanCard } from './KanbanCard';
@@ -70,10 +76,14 @@ type Props = {
   swimlanes?: BoardSwimlaneView[];
   /** ADMIN/owner/LEAD — may reorder/rename/add swimlanes inline. */
   canManage?: boolean;
+  /** Project opted into free-form columns: address card DnD by columnId. */
+  freeFormColumns?: boolean;
+  /** Editor + free-form on — show the inline column-management controls. */
+  canManageColumns?: boolean;
 };
 
 /** A drop target resolved from a droppable/card id: which column + which lane. */
-type DropTarget = { status: Status; laneKey: string; subColumnId?: string };
+type DropTarget = { status: Status; laneKey: string; subColumnId?: string; columnId?: string };
 
 /**
  * Collision routing: a swimlane drag (active.data.type==='lane') only considers
@@ -98,6 +108,8 @@ export function KanbanBoard({
   columns,
   swimlanes = [],
   canManage = false,
+  freeFormColumns = false,
+  canManageColumns = false,
 }: Props) {
   const router = useRouter();
   const tBoard = useT('tasks.board');
@@ -187,17 +199,29 @@ export function KanbanBoard({
       if (parts.length !== 3) return null;
       return { laneKey: parts[0]!, status: parts[1] as Status, subColumnId: parts[2] };
     }
-    // Band droppable: `cell-<laneKey>-<STATUS>` (laneKey is a cuid or NO_LANE,
-    // status has no dash — split on the last dash).
+    // Band droppable: `cell-<laneKey>-<KEY>` where KEY is the columnId (free-form)
+    // or the STATUS (default). Neither cuid nor STATUS contains a dash → split on
+    // the last dash.
     if (id.startsWith('cell-')) {
       const rest = id.slice('cell-'.length);
       const idx = rest.lastIndexOf('-');
       if (idx === -1) return null;
-      return { laneKey: rest.slice(0, idx), status: rest.slice(idx + 1) as Status };
+      const laneKey = rest.slice(0, idx);
+      const key = rest.slice(idx + 1);
+      if (freeFormColumns) {
+        const col = colById.get(key);
+        return col ? { laneKey, status: col.status, columnId: col.id } : null;
+      }
+      return { laneKey, status: key as Status };
     }
-    // Single-lane droppable: `column-<STATUS>` (unchanged from before swimlanes).
+    // Single-lane droppable: `column-<KEY>` (columnId in free-form, else STATUS).
     if (id.startsWith('column-')) {
-      return { laneKey: NO_LANE, status: id.slice('column-'.length) as Status };
+      const key = id.slice('column-'.length);
+      if (freeFormColumns) {
+        const col = colById.get(key);
+        return col ? { laneKey: NO_LANE, status: col.status, columnId: col.id } : null;
+      }
+      return { laneKey: NO_LANE, status: key as Status };
     }
     const t = tasks.find((tt) => tt.id === id);
     if (!t) return null;
@@ -205,6 +229,7 @@ export function KanbanBoard({
       laneKey: t.swimlaneId ?? NO_LANE,
       status: t.internalStatus,
       subColumnId: t.subColumnId ?? undefined,
+      columnId: freeFormColumns ? bucketColumnId(t, colById, colByStatus) : undefined,
     };
   }
 
@@ -255,6 +280,15 @@ export function KanbanBoard({
     if (!from || !to) return;
 
     const taskId = String(active.id);
+
+    // Free-form boards route card moves by columnId (a status can back many
+    // columns); default boards fall through to the status-based path below,
+    // unchanged.
+    if (freeFormColumns) {
+      handleFreeFormMove(taskId, from, to, String(over.id));
+      return;
+    }
+
     const sameStatus = from.status === to.status;
     const sameLane = from.laneKey === to.laneKey;
     const sameSubColumn = (from.subColumnId ?? null) === (to.subColumnId ?? null);
@@ -393,6 +427,119 @@ export function KanbanBoard({
       else setError(res.error.message);
     });
 
+  // --- Free-form column management (S6) ----------------------------------
+  const onAddColumn = (name: string, category: StatusCategory) =>
+    startTransition(async () => {
+      const res = await createBoardColumnAction(projectId, name, category);
+      if (res.ok) router.refresh();
+      else setError(res.error.message);
+    });
+  const onRenameColumn = (columnId: string, name: string) =>
+    startTransition(async () => {
+      const res = await renameBoardColumnAction(columnId, name);
+      if (res.ok) router.refresh();
+      else setError(res.error.message);
+    });
+  const onDeleteColumn = (columnId: string) =>
+    startTransition(async () => {
+      const res = await deleteBoardColumnAction(columnId);
+      if (res.ok) router.refresh();
+      else setError(res.error.message);
+    });
+  const onMoveColumn = (columnId: string, dir: -1 | 1) =>
+    startTransition(async () => {
+      const ids = columns.map((c) => c.id);
+      const i = ids.indexOf(columnId);
+      const j = i + dir;
+      if (i < 0 || j < 0 || j >= ids.length) return;
+      const res = await reorderBoardColumnsAction(projectId, arrayMove(ids, i, j));
+      if (res.ok) router.refresh();
+      else setError(res.error.message);
+    });
+
+  /** Card move on a free-form board — routed by columnId via setTaskColumnAction. */
+  function handleFreeFormMove(taskId: string, from: DropTarget, to: DropTarget, overId: string) {
+    if (!to.columnId) return;
+    const toCol = colById.get(to.columnId);
+    if (!toCol) return;
+    const sameColumn = from.columnId != null && from.columnId === to.columnId;
+    const sameLane = from.laneKey === to.laneKey;
+
+    // Reorder within the same cell — local only (not persisted).
+    if (sameColumn && sameLane) {
+      const arr =
+        (hasLanes
+          ? byLaneColumn.get(`${from.laneKey}::${to.columnId}`)
+          : byColumn.get(to.columnId)) ?? [];
+      const oldIndex = arr.findIndex((t) => t.id === taskId);
+      const newIndex = arr.findIndex((t) => t.id === overId);
+      if (oldIndex === -1 || newIndex === -1 || oldIndex === newIndex) return;
+      const reordered = arrayMove(arr, oldIndex, newIndex);
+      const inCell = new Set(arr.map((t) => t.id));
+      setTasks([...tasks.filter((t) => !inCell.has(t.id)), ...reordered]);
+      return;
+    }
+
+    const moved = tasks.find((t) => t.id === taskId);
+    if (!moved) return;
+    const newSwimlaneId = to.laneKey === NO_LANE ? null : to.laneKey;
+
+    // Closing needs an итог (can't collect mid-drag) — block drag into a DONE-
+    // category column; the user closes from the card.
+    if (
+      !sameColumn &&
+      toCol.status !== moved.internalStatus &&
+      isClosing(statusCategory(toCol.status))
+    ) {
+      setError('Чтобы закрыть задачу, откройте её и укажите итог при закрытии.');
+      return;
+    }
+    if (!sameColumn) {
+      const targetCount = (byColumn.get(toCol.id) ?? []).length;
+      if (toCol.wipLimit != null && targetCount >= toCol.wipLimit) {
+        setError(`Колонка «${toCol.name}» заполнена (WIP-лимит ${toCol.wipLimit}).`);
+        return;
+      }
+    }
+    if (!sameLane && newSwimlaneId) {
+      const lane = swimlanes.find((s) => s.id === newSwimlaneId);
+      const laneCount = tasks.filter((t) => t.swimlaneId === newSwimlaneId).length;
+      if (lane?.wipLimit != null && laneCount >= lane.wipLimit) {
+        setError(`Дорожка «${lane.name}» заполнена (WIP-лимит ${lane.wipLimit}).`);
+        return;
+      }
+    }
+
+    setTasks((cur) =>
+      cur.map((t) =>
+        t.id === taskId
+          ? { ...t, columnId: toCol.id, internalStatus: toCol.status, swimlaneId: newSwimlaneId }
+          : t,
+      ),
+    );
+    startTransition(async () => {
+      let ok = true;
+      if (!sameColumn) {
+        const res = await setTaskColumnAction(taskId, toCol.id);
+        if (!res.ok) setError(res.error.message);
+        ok = res.ok;
+      }
+      if (ok && !sameLane) {
+        const res = await setTaskSwimlaneAction(taskId, newSwimlaneId);
+        ok = res.ok;
+      }
+      if (!ok) {
+        // A column write may have already committed (partial move) — re-read the
+        // authoritative server state rather than reverting to a stale snapshot,
+        // and always surface feedback.
+        setError(tBoard('moveError'));
+        router.refresh();
+        return;
+      }
+      router.refresh();
+    });
+  }
+
   const laneCols = (laneId: string) => (
     <div className="flex gap-3 overflow-x-auto pb-2">
       {columns.map((col) => (
@@ -402,6 +549,8 @@ export function KanbanBoard({
           laneKey={laneId}
           status={col.status}
           name={col.name}
+          columnId={col.id}
+          useColumnId={freeFormColumns}
           tasks={byLaneColumn.get(`${laneId}::${col.id}`) ?? []}
           cap={useCap ? COLUMN_CAP : undefined}
           wipLimit={col.wipLimit}
@@ -463,18 +612,27 @@ export function KanbanBoard({
         ) : (
           <div className="flex flex-col gap-3">
             <div className="flex gap-3 overflow-x-auto pb-4">
-              {columns.map((col) => (
+              {columns.map((col, i) => (
                 <KanbanColumn
                   key={col.id}
                   projectKey={projectKey}
                   status={col.status}
                   name={col.name}
+                  columnId={col.id}
+                  useColumnId={freeFormColumns}
+                  canManageColumns={canManageColumns}
+                  onRenameColumn={onRenameColumn}
+                  onDeleteColumn={onDeleteColumn}
+                  onMoveColumn={onMoveColumn}
+                  isFirstColumn={i === 0}
+                  isLastColumn={i === columns.length - 1}
                   tasks={byColumn.get(col.id) ?? []}
                   cap={useCap ? COLUMN_CAP : undefined}
                   wipLimit={col.wipLimit}
                   subColumns={col.subColumns}
                 />
               ))}
+              {canManageColumns ? <AddColumnControl onAdd={onAddColumn} /> : null}
             </div>
             {canManage ? <AddLaneControl onAdd={onAddLane} /> : null}
           </div>
@@ -679,6 +837,103 @@ function AddLaneControl({ onAdd }: { onAdd: (name: string) => void }) {
       >
         <X className="h-4 w-4" />
       </button>
+    </div>
+  );
+}
+
+/** Russian labels for the status categories a free-form column can belong to. */
+const CATEGORY_LABELS: Record<StatusCategory, string> = {
+  BACKLOG: 'Бэклог',
+  TODO: 'К выполнению',
+  IN_PROGRESS: 'В работе',
+  REVIEW: 'На проверке',
+  BLOCKED: 'Заблокировано',
+  DONE: 'Готово',
+  CANCELED: 'Отменено',
+};
+
+/**
+ * Categories offerable for a NEW column. Terminal ones are excluded: a CANCELED
+ * column is filtered out by the board loader (would be an invisible orphan), and
+ * a second DONE column is unreachable (drag-in needs an итог + close routes to
+ * the first DONE). The materialized default DONE column handles closing.
+ */
+const PICKABLE_CATEGORIES: StatusCategory[] = ['BACKLOG', 'TODO', 'IN_PROGRESS', 'REVIEW', 'BLOCKED'];
+
+/** ＋ a free-form board column: a name + a status category (drives done-detection). */
+function AddColumnControl({ onAdd }: { onAdd: (name: string, category: StatusCategory) => void }) {
+  const [open, setOpen] = useState(false);
+  const [val, setVal] = useState('');
+  const [cat, setCat] = useState<StatusCategory>('IN_PROGRESS');
+
+  function submit() {
+    const v = val.trim();
+    if (v) onAdd(v, cat);
+    setVal('');
+    setOpen(false);
+  }
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="flex h-fit w-44 shrink-0 items-center justify-center gap-1 self-start rounded-md border-2 border-dashed border-input px-3 py-2 text-sm text-muted-foreground transition-colors hover:border-primary hover:text-foreground"
+      >
+        <Plus className="h-4 w-4" /> колонка
+      </button>
+    );
+  }
+  return (
+    <div className="flex w-56 shrink-0 flex-col gap-2 self-start rounded-md border-2 border-dashed border-input p-2">
+      <input
+        autoFocus
+        value={val}
+        onChange={(e) => setVal(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') submit();
+          if (e.key === 'Escape') {
+            setVal('');
+            setOpen(false);
+          }
+        }}
+        maxLength={60}
+        placeholder="Название колонки"
+        className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+      />
+      <select
+        value={cat}
+        onChange={(e) => setCat(e.target.value as StatusCategory)}
+        className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+        title="Категория статуса (определяет логику завершения)"
+      >
+        {PICKABLE_CATEGORIES.map((c) => (
+          <option key={c} value={c}>
+            {CATEGORY_LABELS[c]}
+          </option>
+        ))}
+      </select>
+      <div className="flex items-center justify-end gap-1">
+        <button
+          type="button"
+          aria-label="Создать"
+          onClick={submit}
+          className="rounded p-1.5 text-emerald-600 hover:bg-emerald-50"
+        >
+          <Check className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          aria-label="Отмена"
+          onClick={() => {
+            setVal('');
+            setOpen(false);
+          }}
+          className="rounded p-1.5 text-muted-foreground hover:bg-muted"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
     </div>
   );
 }
