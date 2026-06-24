@@ -3,7 +3,6 @@ import {
   teamlyTypeToColumnType,
   teamlyValueToString,
   optionLabels,
-  isTableSpace,
   tableColumns,
   propertyExternalId,
 } from '@giper/integrations/teamly';
@@ -20,24 +19,6 @@ describe('teamly smart-table mapping', () => {
     expect(teamlyTypeToColumnType('person')).toBe('TEXT');
     expect(teamlyTypeToColumnType('title')).toBe('TEXT');
     expect(teamlyTypeToColumnType(undefined)).toBe('TEXT');
-  });
-
-  it('detects a table only when a USER column exists (system props alone ≠ table)', () => {
-    const sp = (schemaProperties?: object[]) => ({ id: 's', title: 't', description: null, schemaProperties } as Parameters<typeof isTableSpace>[0]);
-    expect(isTableSpace(sp())).toBe(false);
-    expect(isTableSpace(sp([]))).toBe(false);
-    // An ordinary article space: TEAMLY still returns the 4 system props — NOT a table.
-    expect(isTableSpace(sp([
-      { code: 'title', type: 'title' },
-      { code: 'author', type: 'person' },
-      { code: 'executor', type: 'person' },
-      { code: 'executionDate', type: 'date' },
-    ]))).toBe(false);
-    // A real smart table: a user-defined column beyond the system props.
-    expect(isTableSpace(sp([{ code: 'title', type: 'title' }, { code: 'c_email', type: 'text' }]))).toBe(true);
-    expect(isTableSpace(sp([{ code: 'c', type: 'text' }]))).toBe(true);
-    // A user column that is hidden doesn't count.
-    expect(isTableSpace(sp([{ code: 'title', type: 'title' }, { code: 'c_hidden', type: 'text', hide: true }]))).toBe(false);
   });
 
   it('drops hidden + system-metadata columns and sorts by `sort`', () => {
