@@ -486,6 +486,8 @@ model Project {
   /// Configurable board: columns + swimlanes (Phase 0).
   boardColumns   BoardColumn[]
   boardSwimlanes BoardSwimlane[]
+  /// Per-project dynamic statuses (Phase E / S1).
+  statuses       Status[]
   /// Custom fields defined for this project (Phase 3).
   customFields   CustomFieldDefinition[]
   /// Automation rules for this project (Phase 4).
@@ -1364,6 +1366,16 @@ model Task {
   // the mirror so non-mirrored tasks behave the old way.
   internalStatus  TaskStatus  @default(BACKLOG)
 
+  // --- Dynamic statuses (Phase E / S1, inert). FKs into the per-project Status
+  // table, backfilled from the enum tracks above. The enum columns stay as the
+  // denormalized category mirror (never dropped) — the Bitrix track legitimately
+  // owns `status`. No read path uses these yet; SetNull keeps deletes simple
+  // (the enum can always re-derive the category).
+  statusId          String?
+  statusRef         Status?  @relation("TaskMirrorStatus",   fields: [statusId],         references: [id], onDelete: SetNull)
+  internalStatusId  String?
+  internalStatusRef Status?  @relation("TaskInternalStatus", fields: [internalStatusId], references: [id], onDelete: SetNull)
+
   // --- Board placement (Phase 0). Nullable during rollout,
   // backfilled from internalStatus. `columnId` is the configurable board
   // column the card sits in; `boardRank` is a fractional sort key for stable
@@ -1424,6 +1436,7 @@ model Task {
   @@index([assigneeId, status])
   @@index([projectId, status])
   @@index([projectId, internalStatus])
+  @@index([projectId, internalStatusId])
   @@index([sprintId, internalStatus])
   @@index([versionId])
   @@index([componentId])
@@ -1447,6 +1460,13 @@ model BoardColumn {
   name      String
   /// The internal-status bucket this column represents.
   status    TaskStatus
+  /// Dynamic-status FK (Phase E / S1, inert). Backfilled from `status`; becomes
+  /// the source of truth once free-form columns land (S6). The 1:1 `status`
+  /// unique below is dropped then.
+  statusId  String?
+  statusRef Status?    @relation(fields: [statusId], references: [id], onDelete: SetNull)
+  /// Optional column color override (else inherit Status.color).
+  color     String?
   /// Left → right display order.
   order     Int
   /// WIP limit on card count. null = no limit. Phase 1 adds size-based + hard enforcement.
@@ -1458,6 +1478,7 @@ model BoardColumn {
 
   @@unique([projectId, status])
   @@index([projectId, order])
+  @@index([projectId, statusId])
 }
 
 /// Sub-column (sub-stage) inside a BoardColumn. A column with one
@@ -1720,6 +1741,49 @@ enum TaskStatus {
   BLOCKED
   DONE
   CANCELED
+}
+
+/// Semantic bucket a Status belongs to. CODE reasons about categories; USERS
+/// create Statuses. Mirrors the legacy TaskStatus values 1:1 so the Bitrix/Kaiten
+/// bridge, reports, and workflow keep working unchanged through the migration.
+enum StatusCategory {
+  BACKLOG
+  TODO
+  IN_PROGRESS
+  REVIEW
+  BLOCKED
+  DONE
+  CANCELED
+}
+
+/// Per-project, user-definable status — the data behind a free-form board
+/// column. A Task carries its mirror + internal status as FKs alongside the
+/// legacy enum (which stays the denormalized category). Introduced inert
+/// (Phase E / S1): seeded + backfilled, but no read path uses it yet.
+model Status {
+  id         String         @id @default(cuid())
+  projectId  String
+  project    Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name       String
+  category   StatusCategory
+  /// Hex color driving card/column accent (replaces the hardcoded column map).
+  color      String?
+  order      Int            @default(0)
+  /// Exactly one default per category per project — the resolution target for
+  /// createTask, Bitrix/Kaiten inbound, and auto-transitions.
+  isDefault  Boolean        @default(false)
+  /// Soft-archive: a removed status keeps history/FK integrity.
+  archivedAt DateTime?
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  columns       BoardColumn[]
+  tasksMirror   Task[]         @relation("TaskMirrorStatus")
+  tasksInternal Task[]         @relation("TaskInternalStatus")
+
+  @@unique([projectId, name])
+  @@index([projectId, order])
+  @@index([projectId, category])
 }
 
 enum TaskPriority {
