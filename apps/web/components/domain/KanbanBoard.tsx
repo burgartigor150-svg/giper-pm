@@ -40,6 +40,24 @@ const TOTAL_THRESHOLD = 200;
 /** Sentinel lane key for cards not assigned to any swimlane. */
 const NO_LANE = 'none';
 
+/**
+ * S3 — resolve a card's board column id (the bucket key). Prefer the card's
+ * own `columnId` when it points to a live column whose status still matches the
+ * card's `internalStatus`; otherwise fall back to the 1:1 status→column map.
+ * The consistency guard keeps this a pure no-op against today's 1:1 layout (a
+ * stale/foreign columnId can never misplace a card) while routing placement
+ * through columnId so S6's free-form columns are an incremental change.
+ */
+function bucketColumnId(
+  t: Pick<BoardTask, 'columnId' | 'internalStatus'>,
+  colById: Map<string, BoardColumnView>,
+  colByStatus: Map<Status, BoardColumnView>,
+): string | undefined {
+  const direct = t.columnId ? colById.get(t.columnId) : undefined;
+  if (direct && direct.status === t.internalStatus) return direct.id;
+  return colByStatus.get(t.internalStatus)?.id;
+}
+
 type Props = {
   projectKey: string;
   /** Project id — needed to create swimlanes inline. */
@@ -102,29 +120,46 @@ export function KanbanBoard({
 
   const hasLanes = swimlanes.length > 0;
 
+  // Column lookups: by id (the placement bucket key) and by status (the 1:1
+  // fallback + the status-keyed DnD/render paths). Column↔status is 1:1 today,
+  // so the status map resolves every card to exactly one column.
+  const colById = useMemo(
+    () => new Map(columns.map((c) => [c.id, c])),
+    [columns],
+  );
+  const colByStatus = useMemo(() => {
+    const m = new Map<Status, BoardColumnView>();
+    for (const c of columns) if (!m.has(c.status)) m.set(c.status, c);
+    return m;
+  }, [columns]);
+
   // Column totals (across all lanes) — drives the single-lane view and the
-  // per-column WIP check, which is board-wide regardless of swimlanes.
-  const byStatus = useMemo(() => {
-    const map = new Map<Status, BoardTask[]>();
-    for (const c of columns) map.set(c.status, []);
+  // per-column WIP check, which is board-wide regardless of swimlanes. Keyed by
+  // column id now (S3): cards route through their columnId, not internalStatus.
+  const byColumn = useMemo(() => {
+    const map = new Map<string, BoardTask[]>();
+    for (const c of columns) map.set(c.id, []);
     for (const t of tasks) {
-      const arr = map.get(t.internalStatus);
+      const cid = bucketColumnId(t, colById, colByStatus);
+      const arr = cid ? map.get(cid) : undefined;
       if (arr) arr.push(t);
     }
     return map;
-  }, [tasks, columns]);
+  }, [tasks, columns, colById, colByStatus]);
 
-  // Tasks bucketed by `${laneKey}::${status}` for the band view.
-  const byLaneStatus = useMemo(() => {
+  // Tasks bucketed by `${laneKey}::${columnId}` for the band view.
+  const byLaneColumn = useMemo(() => {
     const map = new Map<string, BoardTask[]>();
     for (const t of tasks) {
-      const key = `${t.swimlaneId ?? NO_LANE}::${t.internalStatus}`;
+      const cid = bucketColumnId(t, colById, colByStatus);
+      if (!cid) continue;
+      const key = `${t.swimlaneId ?? NO_LANE}::${cid}`;
       const arr = map.get(key);
       if (arr) arr.push(t);
       else map.set(key, [t]);
     }
     return map;
-  }, [tasks]);
+  }, [tasks, colById, colByStatus]);
 
   const useCap = tasks.length > TOTAL_THRESHOLD;
   const activeTask = activeId ? tasks.find((t) => t.id === activeId) ?? null : null;
@@ -224,10 +259,15 @@ export function KanbanBoard({
     const sameSubColumn = (from.subColumnId ?? null) === (to.subColumnId ?? null);
 
     if (sameStatus && sameLane && sameSubColumn) {
-      // Reorder within the same cell — local only, not persisted.
-      const arr = hasLanes
-        ? byLaneStatus.get(`${from.laneKey}::${from.status}`) ?? []
-        : byStatus.get(from.status) ?? [];
+      // Reorder within the same cell — local only, not persisted. Resolve the
+      // cell's column id from its (1:1) status to read the right bucket.
+      const fromColId = colByStatus.get(from.status)?.id;
+      const arr =
+        (hasLanes
+          ? byLaneColumn.get(`${from.laneKey}::${fromColId}`)
+          : fromColId
+            ? byColumn.get(fromColId)
+            : undefined) ?? [];
       const oldIndex = arr.findIndex((t) => t.id === active.id);
       const newIndex = arr.findIndex((t) => t.id === over.id);
       if (oldIndex === -1 || newIndex === -1 || oldIndex === newIndex) return;
@@ -247,7 +287,8 @@ export function KanbanBoard({
     // lane move also checks the destination lane's own WIP. Refuse → card stays.
     if (!sameStatus) {
       const targetCol = columns.find((c) => c.status === newStatus);
-      const targetCount = byStatus.get(newStatus)?.length ?? 0;
+      const targetCount =
+        (targetCol ? byColumn.get(targetCol.id) : undefined)?.length ?? 0;
       if (targetCol?.wipLimit != null && targetCount >= targetCol.wipLimit) {
         setError(`Колонка «${targetCol.name}» заполнена (WIP-лимит ${targetCol.wipLimit}).`);
         return;
@@ -283,11 +324,22 @@ export function KanbanBoard({
     }
 
     // Optimistic: update internalStatus + swimlaneId on the moved card. Mirror
-    // `status` is owned by Bitrix and only updated by the sync round-trip.
+    // `status` is owned by Bitrix and only updated by the sync round-trip. Keep
+    // `columnId` in sync too (S3 placement source): a status change retargets
+    // the card to that status's column; a lane/sub-column-only move leaves it.
+    const newColumnId = sameStatus
+      ? moved.columnId ?? null
+      : colByStatus.get(newStatus)?.id ?? null;
     setTasks((cur) =>
       cur.map((t) =>
         t.id === taskId
-          ? { ...t, internalStatus: newStatus, swimlaneId: newSwimlaneId, subColumnId: newSubColumnId }
+          ? {
+              ...t,
+              internalStatus: newStatus,
+              columnId: newColumnId,
+              swimlaneId: newSwimlaneId,
+              subColumnId: newSubColumnId,
+            }
           : t,
       ),
     );
@@ -344,12 +396,12 @@ export function KanbanBoard({
     <div className="flex gap-3 overflow-x-auto pb-2">
       {columns.map((col) => (
         <KanbanColumn
-          key={`${laneId}-${col.status}`}
+          key={`${laneId}-${col.id}`}
           projectKey={projectKey}
           laneKey={laneId}
           status={col.status}
           name={col.name}
-          tasks={byLaneStatus.get(`${laneId}::${col.status}`) ?? []}
+          tasks={byLaneColumn.get(`${laneId}::${col.id}`) ?? []}
           cap={useCap ? COLUMN_CAP : undefined}
           wipLimit={col.wipLimit}
           subColumns={col.subColumns}
@@ -416,7 +468,7 @@ export function KanbanBoard({
                   projectKey={projectKey}
                   status={col.status}
                   name={col.name}
-                  tasks={byStatus.get(col.status) ?? []}
+                  tasks={byColumn.get(col.id) ?? []}
                   cap={useCap ? COLUMN_CAP : undefined}
                   wipLimit={col.wipLimit}
                   subColumns={col.subColumns}

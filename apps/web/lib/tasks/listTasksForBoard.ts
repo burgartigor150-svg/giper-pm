@@ -185,6 +185,11 @@ export async function listTasksForBoard(
       // back to status only for non-mirrored tasks where they're equal.
       status: true,
       internalStatus: true,
+      // Board placement source of truth (S3): the card's column. Backfilled
+      // 1:1 from internalStatus at migration time, dual-written by the status
+      // cores. The board prefers it when it points to a live, status-consistent
+      // column, else falls back to the 1:1 status→column map.
+      columnId: true,
       swimlaneId: true,
       subColumnId: true,
       priority: true,
