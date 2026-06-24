@@ -226,6 +226,107 @@ export async function updateBoardSwimlanesAction(
   return { ok: true };
 }
 
+// ---------------------------------------------------------------------------
+// In-board swimlane management (instant-persist, used by the board itself —
+// reorder by drag, inline rename, add lane). Same edit gate as the bulk form.
+// ---------------------------------------------------------------------------
+
+/** Resolve a project the caller may edit, or a ready-to-return error. */
+async function editableProjectOrError(
+  projectId: string,
+): Promise<{ ok: true; key: string } | { ok: false; error: { code: string; message: string } }> {
+  const me = await requireAuth();
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { key: true, ownerId: true, members: { select: { userId: true, role: true } } },
+  });
+  if (!project) return { ok: false, error: { code: 'NOT_FOUND', message: 'Проект не найден' } };
+  if (
+    !canEditProject(
+      { id: me.id, role: me.role },
+      project,
+      await getEffectiveCapsForProject({ id: me.id, role: me.role }, projectId),
+    )
+  ) {
+    return { ok: false, error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' } };
+  }
+  return { ok: true, key: project.key };
+}
+
+/** Reorder a project's swimlanes by id (board drag). Foreign ids are ignored. */
+export async function reorderBoardSwimlanesAction(
+  projectId: string,
+  orderedIds: string[],
+): Promise<ActionResult> {
+  const gate = await editableProjectOrError(projectId);
+  if (!gate.ok) return gate;
+  const own = await prisma.boardSwimlane.findMany({ where: { projectId }, select: { id: true } });
+  const ownSet = new Set(own.map((s) => s.id));
+  const ids = orderedIds.filter((id) => ownSet.has(id));
+  try {
+    await prisma.$transaction(
+      ids.map((id, i) => prisma.boardSwimlane.update({ where: { id }, data: { order: i } })),
+    );
+  } catch (e) {
+    console.error('reorderBoardSwimlanesAction', e);
+    return { ok: false, error: { code: 'INTERNAL', message: 'Не удалось изменить порядок дорожек' } };
+  }
+  revalidatePath(`/projects/${gate.key}/board`);
+  return { ok: true };
+}
+
+/** Rename one swimlane (inline edit in the board). */
+export async function renameBoardSwimlaneAction(
+  swimlaneId: string,
+  name: string,
+): Promise<ActionResult> {
+  const me = await requireAuth();
+  const lane = await prisma.boardSwimlane.findUnique({
+    where: { id: swimlaneId },
+    select: {
+      projectId: true,
+      project: { select: { key: true, ownerId: true, members: { select: { userId: true, role: true } } } },
+    },
+  });
+  if (!lane) return { ok: false, error: { code: 'NOT_FOUND', message: 'Дорожка не найдена' } };
+  if (
+    !canEditProject(
+      { id: me.id, role: me.role },
+      lane.project,
+      await getEffectiveCapsForProject({ id: me.id, role: me.role }, lane.projectId),
+    )
+  ) {
+    return { ok: false, error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' } };
+  }
+  const clean = (typeof name === 'string' ? name : '').trim();
+  if (clean.length === 0 || clean.length > MAX_NAME) {
+    return { ok: false, error: { code: 'VALIDATION', message: `Название дорожки: 1–${MAX_NAME} символов` } };
+  }
+  await prisma.boardSwimlane.update({ where: { id: swimlaneId }, data: { name: clean } });
+  revalidatePath(`/projects/${lane.project.key}/board`);
+  return { ok: true };
+}
+
+/** Create a swimlane at the end (＋ in the board). */
+export async function createBoardSwimlaneAction(
+  projectId: string,
+  name: string,
+): Promise<ActionResult<{ id: string }>> {
+  const gate = await editableProjectOrError(projectId);
+  if (!gate.ok) return gate;
+  const clean = (typeof name === 'string' ? name : '').trim();
+  if (clean.length === 0 || clean.length > MAX_NAME) {
+    return { ok: false, error: { code: 'VALIDATION', message: `Название дорожки: 1–${MAX_NAME} символов` } };
+  }
+  const max = await prisma.boardSwimlane.aggregate({ where: { projectId }, _max: { order: true } });
+  const lane = await prisma.boardSwimlane.create({
+    data: { projectId, name: clean, order: (max._max.order ?? -1) + 1 },
+    select: { id: true },
+  });
+  revalidatePath(`/projects/${gate.key}/board`);
+  return { ok: true, data: { id: lane.id } };
+}
+
 /**
  * Move a single task into a swimlane (or clear it with null). Used by the board
  * when a card is dragged across lanes. Permissioned like a board move: the
