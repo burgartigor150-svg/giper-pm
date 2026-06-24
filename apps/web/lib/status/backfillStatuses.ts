@@ -1,10 +1,15 @@
 import type { PrismaClient, StatusCategory } from '@giper/db';
+import { statusSeedId } from '@giper/shared';
+import { DEFAULT_BOARD_COLUMNS } from '../board/defaultColumns';
+
+export { statusSeedId };
 
 /**
- * Seed + backfill for the dynamic Status table (S1, Phase M1–M3). The canonical
- * SQL lives in the prod migration (idempotent); this TS mirror exists so CI
- * (which uses `prisma db push`, not migration files) and any dev/seed path can
- * materialize the same state, and so integration tests can invoke it directly.
+ * Seed + backfill for the dynamic Status table (S1 M1–M3) and the board-column
+ * materialization + placement backfill (S2 M4–M5). The canonical SQL lives in
+ * the prod migrations (idempotent); this TS mirror exists so CI (`prisma db
+ * push`, not migration files) and any dev/seed path can materialize the same
+ * state, and so integration tests can invoke it directly.
  *
  * Deterministic ids `st_<projectId>_<CATEGORY>` make every step re-runnable.
  */
@@ -24,9 +29,6 @@ export const STATUS_SEED: ReadonlyArray<{
   { category: 'DONE', name: 'Готово', order: 5, color: '#34d399' },
   { category: 'CANCELED', name: 'Отменено', order: 6, color: '#6b7280' },
 ];
-
-export const statusSeedId = (projectId: string, category: string): string =>
-  `st_${projectId}_${category}`;
 
 /** M1: seed the 7 statuses for one project (idempotent via skipDuplicates). */
 export async function seedProjectStatuses(
@@ -48,15 +50,46 @@ export async function seedProjectStatuses(
 }
 
 /**
- * Full backfill: seed every project's statuses, then point Task and BoardColumn
- * FKs at the seeded rows. The FK assignment is raw SQL because Prisma can't set
- * a column from an expression over another column. Idempotent (only NULL FKs).
+ * M4: materialize the 6 default board columns for a project that has NONE
+ * (idempotent — only fires at zero columns). Mirrors DEFAULT_BOARD_COLUMNS so
+ * the board renders identically, with statusId linked. Projects that already
+ * customised their columns keep them.
+ */
+export async function materializeProjectColumns(
+  db: Pick<PrismaClient, 'boardColumn' | 'status'>,
+  projectId: string,
+): Promise<void> {
+  const count = await db.boardColumn.count({ where: { projectId } });
+  if (count > 0) return;
+  // Columns carry a statusId FK → the project's statuses must exist first.
+  // Seed defensively (idempotent) so this is safe to call standalone.
+  await seedProjectStatuses(db, projectId);
+  await db.boardColumn.createMany({
+    data: DEFAULT_BOARD_COLUMNS.map((c, i) => ({
+      projectId,
+      name: c.name,
+      status: c.status,
+      statusId: statusSeedId(projectId, c.status),
+      order: i,
+    })),
+    skipDuplicates: true,
+  });
+}
+
+/**
+ * Full backfill: seed statuses (M1) + materialize columns (M4) per project,
+ * then point Task/BoardColumn FKs (M2/M3) and card placement (M5) at the
+ * seeded rows. FK/placement assignment is raw SQL (Prisma can't set a column
+ * from an expression over another column). All idempotent (only NULL targets).
  */
 export async function backfillAllStatuses(
-  db: Pick<PrismaClient, 'project' | 'status' | '$executeRawUnsafe'>,
+  db: Pick<PrismaClient, 'project' | 'status' | 'boardColumn' | '$executeRawUnsafe'>,
 ): Promise<void> {
   const projects = await db.project.findMany({ select: { id: true } });
-  for (const p of projects) await seedProjectStatuses(db, p.id);
+  for (const p of projects) {
+    await seedProjectStatuses(db, p.id); // M1
+    await materializeProjectColumns(db, p.id); // M4
+  }
 
   // M2: Task mirror + internal status FKs from the enum tracks.
   await db.$executeRawUnsafe(
@@ -68,5 +101,13 @@ export async function backfillAllStatuses(
   // M3: existing BoardColumn rows → their seeded status.
   await db.$executeRawUnsafe(
     `UPDATE "BoardColumn" SET "statusId" = 'st_' || "projectId" || '_' || "status"::text WHERE "statusId" IS NULL`,
+  );
+  // M5: card placement → columnId (lowest-order column matching the INTERNAL
+  // status). CANCELED tasks get no column (the board hides them) → stay null.
+  await db.$executeRawUnsafe(
+    `UPDATE "Task" t SET "columnId" = sub.cid
+     FROM (SELECT DISTINCT ON (c."projectId", c."status") c."projectId", c."status", c."id" AS cid
+           FROM "BoardColumn" c ORDER BY c."projectId", c."status", c."order") sub
+     WHERE t."columnId" IS NULL AND sub."projectId" = t."projectId" AND sub."status" = t."internalStatus"`,
   );
 }

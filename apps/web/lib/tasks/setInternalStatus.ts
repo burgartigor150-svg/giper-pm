@@ -1,5 +1,7 @@
 import { prisma, type TaskStatus } from '@giper/db';
+import { statusSeedId } from '@giper/shared';
 import { DomainError } from '../errors';
+import { internalStatusWrite } from '../status/refs';
 import type { SessionUser } from '../permissions';
 import { isTransitionAllowed } from '../workflow/isTransitionAllowed';
 import { autoUnblockDependents } from './autoTransitions';
@@ -91,10 +93,14 @@ export async function setInternalStatus(
   }
 
   const isMirror = task.externalSource === 'bitrix24';
+  // S2 dual-write: keep the internal-track FKs (internalStatusId + columnId) in
+  // step with the enum, and the mirror FK when a close also flips the mirror.
+  const internalFk = await internalStatusWrite(prisma, task.projectId, status as TaskStatus);
   await prisma.task.update({
     where: { id: taskId },
     data: {
       internalStatus: status as TaskStatus,
+      ...internalFk,
       ...(isClosing
         ? {
             completionResult: result,
@@ -102,7 +108,7 @@ export async function setInternalStatus(
             // Closing here closes it in Bitrix too → reflect DONE on the mirror
             // status so pushTaskStatus sends STATUS=5 and the two tracks agree
             // (the inbound echo is recognised by the synced-hash and skipped).
-            ...(isMirror ? { status: 'DONE' as TaskStatus } : {}),
+            ...(isMirror ? { status: 'DONE' as TaskStatus, statusId: statusSeedId(task.projectId, 'DONE') } : {}),
           }
         : {}),
     },

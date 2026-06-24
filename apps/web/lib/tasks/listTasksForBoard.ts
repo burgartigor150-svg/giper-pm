@@ -1,5 +1,6 @@
 import { prisma, type Prisma, type TaskStatus } from '@giper/db';
 import { DomainError } from '../errors';
+import { DEFAULT_BOARD_COLUMNS } from '../board/defaultColumns';
 import { canViewProject, canViewAllProjectTasks, type SessionUser } from '../permissions';
 import { getTasksSpentMinutes } from '../time/getTaskSpent';
 import {
@@ -67,19 +68,9 @@ export type BoardSwimlaneView = {
   wipLimit: number | null;
 };
 
-/**
- * Default columns (Russian labels) for projects with no BoardColumn rows yet —
- * e.g. created before the board migration, or before columns get seeded.
- * CANCELED is intentionally absent: the board hides cancelled work.
- */
-export const DEFAULT_BOARD_COLUMNS: ReadonlyArray<{ status: TaskStatus; name: string }> = [
-  { status: 'BACKLOG', name: 'Бэклог' },
-  { status: 'TODO', name: 'К работе' },
-  { status: 'IN_PROGRESS', name: 'В работе' },
-  { status: 'REVIEW', name: 'На ревью' },
-  { status: 'BLOCKED', name: 'Заблокирована' },
-  { status: 'DONE', name: 'Готово' },
-];
+// Default columns moved to a leaf module (so the backfill / test factory can
+// import them without this file's server chain). Re-exported for compatibility.
+export { DEFAULT_BOARD_COLUMNS };
 
 /** All non-CANCELED tasks for the project, no pagination — kanban shows everything. */
 export async function listTasksForBoard(

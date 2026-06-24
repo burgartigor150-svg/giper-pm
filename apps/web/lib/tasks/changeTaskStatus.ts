@@ -1,4 +1,5 @@
 import { prisma, type TaskStatus } from '@giper/db';
+import { statusSeedId } from '@giper/shared';
 import { DomainError } from '../errors';
 import { canEditTask, type SessionUser } from '../permissions';
 import { getEffectiveCapsForProject } from '../capabilities';
@@ -79,7 +80,8 @@ export async function changeTaskStatus(
   const updated = await prisma.$transaction(async (tx) => {
     const u = await tx.task.update({
       where: { id: taskId },
-      data: { status: newStatus, startedAt, completedAt },
+      // S2 dual-write: stamp the mirror-track Status FK alongside the enum.
+      data: { status: newStatus, statusId: statusSeedId(task.projectId, newStatus), startedAt, completedAt },
       select: { id: true, status: true, startedAt: true, completedAt: true },
     });
     await tx.taskStatusChange.create({

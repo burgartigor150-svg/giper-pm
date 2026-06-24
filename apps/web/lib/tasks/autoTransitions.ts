@@ -1,5 +1,6 @@
 import { prisma, type TaskStatus } from '@giper/db';
 import { fanoutToTaskAudience } from '../notifications/createNotifications';
+import { internalStatusWrite } from '../status/refs';
 
 /**
  * If a task is still in BACKLOG/TODO and someone starts working on it
@@ -18,6 +19,7 @@ export async function autoMoveToInProgress(
     select: {
       internalStatus: true,
       startedAt: true,
+      projectId: true,
       project: { select: { key: true } },
       number: true,
     },
@@ -33,6 +35,7 @@ export async function autoMoveToInProgress(
     where: { id: taskId },
     data: {
       internalStatus: next,
+      ...(await internalStatusWrite(prisma, task.projectId, next)),
       startedAt: task.startedAt ?? new Date(),
     },
   });
@@ -86,6 +89,7 @@ export async function autoUnblockDependents(
       select: {
         id: true,
         internalStatus: true,
+        projectId: true,
         number: true,
         project: { select: { key: true } },
       },
@@ -97,7 +101,10 @@ export async function autoUnblockDependents(
 
     await prisma.task.update({
       where: { id: target.id },
-      data: { internalStatus: 'TODO' },
+      data: {
+        internalStatus: 'TODO',
+        ...(await internalStatusWrite(prisma, target.projectId, 'TODO')),
+      },
     });
     await fanoutToTaskAudience(target.id, actorId, {
       kind: 'TASK_STATUS_CHANGED',

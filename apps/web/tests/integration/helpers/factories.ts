@@ -1,5 +1,6 @@
 import bcrypt from 'bcryptjs';
 import { prisma, type UserRole, type MemberRole } from '@giper/db';
+import { seedProjectStatuses } from '@/lib/status/backfillStatuses';
 
 let counter = 0;
 const next = () => ++counter;
@@ -37,7 +38,7 @@ export async function makeProject(overrides: Partial<{
     throw new Error('makeProject requires ownerId');
   }
   const i = next();
-  return prisma.project.create({
+  const project = await prisma.project.create({
     data: {
       key: overrides.key ?? `P${String(i).padStart(2, '0').slice(-2)}`,
       name: overrides.name ?? `Project ${i}`,
@@ -47,6 +48,11 @@ export async function makeProject(overrides: Partial<{
       },
     },
   });
+  // Mirror createProject: seed the dynamic statuses so S2 dual-write FKs
+  // (statusId / internalStatusId) resolve. Columns are NOT materialized — most
+  // board tests rely on the synthesized-default render (zero BoardColumn rows).
+  await seedProjectStatuses(prisma, project.id);
+  return project;
 }
 
 export async function addMember(
