@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@giper/db';
+import { isTerminal, statusCategory } from '@/lib/status/category';
 
 /**
  * Daily sprint-snapshot writer. For every ACTIVE sprint, record the remaining
@@ -22,8 +23,6 @@ function checkAuth(req: Request): boolean {
   if (!expected) return false;
   return req.headers.get('authorization') === `Bearer ${expected}`;
 }
-
-const DONE_LIKE = new Set(['DONE', 'CANCELED']);
 
 export async function POST(req: Request) {
   if (!checkAuth(req)) {
@@ -54,7 +53,7 @@ export async function POST(req: Request) {
       const pts = t.storyPoints ?? 0;
       totalTasks += 1;
       totalPoints += pts;
-      if (!DONE_LIKE.has(t.internalStatus)) {
+      if (!isTerminal(statusCategory(t.internalStatus))) {
         remainingTasks += 1;
         remainingPoints += pts;
       }

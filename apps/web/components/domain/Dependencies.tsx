@@ -11,6 +11,7 @@ import {
   removeDependencyAction,
 } from '@/actions/dependencies';
 import { searchTasks, type TaskSearchHit } from '@/actions/tasks';
+import { isTerminal, statusCategory } from '@/lib/status/category';
 
 type Edge = {
   id: string;
@@ -63,7 +64,7 @@ export function Dependencies({
   canEdit,
 }: Props) {
   const openBlockedBy = blockedBy.filter(
-    (e) => e.task.status !== 'DONE' && e.task.status !== 'CANCELED',
+    (e) => !isTerminal(statusCategory(e.task.status)),
   );
 
   return (
@@ -86,7 +87,7 @@ export function Dependencies({
         <DetailsSection title={`Уже не блокируют (${blockedBy.length - openBlockedBy.length})`}>
           <ul className="flex flex-col gap-1">
             {blockedBy
-              .filter((e) => e.task.status === 'DONE' || e.task.status === 'CANCELED')
+              .filter((e) => isTerminal(statusCategory(e.task.status)))
               .map((e) => (
                 <EdgeRow key={e.id} edge={e} canRemove={false} projectKey={projectKey} taskNumber={taskNumber} />
               ))}
