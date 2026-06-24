@@ -461,6 +461,12 @@ model Project {
   // переход, а подсвечивает колонку красным при превышении.
   wipLimits     Json?
 
+  /// S6: free-form board columns (per-project opt-in). When true the board shows
+  /// the inline column-management UI (add/rename/delete/reorder, each backed by a
+  /// dynamic Status) and cards route by columnId. Off = the fixed status-bucket
+  /// columns (unchanged default board).
+  freeFormColumnsEnabled Boolean @default(false)
+
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
   archivedAt    DateTime?
@@ -1476,7 +1482,10 @@ model BoardColumn {
   tasks     Task[]
   subColumns BoardSubColumn[]
 
-  @@unique([projectId, status])
+  // S6: free-form columns — multiple columns may share a status category, so the
+  // 1:1 (projectId,status) UNIQUE is dropped. A plain index keeps the
+  // status→column fallback lookup (boardColumnIdForStatus) fast.
+  @@index([projectId, status])
   @@index([projectId, order])
   @@index([projectId, statusId])
 }
