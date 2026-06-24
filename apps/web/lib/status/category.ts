@@ -33,6 +33,13 @@ export const TERMINAL_CATEGORIES: readonly StatusCategory[] = ['DONE', 'CANCELED
  */
 export const statusCategory = (s: TaskStatus): StatusCategory => s as StatusCategory;
 
+/**
+ * Inverse of {@link statusCategory} — a category's representative TaskStatus enum
+ * value (identical members). Used in S6 to derive a card's internalStatus from
+ * the category of the free-form column it's dropped into.
+ */
+export const categoryToTaskStatus = (c: StatusCategory): TaskStatus => c as TaskStatus;
+
 export const isTerminal = (c: StatusCategory): boolean => c === 'DONE' || c === 'CANCELED';
 /** DONE demands an итог at close; CANCELED is the no-итог escape hatch. */
 export const isClosing = (c: StatusCategory): boolean => c === 'DONE';
