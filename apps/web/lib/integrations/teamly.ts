@@ -158,8 +158,10 @@ export async function runTeamlySyncNow(opts?: { force?: boolean; signal?: AbortS
   try {
     const result = await runTeamlySync(prisma, client, { incremental: !opts?.force, reconcile: true, signal: opts?.signal });
     const summary =
-      `Пространств: ${result.spaces}, статей: ${result.articles}, пропущено: ${result.skipped}, ` +
-      `архивировано: ${result.archived}${result.errors.length ? `, ошибок: ${result.errors.length}` : ''}`;
+      `Пространств: ${result.spaces}, статей: ${result.articles}` +
+      (result.tables ? `, таблиц: ${result.tables} (строк: ${result.tableRows})` : '') +
+      `, пропущено: ${result.skipped}, архивировано: ${result.archived}` +
+      (result.errors.length ? `, ошибок: ${result.errors.length}` : '');
     await prisma.integrationSyncLog.update({
       where: { id: log.id },
       data: {

@@ -8,8 +8,17 @@ export {
   type TeamlyAuthInput,
   type TeamlyClientOptions,
   type TeamlySpace,
+  type TeamlySchemaProperty,
   type TeamlyTreeItem,
   type TeamlyArticle,
 } from './client';
 export { getTeamlyBotUserId, TEAMLY_BOT_EMAIL } from './botUser';
 export { runTeamlySync, type RunTeamlySyncOptions, type RunTeamlySyncResult } from './runSync';
+export {
+  isTableSpace,
+  tableColumns,
+  teamlyTypeToColumnType,
+  teamlyValueToString,
+  optionLabels,
+  propertyExternalId,
+} from './tableMapping';

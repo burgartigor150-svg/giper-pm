@@ -2,6 +2,14 @@ import type { PrismaClient } from '@giper/db';
 import { TeamlyClient, type TeamlySpace, type TeamlyTreeItem } from './client';
 import { proseMirrorToMarkdown } from './proseMirrorToMarkdown';
 import { getTeamlyBotUserId } from './botUser';
+import {
+  isTableSpace,
+  tableColumns,
+  teamlyTypeToColumnType,
+  teamlyValueToString,
+  optionLabels,
+  propertyExternalId,
+} from './tableMapping';
 
 /**
  * One-way TEAMLY → Knowledge Base mirror. Enumerates spaces, then each space's
@@ -42,6 +50,10 @@ export type RunTeamlySyncResult = {
   ok: boolean;
   spaces: number;
   articles: number;
+  /** Smart tables imported (T3) — each TEAMLY table-space → one KnowledgeTable. */
+  tables: number;
+  /** Total table rows imported (T3). */
+  tableRows: number;
   skipped: number;
   archived: number;
   errors: string[];
@@ -67,6 +79,8 @@ export async function runTeamlySync(
 
   let spaceCount = 0;
   let articleCount = 0;
+  let tableCount = 0;
+  let tableRowCount = 0;
   let skipped = 0;
   let archived = 0;
   let capped = false;
@@ -90,12 +104,27 @@ export async function runTeamlySync(
       const localSpaceId = await upsertSpace(prisma, sp, botId);
       spaceCount++;
       seenSpaceIds.push(sp.id);
-      const res = await syncSpaceArticles(prisma, client, sp.id, localSpaceId, botId, opts);
-      articleCount += res.imported;
-      skipped += res.skipped;
-      capped = capped || res.capped;
-      synced.push({ teamlySpaceId: sp.id, localSpaceId, seenIds: res.seenIds });
-      errors.push(...res.errors);
+      if (isTableSpace(sp)) {
+        // Smart table (T3): columns = schemaProperties, rows = articles.
+        const res = await syncSpaceTable(prisma, client, sp, localSpaceId, botId, opts);
+        tableCount++;
+        tableRowCount += res.rows;
+        errors.push(...res.errors);
+        // A table-space has no KB articles → empty seenIds so the article
+        // reconcile leaves it alone (rows reconcile inside syncSpaceTable).
+        synced.push({ teamlySpaceId: sp.id, localSpaceId, seenIds: [] });
+      } else {
+        // A plain space has no mirrored table; if it used to be a smart table,
+        // drop the stale KnowledgeTable (columns/rows cascade) so it doesn't
+        // linger orphaned after a table→plain transition.
+        await prisma.knowledgeTable.deleteMany({ where: { externalSource: SOURCE, externalId: sp.id } });
+        const res = await syncSpaceArticles(prisma, client, sp.id, localSpaceId, botId, opts);
+        articleCount += res.imported;
+        skipped += res.skipped;
+        capped = capped || res.capped;
+        synced.push({ teamlySpaceId: sp.id, localSpaceId, seenIds: res.seenIds });
+        errors.push(...res.errors);
+      }
     } catch (e) {
       errors.push(`space ${sp.id}: ${String(e)}`);
     }
@@ -113,6 +142,8 @@ export async function runTeamlySync(
     ok: errors.length === 0,
     spaces: spaceCount,
     articles: articleCount,
+    tables: tableCount,
+    tableRows: tableRowCount,
     skipped,
     archived,
     errors: errors.slice(0, 50),
@@ -325,4 +356,174 @@ async function syncSpaceArticles(
   }
 
   return { imported, skipped, errors, seenIds: items.map((i) => i.id), capped };
+}
+
+type TableResult = { rows: number; errors: string[] };
+
+/**
+ * Sync a TEAMLY smart table (a space with schemaProperties) → one
+ * KnowledgeTable in `localSpaceId`: columns from schemaProperties, rows from the
+ * space's articles (each article's `properties.properties` = cell values keyed
+ * by property code). Upserts table/columns/rows by externalId so re-runs update
+ * in place; prunes columns/rows that vanished (row prune is guarded so a
+ * silent-empty tree can't wipe the table).
+ */
+async function syncSpaceTable(
+  prisma: PrismaClient,
+  client: TeamlyClient,
+  sp: TeamlySpace,
+  localSpaceId: string,
+  botId: string,
+  opts: RunTeamlySyncOptions,
+): Promise<TableResult> {
+  const errors: string[] = [];
+  const cols = tableColumns(sp);
+  // Namespace column/row externalIds by the space so a property `code` (or id)
+  // that recurs across two table-spaces can never steal another table's column.
+  const ns = (id: string) => `${sp.id}::${id}`;
+
+  // 1. upsert the table (externalId = the TEAMLY space id).
+  const existingTable = await prisma.knowledgeTable.findUnique({
+    where: { externalSource_externalId: { externalSource: SOURCE, externalId: sp.id } },
+    select: { id: true },
+  });
+  let tableId: string;
+  if (existingTable) {
+    await prisma.knowledgeTable.update({
+      where: { id: existingTable.id },
+      data: { name: sp.title || 'Таблица', externalUpdatedAt: new Date() },
+    });
+    tableId = existingTable.id;
+  } else {
+    const max = await prisma.knowledgeTable.aggregate({ where: { spaceId: localSpaceId }, _max: { order: true } });
+    const created = await prisma.knowledgeTable.create({
+      data: {
+        spaceId: localSpaceId,
+        name: sp.title || 'Таблица',
+        order: (max._max.order ?? -1) + 1,
+        createdById: botId,
+        externalSource: SOURCE,
+        externalId: sp.id,
+        externalUpdatedAt: new Date(),
+      },
+      select: { id: true },
+    });
+    tableId = created.id;
+  }
+
+  // 2. upsert columns (externalId = property id) → build code → local column id.
+  const colIdByCode = new Map<string, string>();
+  const seenColExt: string[] = [];
+  let colOrder = 0;
+  for (const p of cols) {
+    const ext = propertyExternalId(p);
+    if (!ext || !p.code) continue;
+    const extId = ns(ext);
+    const type = teamlyTypeToColumnType(p.type);
+    const options = type === 'SELECT' ? optionLabels(p.options) : null;
+    const existingCol = await prisma.knowledgeTableColumn.findUnique({
+      where: { externalSource_externalId: { externalSource: SOURCE, externalId: extId } },
+      select: { id: true },
+    });
+    let colId: string;
+    if (existingCol) {
+      await prisma.knowledgeTableColumn.update({
+        where: { id: existingCol.id },
+        data: { tableId, name: p.name || 'Столбец', type, options: options ?? undefined, order: colOrder },
+      });
+      colId = existingCol.id;
+    } else {
+      const c = await prisma.knowledgeTableColumn.create({
+        data: { tableId, name: p.name || 'Столбец', type, options: options ?? undefined, order: colOrder, externalSource: SOURCE, externalId: extId },
+        select: { id: true },
+      });
+      colId = c.id;
+    }
+    colIdByCode.set(p.code, colId);
+    seenColExt.push(extId);
+    colOrder++;
+  }
+  // Prune columns that vanished — skip on abort (a truncated schemaProperties
+  // response must not wipe columns + orphan row cells).
+  if (seenColExt.length > 0 && !opts.signal?.aborted) {
+    await prisma.knowledgeTableColumn.deleteMany({
+      where: { tableId, externalSource: SOURCE, externalId: { notIn: seenColExt } },
+    });
+  }
+
+  // 3. rows = the space's articles (each row-article's properties = cell values).
+  const rowItems: TeamlyTreeItem[] = [];
+  for (let page = 1; page <= 1000; page++) {
+    if (opts.signal?.aborted) break;
+    const { items, lastPage } = await client.getSpaceTree(sp.id, page, 60);
+    rowItems.push(
+      ...items.filter((i) => (i.type === 'inlineDatabaseArticle' || i.type === 'article') && !i.isArchived),
+    );
+    if (page >= lastPage) break;
+  }
+
+  let rows = 0;
+  let rowOrder = 0;
+  let rowErrors = 0;
+  const seenRowIds: string[] = [];
+  for (const item of rowItems) {
+    if (opts.signal?.aborted) break;
+    try {
+      const article = await client.getArticle(item.id);
+      if (!article) {
+        errors.push(`row ${item.id}: not found`);
+        rowErrors++;
+        continue;
+      }
+      // Don't mirror source-hidden/archived rows into a PUBLIC table (same guard
+      // as the article path). Left out of seenRowIds → pruned on a clean run.
+      if (article.is_hidden || article.archived) continue;
+      const props = article.properties?.properties ?? {};
+      const values: Record<string, string> = {};
+      for (const p of cols) {
+        if (!p.code) continue;
+        const colId = colIdByCode.get(p.code);
+        if (!colId) continue;
+        // The title property's value is the article's own title, not a cell.
+        values[colId] =
+          p.type === 'title'
+            ? article.title || item.title || ''
+            : teamlyValueToString(props[p.code], p.type, p.options);
+      }
+      const rowExtId = ns(item.id);
+      const existingRow = await prisma.knowledgeTableRow.findUnique({
+        where: { externalSource_externalId: { externalSource: SOURCE, externalId: rowExtId } },
+        select: { id: true },
+      });
+      if (existingRow) {
+        await prisma.knowledgeTableRow.update({ where: { id: existingRow.id }, data: { tableId, values, order: rowOrder } });
+      } else {
+        await prisma.knowledgeTableRow.create({ data: { tableId, values, order: rowOrder, externalSource: SOURCE, externalId: rowExtId } });
+      }
+      seenRowIds.push(rowExtId);
+      rows++;
+      rowOrder++;
+    } catch (e) {
+      errors.push(`row ${item.id}: ${String(e)}`);
+      rowErrors++;
+    }
+  }
+  // Prune vanished rows ONLY on a clean, complete pass (no abort, no per-row
+  // errors) — a transient blip must never hard-delete still-live rows.
+  if (seenRowIds.length > 0 && !opts.signal?.aborted && rowErrors === 0) {
+    await prisma.knowledgeTableRow.deleteMany({
+      where: { tableId, externalSource: SOURCE, externalId: { notIn: seenRowIds } },
+    });
+  }
+
+  // A table-space has no standalone KB articles (its items are rows). If this
+  // space used to be a plain space, drop the stale mirrored articles so content
+  // isn't duplicated (article + row) after a plain→table transition. Gated like
+  // the prunes: never clean up on an aborted or columnless (partial/degenerate)
+  // sync, so a transient blip can't delete the old representation prematurely.
+  if (!opts.signal?.aborted && seenColExt.length > 0) {
+    await prisma.knowledgeArticle.deleteMany({ where: { externalSource: SOURCE, spaceId: localSpaceId } });
+  }
+
+  return { rows, errors };
 }

@@ -154,3 +154,96 @@ describe('runTeamlySync', () => {
     expect((await prisma.knowledgeArticle.findFirstOrThrow({ where: { externalId: 'ta2' } })).status).toBe('PUBLISHED');
   });
 });
+
+describe('runTeamlySync — smart tables (T3)', () => {
+  // A TEAMLY smart table is a space with schemaProperties (columns); its
+  // inlineDatabaseArticle items are the rows (article.properties.properties =
+  // cell values keyed by property code).
+  function mockTableClient(over?: { omitRow?: string; hiddenRow?: string }): TeamlyClient {
+    const space = {
+      id: 'tbl1',
+      title: 'Контакты',
+      description: null,
+      main_article: null,
+      schemaProperties: [
+        { propertyId: 'p1', code: 'title', name: 'Имя', type: 'title', sort: 0 },
+        { propertyId: 'p2', code: 'c_email', name: 'Email', type: 'text', sort: 1 },
+        { propertyId: 'p3', code: 'c_status', name: 'Статус', type: 'select', sort: 2, options: [{ id: 'o1', text: 'Активен' }, { id: 'o2', text: 'Архив' }] },
+        { propertyId: 'p4', code: 'c_count', name: 'Кол-во', type: 'number', sort: 3 },
+        { propertyId: 'pSys', code: 'author', name: 'Автор', type: 'person', sort: 9 },
+      ],
+    };
+    const tree = [
+      { id: 'row1', title: 'Иван', parentSpaceId: 'tbl1', type: 'inlineDatabaseArticle', isArchived: false, createdAt: '2025-01-10 10:00:00', updatedAt: '2025-01-10 10:00:00', publishedAt: null, createdBy: null },
+      { id: 'row2', title: 'Пётр', parentSpaceId: 'tbl1', type: 'inlineDatabaseArticle', isArchived: false, createdAt: '2025-01-10 10:00:00', updatedAt: '2025-01-10 10:00:00', publishedAt: null, createdBy: null },
+    ].filter((r) => r.id !== over?.omitRow);
+    const rows: Record<string, unknown> = {
+      row1: { id: 'row1', title: 'Иван', properties: { properties: { c_email: 'ivan@x.ru', c_status: 'o1', c_count: 5 } }, editorContentObject: null, author: null, breadcrumbs: [], updated_at: null, icon: null, archived: false, is_hidden: false, created_at: null },
+      row2: { id: 'row2', title: 'Пётр', properties: { properties: { c_email: 'petr@x.ru', c_status: 'o2', c_count: 3 } }, editorContentObject: null, author: null, breadcrumbs: [], updated_at: null, icon: null, archived: false, is_hidden: false, created_at: null },
+    };
+    return {
+      listSpaces: async () => ({ items: [space], lastPage: 1 }),
+      getSpaceTree: async () => ({ items: tree, lastPage: 1 }),
+      getArticle: async (id: string) => {
+        const r = rows[id];
+        if (!r) return null;
+        return id === over?.hiddenRow ? { ...(r as object), is_hidden: true } : r;
+      },
+    } as unknown as TeamlyClient;
+  }
+
+  it('imports a TEAMLY table as a KnowledgeTable with typed columns + rows', async () => {
+    const res = await runTeamlySync(prisma, mockTableClient());
+    expect(res.ok).toBe(true);
+    expect(res.tables).toBe(1);
+    expect(res.tableRows).toBe(2);
+    expect(res.articles).toBe(0); // a table-space yields no KB articles
+
+    const space = await prisma.knowledgeSpace.findFirstOrThrow({ where: { externalSource: 'teamly', externalId: 'tbl1' } });
+    const table = await prisma.knowledgeTable.findFirstOrThrow({
+      where: { externalSource: 'teamly', externalId: 'tbl1' },
+      include: { columns: { orderBy: { order: 'asc' } }, rows: { orderBy: { order: 'asc' } } },
+    });
+    expect(table.spaceId).toBe(space.id);
+    expect(table.name).toBe('Контакты');
+
+    // columns: system 'author' dropped → 4 typed columns in sort order
+    expect(table.columns.map((c) => c.name)).toEqual(['Имя', 'Email', 'Статус', 'Кол-во']);
+    expect(table.columns.map((c) => c.type)).toEqual(['TEXT', 'TEXT', 'SELECT', 'NUMBER']);
+    expect(table.columns.find((c) => c.name === 'Статус')!.options).toEqual(['Активен', 'Архив']);
+
+    // rows: title from article.title; select id→label; number stringified
+    const cell = (r: (typeof table.rows)[number], name: string) =>
+      (r.values as Record<string, string>)[table.columns.find((c) => c.name === name)!.id];
+    const r1 = table.rows.find((r) => r.externalId === 'tbl1::row1')!;
+    expect(cell(r1, 'Имя')).toBe('Иван');
+    expect(cell(r1, 'Email')).toBe('ivan@x.ru');
+    expect(cell(r1, 'Статус')).toBe('Активен');
+    expect(cell(r1, 'Кол-во')).toBe('5');
+  });
+
+  it('is idempotent — re-sync keeps one table + stable column ids', async () => {
+    await runTeamlySync(prisma, mockTableClient());
+    const before = await prisma.knowledgeTableColumn.findMany({ where: { externalSource: 'teamly' }, select: { id: true } });
+    await runTeamlySync(prisma, mockTableClient());
+    expect(await prisma.knowledgeTable.count({ where: { externalSource: 'teamly' } })).toBe(1);
+    expect(await prisma.knowledgeTableRow.count({ where: { externalSource: 'teamly' } })).toBe(2);
+    const after = await prisma.knowledgeTableColumn.findMany({ where: { externalSource: 'teamly' }, select: { id: true } });
+    expect(after.map((c) => c.id).sort()).toEqual(before.map((c) => c.id).sort()); // stable
+  });
+
+  it('prunes a row removed from the source table', async () => {
+    await runTeamlySync(prisma, mockTableClient());
+    expect(await prisma.knowledgeTableRow.count({ where: { externalSource: 'teamly' } })).toBe(2);
+    await runTeamlySync(prisma, mockTableClient({ omitRow: 'row2' }));
+    expect(await prisma.knowledgeTableRow.count({ where: { externalSource: 'teamly' } })).toBe(1);
+    expect(await prisma.knowledgeTableRow.count({ where: { externalSource: 'teamly', externalId: 'tbl1::row1' } })).toBe(1);
+  });
+
+  it('does not mirror a source-hidden row into the public table', async () => {
+    const res = await runTeamlySync(prisma, mockTableClient({ hiddenRow: 'row2' }));
+    expect(res.tableRows).toBe(1); // only the visible row1
+    expect(await prisma.knowledgeTableRow.count({ where: { externalSource: 'teamly' } })).toBe(1);
+    expect(await prisma.knowledgeTableRow.count({ where: { externalSource: 'teamly', externalId: 'tbl1::row2' } })).toBe(0);
+  });
+});

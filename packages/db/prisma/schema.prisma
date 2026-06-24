@@ -2702,7 +2702,13 @@ model KnowledgeTable {
   updatedAt   DateTime               @updatedAt
   columns     KnowledgeTableColumn[]
   rows        KnowledgeTableRow[]
+  /// External mirror (TEAMLY T3): a TEAMLY smart table IS a space; we import it
+  /// as one KnowledgeTable. externalId = the TEAMLY space id. Null for native.
+  externalSource    String?
+  externalId        String?
+  externalUpdatedAt DateTime?
 
+  @@unique([externalSource, externalId])
   @@index([spaceId, order])
 }
 
@@ -2716,7 +2722,12 @@ model KnowledgeTableColumn {
   options   Json?
   order     Int                @default(0)
   createdAt DateTime           @default(now())
+  /// External mirror (TEAMLY T3): externalId = the TEAMLY property id, so a
+  /// re-sync keeps the same local column id (row values key on it). Null = native.
+  externalSource String?
+  externalId     String?
 
+  @@unique([externalSource, externalId])
   @@index([tableId, order])
 }
 
@@ -2729,7 +2740,11 @@ model KnowledgeTableRow {
   order     Int            @default(0)
   createdAt DateTime       @default(now())
   updatedAt DateTime       @updatedAt
+  /// External mirror (TEAMLY T3): externalId = the TEAMLY row-article id. Null = native.
+  externalSource String?
+  externalId     String?
 
+  @@unique([externalSource, externalId])
   @@index([tableId, order])
 }
 
