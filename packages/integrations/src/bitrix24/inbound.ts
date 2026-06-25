@@ -155,9 +155,10 @@ export async function syncOneTask(
     });
     const number = (max._max.number ?? 0) + 1;
     const incomingHashCreate = hashTaskState({ status: mapped.status });
-    // S5 dual-write: mirror-track FK from the Bitrix status, internal-track FKs
-    // for the BACKLOG default a new mirror lands in on the team board.
-    const internalFk = await internalStatusFk(prisma, project.id, 'BACKLOG');
+    // Seed the internal (board) status from the mapped Bitrix status so an
+    // imported task lands in the matching column (e.g. «К работе» → «В работе»),
+    // not always Бэклог. After import the user moves it on the board manually.
+    const internalFk = await internalStatusFk(prisma, project.id, mapped.status);
     const created = await prisma.task.create({
       data: {
         projectId: project.id,
@@ -165,6 +166,7 @@ export async function syncOneTask(
         title: mapped.title,
         description: mapped.description,
         status: mapped.status,
+        internalStatus: mapped.status,
         ...mirrorStatusFk(project.id, mapped.status),
         ...internalFk,
         priority: mapped.priority,
