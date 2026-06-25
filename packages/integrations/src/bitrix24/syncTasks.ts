@@ -6,7 +6,12 @@ import { syncTaskAttachments, type SyncFilesResult } from './syncFiles';
 import { syncTaskComments, type SyncCommentsResult } from './syncComments';
 import { syncTaskHistory, type SyncHistoryResult } from './syncHistory';
 import { syncTaskChat, type SyncChatResult } from './syncChat';
-import { mirrorStatusFk, internalStatusFk, seedProjectStatuses } from '../status/statusSeed';
+import {
+  mirrorStatusFk,
+  internalStatusFk,
+  seedProjectStatuses,
+  seedProjectsStatuses,
+} from '../status/statusSeed';
 
 export type SyncTasksResult = {
   totalSeen: number;
