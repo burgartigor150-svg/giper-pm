@@ -1,4 +1,10 @@
-import { Bitrix24Client, runBitrix24Sync, lastSuccessfulSyncStart } from '@giper/integrations/bitrix24';
+import {
+  Bitrix24Client,
+  runBitrix24Sync,
+  lastSuccessfulSyncStart,
+  syncBitrixCalendar,
+  type SyncBitrixCalendarResult,
+} from '@giper/integrations/bitrix24';
 import { prisma } from '@giper/db';
 import { DomainError } from '../errors';
 
@@ -15,8 +21,8 @@ function webhookUrl(): string {
   return url;
 }
 
-export function getBitrix24Client(): Bitrix24Client {
-  return new Bitrix24Client({ webhookUrl: webhookUrl() });
+export function getBitrix24Client(signal?: AbortSignal): Bitrix24Client {
+  return new Bitrix24Client({ webhookUrl: webhookUrl(), signal });
 }
 
 /**
@@ -324,4 +330,19 @@ export async function getBitrix24SyncStatus() {
     },
   });
   return { configured: !!process.env.BITRIX24_WEBHOOK_URL, integration, lastRuns };
+}
+
+/**
+ * Mirror every linked user's Bitrix24 personal calendar into CalendarEvent.
+ * Read-only, idempotent (dedup by externalId). No-op when Bitrix24 isn't
+ * configured. Called from the Bitrix24 cron after the task sync.
+ */
+export async function syncBitrixCalendarNow(
+  opts: { signal?: AbortSignal } = {},
+): Promise<SyncBitrixCalendarResult & { skipped?: boolean }> {
+  if (!process.env.BITRIX24_WEBHOOK_URL?.trim()) {
+    return { users: 0, events: 0, deleted: 0, errors: [], skipped: true };
+  }
+  const client = getBitrix24Client(opts.signal);
+  return syncBitrixCalendar(prisma, client, opts);
 }

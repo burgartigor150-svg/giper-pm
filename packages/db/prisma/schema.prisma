@@ -2479,9 +2479,17 @@ model CalendarEvent {
 
   attendees   CalendarEventAttendee[]
 
+  /// External mirror provenance. 'bitrix24' for events pulled from a user's
+  /// Bitrix24 personal calendar; externalId = `bxcal:<b24UserId>:<b24EventId>`
+  /// (per-user scoped, so a shared event mirrors once per attendee). Null for
+  /// native giper events.
+  externalSource String?
+  externalId     String?
+
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 
+  @@unique([externalSource, externalId])
   @@index([startAt, endAt])
   @@index([projectId, startAt])
   @@index([createdById, startAt])
