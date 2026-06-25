@@ -25,6 +25,8 @@ export { syncCollabChat } from './syncCollabChat';
 export type { SyncCollabChatResult } from './syncCollabChat';
 export { runBitrix24Sync, lastSuccessfulSyncStart } from './runSync';
 export type { RunSyncResult } from './runSync';
+export { syncBitrixCalendar, parseBitrixDate } from './syncCalendar';
+export type { SyncBitrixCalendarResult } from './syncCalendar';
 export {
   pushTaskStatus,
   pushTaskDeadline,

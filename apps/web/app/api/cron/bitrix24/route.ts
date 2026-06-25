@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { runBitrix24SyncNow } from '@/lib/integrations/bitrix24';
+import { runBitrix24SyncNow, syncBitrixCalendarNow } from '@/lib/integrations/bitrix24';
 
 /**
  * Cron-callable endpoint for the read-only Bitrix24 mirror. Wired to a
@@ -45,6 +45,19 @@ export async function POST(req: Request) {
           .filter((s) => /^\d+$/.test(s))
       : undefined;
     const result = await runBitrix24SyncNow({ force, backfill, groupIds });
+    // Mirror each user's Bitrix24 personal calendar (read-only). Non-fatal: a
+    // calendar API failure must not fail the task sync. Skipped on backfill runs
+    // (those are a one-off task-only pass).
+    let calendar = { users: 0, events: 0, deleted: 0, errors: [] as string[] };
+    if (!backfill) {
+      try {
+        // Hard deadline so the per-user calendar loop can't blow the function's
+        // 300s budget on a large org — a partial pass is safe (idempotent).
+        calendar = await syncBitrixCalendarNow({ signal: AbortSignal.timeout(120_000) });
+      } catch (e) {
+        calendar.errors.push(e instanceof Error ? e.message : String(e));
+      }
+    }
     return NextResponse.json({
       ok: result.ok,
       force,
@@ -53,6 +66,7 @@ export async function POST(req: Request) {
       users: result.users,
       projects: result.projects,
       tasks: result.tasks,
+      calendar: { events: calendar.events, deleted: calendar.deleted, errors: calendar.errors.length },
       error: result.error,
     });
   } catch (e) {
