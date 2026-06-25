@@ -89,10 +89,13 @@ describe('runKaitenSync', () => {
     expect(imported.find((t) => t.externalId === '101')?.status).toBe('IN_PROGRESS');
     expect(imported.find((t) => t.externalId === '102')?.status).toBe('DONE');
 
-    // S5: the inbound sync dual-writes the dynamic-status FKs alongside the enum.
+    // The inbound sync dual-writes the dynamic-status FKs alongside the enum,
+    // and seeds the INTERNAL (board) status from the mapped Kaiten state so an
+    // imported card lands in its matching column, not always Бэклог.
     const t101fk = imported.find((t) => t.externalId === '101')!;
     expect(t101fk.statusId).toBe(`st_${project.id}_IN_PROGRESS`); // mirror FK from Kaiten state
-    expect(t101fk.internalStatusId).toBe(`st_${project.id}_BACKLOG`); // team board starts in backlog
+    expect(t101fk.internalStatus).toBe('IN_PROGRESS'); // internal seeded from mirror, not BACKLOG
+    expect(t101fk.internalStatusId).toBe(`st_${project.id}_IN_PROGRESS`);
     expect(t101fk.columnId).toBeNull(); // makeProject seeds statuses, not columns → board fallback
     expect(imported.find((t) => t.externalId === '102')?.statusId).toBe(`st_${project.id}_DONE`);
 
@@ -391,6 +394,7 @@ describe('runKaitenSync', () => {
     expect(await prisma.status.count({ where: { projectId: project.id } })).toBe(7);
     const t = await prisma.task.findFirstOrThrow({ where: { projectId: project.id, externalId: '201' } });
     expect(t.statusId).toBe(`st_${project.id}_IN_PROGRESS`);
-    expect(t.internalStatusId).toBe(`st_${project.id}_BACKLOG`);
+    // internal status is seeded from the mirror status on import (not BACKLOG).
+    expect(t.internalStatusId).toBe(`st_${project.id}_IN_PROGRESS`);
   });
 });

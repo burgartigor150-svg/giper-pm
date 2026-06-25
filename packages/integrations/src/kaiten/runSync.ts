@@ -161,9 +161,10 @@ export async function runKaitenSync(
       assigneeId?: string | null;
     },
   ): Promise<{ id: string; created: boolean }> {
-    // S5 dual-write: mirror FK from the Kaiten status + internal-track FKs for
-    // the BACKLOG default the new task lands in on the team board.
-    const internalFk = await internalStatusFk(prisma, params.projectId, 'BACKLOG');
+    // Seed the internal (board) status from the mapped Kaiten status so an
+    // imported card lands in the matching column, not always Бэклог. After
+    // import the user moves it on the board manually.
+    const internalFk = await internalStatusFk(prisma, params.projectId, data.status);
     for (let attempt = 0; attempt < 6; attempt++) {
       const agg = await prisma.task.aggregate({ where: { projectId: params.projectId }, _max: { number: true } });
       try {
@@ -174,8 +175,14 @@ export async function runKaitenSync(
             title: data.title,
             description: data.description,
             status: data.status,
+            internalStatus: data.status,
             ...mirrorStatusFk(params.projectId, data.status),
             ...internalFk,
+            // A card imported already in DONE needs a completedAt, else it reads
+            // as "done" but is invisible to every completion metric (throughput /
+            // cycle-time / burndown all key off completedAt). Kaiten gives no
+            // done-timestamp here, so stamp import time.
+            ...(data.status === 'DONE' ? { completedAt: new Date() } : {}),
             dueDate: data.dueDate,
             assigneeId: data.assigneeId ?? null,
             creatorId: botId,
