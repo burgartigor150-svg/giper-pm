@@ -71,14 +71,14 @@ export default async function ProjectOverviewPage({
   ]);
 
   return (
-    <div className="mx-auto max-w-5xl space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
+    <div className="mx-auto max-w-7xl space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
           <span className="rounded-md bg-muted px-2 py-1 font-mono text-xs">{project.key}</span>
           <h1 className="text-xl font-semibold">{project.name}</h1>
           <StatusBadge status={project.status} />
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Link href={`/projects/${project.key}/board`}>
             <Button variant="outline" size="sm">Канбан</Button>
           </Link>
