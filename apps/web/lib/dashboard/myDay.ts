@@ -33,6 +33,8 @@ export async function getTodayTimeline(userId: string) {
       durationMin: true,
       source: true,
       note: true,
+      name: true,
+      stage: true,
       flag: true,
       task: {
         select: {

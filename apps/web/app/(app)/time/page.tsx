@@ -120,9 +120,16 @@ export default async function TimePage({
                           </span>{' '}
                           {e.task.title}
                         </Link>
+                      ) : e.name ? (
+                        <span>{e.name}</span>
                       ) : (
                         <span className="text-muted-foreground">—</span>
                       )}
+                      {e.stage ? (
+                        <span className="ml-2 inline-block whitespace-nowrap rounded-full bg-sky-100 px-2 py-0.5 align-middle text-[10px] text-sky-700">
+                          {t(`form.stages.${e.stage}`)}
+                        </span>
+                      ) : null}
                     </td>
                     <td className="px-3 py-2 whitespace-nowrap">
                       {e.durationMin ? `${(e.durationMin / 60).toFixed(2)} ч` : '—'}

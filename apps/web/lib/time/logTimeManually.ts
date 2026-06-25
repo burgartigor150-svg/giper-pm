@@ -45,6 +45,8 @@ export async function logTimeManually(input: LogTimeInput, user: SessionUser) {
       durationMin,
       source: 'MANUAL_FORM',
       note: input.note ?? null,
+      name: input.name ?? null,
+      stage: input.stage ?? null,
       flag: overlap ? 'OVERLAPPING' : null,
     },
     select: { id: true, durationMin: true, flag: true },

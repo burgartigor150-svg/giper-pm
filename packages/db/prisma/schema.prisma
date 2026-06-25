@@ -1904,8 +1904,12 @@ model TimeEntry {
   
   source      TimeSource
   category    ActivityCategory? // для авто/digital — категория
+  /// Manual work-phase tag — what the user actually did (discovery/analysis/…).
+  stage       WorkStage?
+  /// Free-form label for a no-task entry («название, если без задачи»).
+  name        String?
   note        String?        @db.Text
-  
+
   // Для digital-источников
   externalRef String?        // commit SHA, PR ID, calendar event ID
   
@@ -1967,6 +1971,15 @@ model Activity {
   
   @@index([userId, capturedAt])
   @@index([deviceId, capturedAt])
+}
+
+/// Manual work-phase a time entry belongs to (what the user did on the task).
+enum WorkStage {
+  DISCOVERY    // discovery
+  ANALYSIS     // анализ
+  DEVELOPMENT  // разработка
+  TESTING      // тестирование
+  MEETING      // встреча
 }
 
 enum ActivityCategory {

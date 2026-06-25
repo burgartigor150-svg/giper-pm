@@ -14,6 +14,15 @@ import { TaskStatusBadge } from '@/components/domain/TaskStatusBadge';
 import { AutoStoppedActions } from '@/components/domain/AutoStoppedActions';
 import { LogGapButton } from '@/components/domain/LogGapButton';
 
+/** Russian labels for the manual work-phase tag (mirrors time.form.stages). */
+const STAGE_LABELS: Record<string, string> = {
+  DISCOVERY: 'Discovery',
+  ANALYSIS: 'Анализ',
+  DEVELOPMENT: 'Разработка',
+  TESTING: 'Тестирование',
+  MEETING: 'Встреча',
+};
+
 /**
  * "Мой день" — single-page focus view for the working day. Different in
  * intent from /dashboard: dashboard is "overview / aggregates", this is
@@ -196,9 +205,16 @@ function EntryRow({ entry }: { entry: Entry }) {
             </span>
             <span className="ml-2">{entry.task.title}</span>
           </Link>
+        ) : entry.name ? (
+          <span className="text-sm">{entry.name}</span>
         ) : (
           <span className="text-sm text-muted-foreground">Без задачи</span>
         )}
+        {entry.stage ? (
+          <span className="ml-2 inline-block rounded-full bg-sky-100 px-2 py-0.5 align-middle text-[10px] text-sky-700">
+            {STAGE_LABELS[entry.stage]}
+          </span>
+        ) : null}
         {entry.note ? (
           <div className="text-xs text-muted-foreground">{entry.note}</div>
         ) : null}

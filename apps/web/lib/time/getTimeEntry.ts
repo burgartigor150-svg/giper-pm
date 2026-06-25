@@ -14,6 +14,8 @@ export async function getTimeEntry(entryId: string, user: SessionUser) {
       durationMin: true,
       source: true,
       note: true,
+      name: true,
+      stage: true,
       flag: true,
       task: {
         select: {

@@ -191,3 +191,47 @@ describe('timeListFilterSchema', () => {
     expect(timeListFilterSchema.safeParse({}).success).toBe(true);
   });
 });
+
+describe('logTimeSchema — name + stage', () => {
+  const startedAt = '2026-05-01T10:00:00Z';
+  const endedAt = '2026-05-01T11:00:00Z';
+
+  it('keeps a valid stage and trims a name', () => {
+    const r = logTimeSchema.parse({ startedAt, endedAt, name: '  Планёрка  ', stage: 'MEETING' });
+    expect(r.name).toBe('Планёрка');
+    expect(r.stage).toBe('MEETING');
+  });
+
+  it('blank name / empty stage → undefined', () => {
+    const r = logTimeSchema.parse({ startedAt, endedAt, name: '   ', stage: '' });
+    expect(r.name).toBeUndefined();
+    expect(r.stage).toBeUndefined();
+  });
+
+  it('rejects an unknown stage', () => {
+    expect(logTimeSchema.safeParse({ startedAt, endedAt, stage: 'DEPLOY' }).success).toBe(false);
+  });
+
+  it('omitting name/stage is fine', () => {
+    const r = logTimeSchema.parse({ startedAt, endedAt });
+    expect(r.name).toBeUndefined();
+    expect(r.stage).toBeUndefined();
+  });
+});
+
+describe('editTimeEntrySchema — name + stage clear to null', () => {
+  const startedAt = '2026-05-01T10:00:00Z';
+  const endedAt = '2026-05-01T11:00:00Z';
+
+  it('blank name / empty stage → null (clears)', () => {
+    const r = editTimeEntrySchema.parse({ startedAt, endedAt, name: '', stage: '' });
+    expect(r.name).toBeNull();
+    expect(r.stage).toBeNull();
+  });
+
+  it('keeps a set stage + name on edit', () => {
+    const r = editTimeEntrySchema.parse({ startedAt, endedAt, name: 'Ресёрч', stage: 'DISCOVERY' });
+    expect(r.name).toBe('Ресёрч');
+    expect(r.stage).toBe('DISCOVERY');
+  });
+});

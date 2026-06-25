@@ -70,6 +70,8 @@ export async function listTimeEntries(
       durationMin: true,
       source: true,
       note: true,
+      name: true,
+      stage: true,
       flag: true,
       taskId: true,
       task: {

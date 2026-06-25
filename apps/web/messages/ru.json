@@ -422,6 +422,18 @@
       "task": "Задача",
       "taskOptional": "Задача (опционально)",
       "noTask": "Без задачи",
+      "taskSearchPlaceholder": "Название или ID задачи (напр. GGYPE-49)",
+      "name": "Название",
+      "namePlaceholder": "Чем занимались (если без задачи)",
+      "stage": "Стадия",
+      "stageNone": "Не указана",
+      "stages": {
+        "DISCOVERY": "Discovery",
+        "ANALYSIS": "Анализ",
+        "DEVELOPMENT": "Разработка",
+        "TESTING": "Тестирование",
+        "MEETING": "Встреча"
+      },
       "date": "Дата",
       "startTime": "Начало",
       "endTime": "Окончание",
