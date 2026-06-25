@@ -10,6 +10,8 @@ import { useT } from '@/lib/useT';
 
 const initial: ActionResult = { ok: true };
 
+const STAGES = ['DISCOVERY', 'ANALYSIS', 'DEVELOPMENT', 'TESTING', 'MEETING'] as const;
+
 type Props = {
   entryId: string;
   initial: {
@@ -17,6 +19,8 @@ type Props = {
     startTime: string; // HH:mm
     endTime: string; // HH:mm
     note: string;
+    name: string;
+    stage: string; // '' | WorkStage
     task: TaskSearchHit | null;
   };
 };
@@ -86,7 +90,7 @@ export function EditTimeEntryForm({ entryId, initial: init }: Props) {
           <div className="relative">
             <Input
               type="search"
-              placeholder={t('noTask')}
+              placeholder={t('taskSearchPlaceholder')}
               value={taskQuery}
               onChange={(e) => setTaskQuery(e.target.value)}
             />
@@ -116,6 +120,37 @@ export function EditTimeEntryForm({ entryId, initial: init }: Props) {
             ) : null}
           </div>
         )}
+      </div>
+
+      {/* Name only applies to a no-task entry — picking a task intentionally
+          clears it on save (a task-linked row shows the task, never the name). */}
+      {!taskPicked ? (
+        <div className="flex flex-col gap-1">
+          <label className="text-sm font-medium">{t('name')}</label>
+          <Input
+            type="text"
+            name="name"
+            defaultValue={init.name}
+            placeholder={t('namePlaceholder')}
+            maxLength={200}
+          />
+        </div>
+      ) : null}
+
+      <div className="flex flex-col gap-1">
+        <label className="text-sm font-medium">{t('stage')}</label>
+        <select
+          name="stage"
+          defaultValue={init.stage}
+          className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+        >
+          <option value="">{t('stageNone')}</option>
+          {STAGES.map((s) => (
+            <option key={s} value={s}>
+              {t(`stages.${s}`)}
+            </option>
+          ))}
+        </select>
       </div>
 
       <div className="grid grid-cols-3 gap-3">

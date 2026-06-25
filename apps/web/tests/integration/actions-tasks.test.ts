@@ -405,6 +405,39 @@ describe('searchTasks', () => {
     expect(hits[0]?.projectKey).toBe('SRC');
   });
 
+  it('finds a task by its id ref "KEY-N" even when the title does not match', async () => {
+    const u = await makeUser({ role: 'ADMIN' });
+    mockMe.id = u.id;
+    const p = await makeProject({ ownerId: u.id, key: 'IDQ' });
+    const task = await makeTask({ projectId: p.id, creatorId: u.id, number: 77, title: 'Совсем другое' });
+
+    const hits = await searchTasks(`IDQ-77`);
+    expect(hits.map((h) => h.id)).toContain(task.id);
+    // Case-insensitive on the key.
+    expect((await searchTasks('idq-77')).map((h) => h.id)).toContain(task.id);
+  });
+
+  it('finds a task by a bare number', async () => {
+    const u = await makeUser({ role: 'ADMIN' });
+    mockMe.id = u.id;
+    const p = await makeProject({ ownerId: u.id, key: 'NUM' });
+    const task = await makeTask({ projectId: p.id, creatorId: u.id, number: 42, title: 'Безымянное' });
+
+    const hits = await searchTasks('42');
+    expect(hits.map((h) => h.id)).toContain(task.id);
+  });
+
+  it('id-ref search still respects project access (MEMBER outside the project)', async () => {
+    const admin = await makeUser({ role: 'ADMIN' });
+    const member = await makeUser({ role: 'MEMBER' });
+    const p = await makeProject({ ownerId: admin.id, key: 'SEC' });
+    await makeTask({ projectId: p.id, creatorId: admin.id, number: 9, title: 'Closed' });
+
+    mockMe.id = member.id;
+    mockMe.role = 'MEMBER';
+    expect(await searchTasks('SEC-9')).toHaveLength(0);
+  });
+
   it('MEMBER cannot see tasks of projects they are not in', async () => {
     const admin = await makeUser({ role: 'ADMIN' });
     const member = await makeUser({ role: 'MEMBER' });

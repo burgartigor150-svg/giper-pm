@@ -11,7 +11,7 @@ import {
   type CreateTaskInput,
   type UpdateTaskInput,
 } from '@giper/shared';
-import { prisma, type TaskStatus } from '@giper/db';
+import { prisma, Prisma, type TaskStatus } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
 import { DomainError } from '@/lib/errors';
 import { isTerminal, statusCategory } from '@/lib/status/category';
@@ -536,26 +536,52 @@ export type TaskSearchHit = {
  * Search tasks by title across all projects the user can view.
  * Returns up to 10 hits. Min query length 2.
  */
+/**
+ * Parse a task reference users orient by: `GGYPE-49`, `P01-49` (key may carry
+ * digits → split on the LAST dash), or a bare `49`. Returns null when the query
+ * isn't a ref (then we fall back to title search only).
+ */
+function parseTaskRef(q: string): { key?: string; number: number } | null {
+  const dash = q.lastIndexOf('-');
+  if (dash > 0) {
+    const key = q.slice(0, dash).trim();
+    const num = q.slice(dash + 1).trim();
+    if (/^\d{1,9}$/.test(num) && /^[A-Za-z0-9]+$/.test(key)) {
+      return { key, number: Number(num) };
+    }
+  }
+  if (/^\d{1,9}$/.test(q)) return { number: Number(q) };
+  return null;
+}
+
 export async function searchTasks(query: string): Promise<TaskSearchHit[]> {
   const me = await requireAuth();
   const q = query.trim();
   if (q.length < 2) return [];
 
-  const where =
+  const access: Prisma.ProjectWhereInput =
     me.role === 'ADMIN' || me.role === 'PM'
       ? {}
       : {
-          OR: [
-            { ownerId: me.id },
-            { members: { some: { userId: me.id } } },
-          ],
+          OR: [{ ownerId: me.id }, { members: { some: { userId: me.id } } }],
         };
+
+  // Match by title OR by task id (KEY-N / bare number) — teams reference tasks
+  // by id, so a "GGYPE-49" / "49" query must resolve the exact card.
+  const ref = parseTaskRef(q);
+  const or: Prisma.TaskWhereInput[] = [{ title: { contains: q, mode: 'insensitive' } }];
+  if (ref) {
+    or.push({
+      number: ref.number,
+      ...(ref.key ? { project: { key: { equals: ref.key, mode: 'insensitive' } } } : {}),
+    });
+  }
 
   const tasks = await prisma.task.findMany({
     where: {
-      title: { contains: q, mode: 'insensitive' as const },
+      OR: or,
       status: { not: 'CANCELED' },
-      project: where,
+      project: access,
     },
     orderBy: { updatedAt: 'desc' },
     take: 10,

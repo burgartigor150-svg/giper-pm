@@ -9,6 +9,8 @@ import { useT } from '@/lib/useT';
 
 const initial: ActionResult<{ flag: string | null }> = { ok: true };
 
+const STAGES = ['DISCOVERY', 'ANALYSIS', 'DEVELOPMENT', 'TESTING', 'MEETING'] as const;
+
 function todayStr(): string {
   const d = new Date();
   const y = d.getFullYear();
@@ -82,7 +84,7 @@ export function ManualTimeForm({ onCancel }: { onCancel?: () => void }) {
           <div className="relative">
             <Input
               type="search"
-              placeholder={t('noTask')}
+              placeholder={t('taskSearchPlaceholder')}
               value={taskQuery}
               onChange={(e) => setTaskQuery(e.target.value)}
             />
@@ -112,6 +114,29 @@ export function ManualTimeForm({ onCancel }: { onCancel?: () => void }) {
             ) : null}
           </div>
         )}
+      </div>
+
+      {!taskPicked ? (
+        <div className="flex flex-col gap-1">
+          <label className="text-sm font-medium">{t('name')}</label>
+          <Input type="text" name="name" placeholder={t('namePlaceholder')} maxLength={200} />
+        </div>
+      ) : null}
+
+      <div className="flex flex-col gap-1">
+        <label className="text-sm font-medium">{t('stage')}</label>
+        <select
+          name="stage"
+          defaultValue=""
+          className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+        >
+          <option value="">{t('stageNone')}</option>
+          {STAGES.map((s) => (
+            <option key={s} value={s}>
+              {t(`stages.${s}`)}
+            </option>
+          ))}
+        </select>
       </div>
 
       <div className="grid grid-cols-3 gap-3">

@@ -248,6 +248,35 @@ describe('logTimeAction', () => {
     expect(entries[0]?.durationMin).toBe(60);
   });
 
+  it('stores a free-form name + stage on a no-task entry', async () => {
+    const u = await makeUser({ role: 'ADMIN' });
+    mockMe.id = u.id;
+    const fd = new FormData();
+    fd.set('date', '2025-04-01');
+    fd.set('startTime', '09:00');
+    fd.set('endTime', '10:00');
+    fd.set('name', 'Планёрка по релизу');
+    fd.set('stage', 'MEETING');
+    const res = await logTimeAction(null, fd);
+    expect(res.ok).toBe(true);
+    const entry = await prisma.timeEntry.findFirstOrThrow({ where: { userId: u.id } });
+    expect(entry.taskId).toBeNull();
+    expect(entry.name).toBe('Планёрка по релизу');
+    expect(entry.stage).toBe('MEETING');
+  });
+
+  it('rejects an invalid stage value', async () => {
+    const u = await makeUser({ role: 'ADMIN' });
+    mockMe.id = u.id;
+    const fd = new FormData();
+    fd.set('date', '2025-04-01');
+    fd.set('startTime', '09:00');
+    fd.set('endTime', '10:00');
+    fd.set('stage', 'DEPLOY');
+    const res = await logTimeAction(null, fd);
+    expect(res.ok).toBe(false);
+  });
+
   it('flags overlapping entries', async () => {
     const u = await makeUser({ role: 'ADMIN' });
     mockMe.id = u.id;

@@ -50,6 +50,8 @@ export default async function EditTimeEntryPage({
               startTime,
               endTime,
               note: entry.note ?? '',
+              name: entry.name ?? '',
+              stage: entry.stage ?? '',
               task: entry.task
                 ? {
                     id: entry.task.id,

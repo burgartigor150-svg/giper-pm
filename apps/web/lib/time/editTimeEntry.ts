@@ -60,6 +60,8 @@ export async function editTimeEntry(
       endedAt: input.endedAt,
       durationMin,
       note: input.note ?? null,
+      name: input.name ?? null,
+      stage: input.stage ?? null,
       flag: overlap ? 'OVERLAPPING' : null,
     },
     select: { id: true, durationMin: true, flag: true },
