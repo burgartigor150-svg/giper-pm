@@ -273,11 +273,20 @@ export async function deleteCalendarEventAction(
   const me = await requireAuth();
   const ev = await prisma.calendarEvent.findUnique({
     where: { id: eventId },
-    select: { id: true, createdById: true },
+    select: { id: true, createdById: true, externalSource: true },
   });
   if (!ev) return { ok: false, error: { code: 'NOT_FOUND', message: 'Событие не найдено' } };
   if (ev.createdById !== me.id) {
     return { ok: false, error: { code: 'FORBIDDEN', message: 'Только создатель может удалить' } };
+  }
+  // Mirrored external events (e.g. Bitrix24 personal calendar) are read-only —
+  // deleting would just be re-created by the next sync. Enforce server-side so
+  // the contract doesn't rely on the client hiding the button.
+  if (ev.externalSource) {
+    return {
+      ok: false,
+      error: { code: 'FORBIDDEN', message: 'Событие из внешнего календаря нельзя удалить' },
+    };
   }
   await prisma.calendarEvent.delete({ where: { id: eventId } });
   revalidatePath('/calendar');
