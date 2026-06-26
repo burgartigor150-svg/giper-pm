@@ -11,6 +11,8 @@ import { setInternalStatus } from '@/lib/tasks/setInternalStatus';
 import { runColumnEnterAutomations } from '@/lib/automations/runColumnEnterAutomations';
 import { isColumnTransitionAllowed } from '@/lib/workflow/isColumnTransitionAllowed';
 import { autoUnblockDependents } from '@/lib/tasks/autoTransitions';
+import { assertWipNotExceeded } from '@/lib/board/assertWipNotExceeded';
+import { DomainError } from '@/lib/errors';
 import type { ActionResult } from './projects';
 
 const VALID_STATUSES: readonly TaskStatus[] = [
@@ -757,11 +759,18 @@ export async function setTaskColumnAction(taskId: string, columnId: string): Pro
     return { ok: false, error: { code: 'VALIDATION', message: 'Колонка не найдена' } };
   }
   try {
+    // WIP: entering a DIFFERENT column → enforce the EXPLICIT target column's
+    // limit up-front, before any write, so a rejected move commits nothing. The
+    // cross-category core call below gets skipWip so it doesn't ALSO check the
+    // default column the category resolves to.
+    if (task.columnId !== columnId) {
+      await assertWipNotExceeded(task.projectId, { columnId, status: col.status }, taskId);
+    }
     if (task.internalStatus !== col.status) {
       // Category change → the workflow-gated core enforces the transition + runs
       // side effects (it also rejects a forbidden move / a DONE without an итог).
       // Thread the destination columnId so per-column automation rules fire too.
-      await setInternalStatus(taskId, col.status, me, { columnId });
+      await setInternalStatus(taskId, col.status, me, { columnId, skipWip: true });
       await prisma.task.update({
         where: { id: taskId },
         data: { columnId, ...(col.statusId ? { internalStatusId: col.statusId } : {}) },
@@ -795,8 +804,14 @@ export async function setTaskColumnAction(taskId: string, columnId: string): Pro
       await runColumnEnterAutomations(taskId, col.status, columnId, { columnRulesOnly: true });
     }
   } catch (e) {
+    // Preserve the DomainError code (WIP_EXCEEDED / TRANSITION_NOT_ALLOWED /
+    // NOT_FOUND / …) so callers can distinguish a WIP/workflow rejection from a
+    // generic failure — mirrors setInternalStatusAction.
+    if (e instanceof DomainError) {
+      return { ok: false, error: { code: e.code, message: e.message } };
+    }
     const message = e instanceof Error ? e.message : 'Не удалось переместить задачу';
-    return { ok: false, error: { code: 'VALIDATION', message } };
+    return { ok: false, error: { code: 'INTERNAL', message } };
   }
   revalidatePath(`/projects/${task.project.key}/board`);
   return { ok: true };

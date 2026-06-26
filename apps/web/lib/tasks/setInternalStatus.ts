@@ -6,6 +6,7 @@ import type { SessionUser } from '../permissions';
 import { isTransitionAllowed } from '../workflow/isTransitionAllowed';
 import { isClosing as isClosingCat, isTerminal, statusCategory } from '../status/category';
 import { autoUnblockDependents } from './autoTransitions';
+import { assertWipNotExceeded } from '../board/assertWipNotExceeded';
 import { runColumnEnterAutomations } from '../automations/runColumnEnterAutomations';
 import { dispatchWebhooks } from '../webhooks/dispatchWebhooks';
 import { closeBitrixTaskBestEffort } from '../integrations/bitrix24Outbound';
@@ -36,7 +37,7 @@ export async function setInternalStatus(
   taskId: string,
   status: string,
   user: SessionUser,
-  opts: { result?: string; columnId?: string } = {},
+  opts: { result?: string; columnId?: string; skipWip?: boolean } = {},
 ): Promise<{ projectKey: string; number: number }> {
   if (!VALID.includes(status as TaskStatus)) {
     throw new DomainError('VALIDATION', 400, 'Невалидный статус');
@@ -98,6 +99,17 @@ export async function setInternalStatus(
   // S2 dual-write: keep the internal-track FKs (internalStatusId + columnId) in
   // step with the enum, and the mirror FK when a close also flips the mirror.
   const internalFk = await internalStatusWrite(prisma, task.projectId, status as TaskStatus);
+  // WIP: the card enters the target column for the new category — enforce its
+  // limit server-side (the board checks client-side, but the card picker / MCP
+  // bypass it). The free-form board move passes skipWip because setTaskColumnAction
+  // checks the EXPLICIT target column (this lookup resolves only the default one).
+  if (!opts.skipWip) {
+    await assertWipNotExceeded(
+      task.projectId,
+      { columnId: internalFk.columnId, status: status as TaskStatus },
+      taskId,
+    );
+  }
   await prisma.task.update({
     where: { id: taskId },
     data: {

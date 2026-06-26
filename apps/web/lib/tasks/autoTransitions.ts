@@ -30,6 +30,9 @@ export async function autoMoveToInProgress(
   // shouldn't surprise them.
   if (task.internalStatus !== 'BACKLOG' && task.internalStatus !== 'TODO') return;
 
+  // WIP-exempt by design: this fires from starting a timer / logging hours, and
+  // beginning work must never be blocked because the IN_PROGRESS column is full
+  // (see assertWipNotExceeded — auto-transitions are an intentional bypass).
   const next: TaskStatus = 'IN_PROGRESS';
   await prisma.task.update({
     where: { id: taskId },
