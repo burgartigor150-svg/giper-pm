@@ -32,6 +32,7 @@ import {
   renameBoardColumnAction,
   deleteBoardColumnAction,
   reorderBoardColumnsAction,
+  setBoardColumnCategoryAction,
   setTaskColumnAction,
 } from '@/actions/board';
 import type { StatusCategory } from '@giper/db';
@@ -456,6 +457,12 @@ export function KanbanBoard({
       if (res.ok) router.refresh();
       else setError(res.error.message);
     });
+  const onSetColumnCategory = (columnId: string, category: StatusCategory) =>
+    startTransition(async () => {
+      const res = await setBoardColumnCategoryAction(columnId, category);
+      if (res.ok) router.refresh();
+      else setError(res.error.message);
+    });
 
   /** Card move on a free-form board — routed by columnId via setTaskColumnAction. */
   function handleFreeFormMove(taskId: string, from: DropTarget, to: DropTarget, overId: string) {
@@ -624,6 +631,7 @@ export function KanbanBoard({
                   onRenameColumn={onRenameColumn}
                   onDeleteColumn={onDeleteColumn}
                   onMoveColumn={onMoveColumn}
+                  onSetColumnCategory={onSetColumnCategory}
                   isFirstColumn={i === 0}
                   isLastColumn={i === columns.length - 1}
                   tasks={byColumn.get(col.id) ?? []}

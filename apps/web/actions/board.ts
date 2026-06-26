@@ -10,6 +10,7 @@ import { STATUS_SEED, materializeProjectColumns } from '@/lib/status/backfillSta
 import { setInternalStatus } from '@/lib/tasks/setInternalStatus';
 import { runColumnEnterAutomations } from '@/lib/automations/runColumnEnterAutomations';
 import { isColumnTransitionAllowed } from '@/lib/workflow/isColumnTransitionAllowed';
+import { autoUnblockDependents } from '@/lib/tasks/autoTransitions';
 import type { ActionResult } from './projects';
 
 const VALID_STATUSES: readonly TaskStatus[] = [
@@ -541,6 +542,119 @@ export async function renameBoardColumnAction(columnId: string, name: string): P
       .catch(() => {});
   }
   revalidatePath(`/projects/${gate.column.key}/board`);
+  return { ok: true };
+}
+
+/**
+ * Change a free-form column's TYPE (status category). Kaiten parity: the
+ * column's type — not its name — drives the status of the cards in it, so
+ * re-typing CASCADES every card in the column to the new category (matching
+ * Kaiten, where re-typing a column to «Готово» completes its cards). The
+ * column's backing Status row is re-categorized in place.
+ *
+ * - If this is the LAST column of the old category, stranded cards of that
+ *   category with no column (columnId null — e.g. a previously-deleted column
+ *   SetNull'd them) are swept into this column too, so they can't be orphaned
+ *   into a category with no column (which would hide them on a free-form board).
+ * - to DONE: stamps completedAt on NATIVE cards that lack one (Bitrix-mirror
+ *   cards keep Bitrix as the owner of completion — stamping locally would just
+ *   be cleared by the next inbound sync), and best-effort auto-unblocks the
+ *   dependents of cards that actually block something. The per-card «итог»
+ *   requirement is bypassed (structural admin action, not a user close) and the
+ *   Bitrix mirror is NOT pushed.
+ * - re-typing AWAY from DONE leaves completedAt as-is (same as the per-card path).
+ * - CANCELED is rejected — a CANCELED column is hidden from the board.
+ *
+ * Note: a bulk re-type does NOT emit per-card TaskStatusChange/audit/webhook
+ * events — it's a structural board edit, not N user-initiated status changes.
+ */
+export async function setBoardColumnCategoryAction(
+  columnId: string,
+  category: StatusCategory,
+): Promise<ActionResult> {
+  const me = await requireAuth();
+  const gate = await editableColumnOrError(columnId);
+  if (!gate.ok) return gate;
+  if (!VALID_CATEGORIES.has(category)) {
+    return { ok: false, error: { code: 'VALIDATION', message: 'Неверная категория статуса' } };
+  }
+  if (category === 'CANCELED') {
+    return { ok: false, error: { code: 'VALIDATION', message: 'Нельзя сменить тип на «Отмена»' } };
+  }
+  const col = gate.column;
+  const oldStatus = col.status;
+  const newStatus = categoryToTaskStatus(category);
+  if (oldStatus === newStatus) return { ok: true }; // no-op
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      // 1. Re-categorize the column's backing Status row (kept in place).
+      if (col.statusId) {
+        await tx.status.update({
+          where: { id: col.statusId },
+          data: { category, color: CATEGORY_COLOR[category] ?? null },
+        });
+      }
+      // 2. Re-type the column itself.
+      await tx.boardColumn.update({
+        where: { id: columnId },
+        data: { status: newStatus, color: CATEGORY_COLOR[category] ?? null },
+      });
+      // 3. Cascade every card in this column to the new category (dual-write the
+      //    enum + the Status FK). internalStatusId stays the column's own Status.
+      await tx.task.updateMany({
+        where: { columnId },
+        data: { internalStatus: newStatus, ...(col.statusId ? { internalStatusId: col.statusId } : {}) },
+      });
+      // 3b. If this was the LAST column of the old category, no column is left to
+      //     bucket cards still in that category but with no column (null columnId
+      //     — e.g. orphaned by a prior column delete's SetNull). Sweep them into
+      //     this column so they don't vanish from a free-form board.
+      const remainingOldCols = await tx.boardColumn.count({
+        where: { projectId: col.projectId, status: oldStatus },
+      });
+      if (remainingOldCols === 0) {
+        await tx.task.updateMany({
+          where: { projectId: col.projectId, columnId: null, internalStatus: oldStatus },
+          data: {
+            internalStatus: newStatus,
+            columnId,
+            ...(col.statusId ? { internalStatusId: col.statusId } : {}),
+          },
+        });
+      }
+      // 4. Entering DONE stamps a completion time on NATIVE cards that lack one
+      //    (mirrors setInternalStatus). Bitrix-mirror cards are skipped — Bitrix
+      //    owns their completion, and a local stamp would be cleared by the next
+      //    inbound sync (which overwrites completedAt from upstream).
+      if (category === 'DONE') {
+        await tx.task.updateMany({
+          where: { columnId, externalSource: null, completedAt: null },
+          data: { completedAt: new Date() },
+        });
+      }
+    });
+  } catch (e) {
+    console.error('setBoardColumnCategoryAction', e);
+    return { ok: false, error: { code: 'INTERNAL', message: 'Не удалось сменить тип колонки' } };
+  }
+
+  // Best-effort auto-unblock for cards that just became DONE. Bound to cards that
+  // ACTUALLY block something (an outgoing BLOCKS edge) so a large column doesn't
+  // fan out N no-op calls. Outside the transaction; failures never undo the
+  // re-type.
+  if (category === 'DONE') {
+    const blockerEdges = await prisma.taskDependency.findMany({
+      where: { fromTask: { columnId }, linkType: 'BLOCKS' },
+      select: { fromTaskId: true },
+      distinct: ['fromTaskId'],
+    });
+    for (const e of blockerEdges) {
+      await autoUnblockDependents(e.fromTaskId, me.id).catch(() => {});
+    }
+  }
+
+  revalidatePath(`/projects/${col.key}/board`);
   return { ok: true };
 }
 
