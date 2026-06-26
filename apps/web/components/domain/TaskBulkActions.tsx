@@ -2,8 +2,12 @@
 
 import { createContext, useContext, useMemo, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Check, ChevronDown, Flag, User2, X } from 'lucide-react';
-import { bulkUpdateTasksAction, type BulkTaskOp } from '@/actions/bulkTasks';
+import { Check, ChevronDown, Flag, Rocket, Tag, Trash2, User2, X } from 'lucide-react';
+import {
+  bulkUpdateTasksAction,
+  bulkDeleteTasksAction,
+  type BulkTaskOp,
+} from '@/actions/bulkTasks';
 
 /**
  * Multi-select + bulk-action toolbar for the task LIST view. Selection state
@@ -108,29 +112,61 @@ const PRIORITY_OPTIONS: { value: 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT'; label: st
 ];
 
 type Member = { id: string; name: string };
-type Menu = 'status' | 'assignee' | 'priority' | null;
+type TagOption = { id: string; name: string; color: string };
+type SprintOption = { id: string; name: string };
+type Menu = 'status' | 'assignee' | 'priority' | 'tag' | 'sprint' | null;
 
-export function BulkTaskActionBar({ members }: { members: Member[] }) {
+export function BulkTaskActionBar({
+  members,
+  tags = [],
+  sprints = [],
+}: {
+  members: Member[];
+  tags?: TagOption[];
+  sprints?: SprintOption[];
+}) {
   const router = useRouter();
   const { selected, clear } = useSelection();
   const [menu, setMenu] = useState<Menu>(null);
   const [pending, startTransition] = useTransition();
   const [result, setResult] = useState<string | null>(null);
+  // Two-step inline confirm for the destructive delete (no window.confirm).
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   if (selected.size === 0) return null;
+
+  function reportTally(succeeded: number, failed: number) {
+    setResult(
+      failed > 0
+        ? `Готово: ${succeeded}, пропущено: ${failed} (нет прав или недоступны)`
+        : `Готово: ${succeeded}`,
+    );
+  }
 
   function run(op: BulkTaskOp) {
     setMenu(null);
     setResult(null);
+    setConfirmDelete(false);
     startTransition(async () => {
       const res = await bulkUpdateTasksAction([...selected], op);
       if (res.ok) {
-        const { succeeded, failed } = res.data;
-        setResult(
-          failed > 0
-            ? `Готово: ${succeeded}, пропущено: ${failed} (нет прав или недоступны)`
-            : `Готово: ${succeeded}`,
-        );
+        reportTally(res.data.succeeded, res.data.failed);
+        clear();
+        router.refresh();
+      } else {
+        setResult(res.error.message);
+      }
+    });
+  }
+
+  function runDelete() {
+    setMenu(null);
+    setResult(null);
+    setConfirmDelete(false);
+    startTransition(async () => {
+      const res = await bulkDeleteTasksAction([...selected]);
+      if (res.ok) {
+        reportTally(res.data.succeeded, res.data.failed);
         clear();
         router.refresh();
       } else {
@@ -190,9 +226,89 @@ export function BulkTaskActionBar({ members }: { members: Member[] }) {
             ))}
           </BulkMenu>
 
+          {tags.length > 0 ? (
+            <BulkMenu
+              open={menu === 'tag'}
+              onToggle={() => setMenu((m) => (m === 'tag' ? null : 'tag'))}
+              label="Тег"
+              icon={<Tag className="h-4 w-4" aria-hidden />}
+              disabled={pending}
+            >
+              {tags.map((tg) => (
+                <MenuItem key={tg.id} onClick={() => run({ kind: 'addTag', tagId: tg.id })}>
+                  <span className="inline-flex items-center gap-2">
+                    <span
+                      className="h-2.5 w-2.5 shrink-0 rounded-full"
+                      style={{ backgroundColor: tg.color }}
+                      aria-hidden
+                    />
+                    {tg.name}
+                  </span>
+                </MenuItem>
+              ))}
+            </BulkMenu>
+          ) : null}
+
+          {sprints.length > 0 ? (
+            <BulkMenu
+              open={menu === 'sprint'}
+              onToggle={() => setMenu((m) => (m === 'sprint' ? null : 'sprint'))}
+              label="Спринт"
+              icon={<Rocket className="h-4 w-4" aria-hidden />}
+              disabled={pending}
+            >
+              <MenuItem onClick={() => run({ kind: 'sprint', sprintId: null })}>
+                <span className="text-muted-foreground">— Убрать из спринта</span>
+              </MenuItem>
+              {sprints.map((s) => (
+                <MenuItem key={s.id} onClick={() => run({ kind: 'sprint', sprintId: s.id })}>
+                  {s.name}
+                </MenuItem>
+              ))}
+            </BulkMenu>
+          ) : null}
+
+          {confirmDelete ? (
+            <span className="inline-flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={runDelete}
+                disabled={pending}
+                className="inline-flex items-center gap-1.5 rounded-md border border-destructive bg-destructive px-2.5 py-1.5 font-medium text-destructive-foreground transition-colors hover:bg-destructive/90 disabled:opacity-50"
+              >
+                <Trash2 className="h-4 w-4" aria-hidden />
+                Удалить {selected.size}?
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmDelete(false)}
+                disabled={pending}
+                className="rounded-md px-2 py-1.5 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+              >
+                Отмена
+              </button>
+            </span>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                setMenu(null);
+                setConfirmDelete(true);
+              }}
+              disabled={pending}
+              className="inline-flex items-center gap-1.5 rounded-md border border-input bg-background px-2.5 py-1.5 font-medium text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-50"
+            >
+              <Trash2 className="h-4 w-4" aria-hidden />
+              Удалить
+            </button>
+          )}
+
           <button
             type="button"
-            onClick={clear}
+            onClick={() => {
+              setConfirmDelete(false);
+              clear();
+            }}
             disabled={pending}
             className="ml-auto inline-flex items-center gap-1 rounded-md px-2 py-1.5 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
           >
