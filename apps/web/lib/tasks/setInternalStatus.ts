@@ -36,7 +36,7 @@ export async function setInternalStatus(
   taskId: string,
   status: string,
   user: SessionUser,
-  opts: { result?: string } = {},
+  opts: { result?: string; columnId?: string } = {},
 ): Promise<{ projectKey: string; number: number }> {
   if (!VALID.includes(status as TaskStatus)) {
     throw new DomainError('VALIDATION', 400, 'Невалидный статус');
@@ -119,7 +119,9 @@ export async function setInternalStatus(
   if (isTerminal(cat)) {
     await autoUnblockDependents(taskId, user.id);
   }
-  await runColumnEnterAutomations(taskId, status);
+  // Pass the destination column (when the caller is a free-form board move) so
+  // per-column automation rules can fire too; category rules fire regardless.
+  await runColumnEnterAutomations(taskId, status, opts.columnId);
   await dispatchWebhooks(task.projectId, 'card.moved', {
     project: { id: task.projectId, key: task.project.key },
     task: { id: taskId, number: task.number, title: task.title, toStatus: status },

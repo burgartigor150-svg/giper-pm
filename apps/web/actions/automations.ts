@@ -28,8 +28,16 @@ export type AutomationRuleInput = {
   enabled: boolean;
   /** What fires the rule. */
   triggerType: 'CARD_ENTERS_COLUMN' | 'TASK_CREATED';
-  /** Column (status) whose entry fires the rule (CARD_ENTERS_COLUMN only). */
+  /**
+   * Status category whose entry fires the rule (CARD_ENTERS_COLUMN, category
+   * mode). Ignored when triggerColumnId is set.
+   */
   triggerStatus: string;
+  /**
+   * Specific board column whose entry fires the rule (CARD_ENTERS_COLUMN, column
+   * mode). Empty string = category mode. Stored as triggerConfig.columnId.
+   */
+  triggerColumnId?: string;
   actionType: AutomationActionKind;
   /** userId (SET_ASSIGNEE) | priority (SET_PRIORITY) | swimlaneId or '' (SET_SWIMLANE). */
   actionValue: string;
@@ -76,6 +84,14 @@ export async function updateAutomationsAction(
   });
   const existingIds = new Set(existing.map((r) => r.id));
 
+  // Column-keyed triggers must reference a real column OF THIS PROJECT — fetch
+  // the project's column ids once so a crafted/foreign columnId can't be stored.
+  const projectColumns = await prisma.boardColumn.findMany({
+    where: { projectId },
+    select: { id: true },
+  });
+  const projectColumnIds = new Set(projectColumns.map((c) => c.id));
+
   type Clean = {
     id: string | null;
     name: string;
@@ -97,7 +113,15 @@ export async function updateAutomationsAction(
       };
     }
     const isColumnTrigger = r.triggerType !== 'TASK_CREATED';
-    if (isColumnTrigger && !STATUSES.includes(r.triggerStatus as TaskStatus)) {
+    // A CARD_ENTERS_COLUMN rule is either category-keyed (triggerStatus) or
+    // column-keyed (triggerColumnId). Column mode wins when an id is supplied.
+    const triggerColumnId = isColumnTrigger ? (r.triggerColumnId ?? '').trim() : '';
+    const isColumnKeyed = triggerColumnId.length > 0;
+    if (isColumnTrigger && isColumnKeyed) {
+      if (!projectColumnIds.has(triggerColumnId)) {
+        return { ok: false, error: { code: 'VALIDATION', message: 'Неверная колонка-триггер' } };
+      }
+    } else if (isColumnTrigger && !STATUSES.includes(r.triggerStatus as TaskStatus)) {
       return { ok: false, error: { code: 'VALIDATION', message: 'Неверная колонка-триггер' } };
     }
     if (!ACTION_TYPES.includes(r.actionType)) {
@@ -126,7 +150,11 @@ export async function updateAutomationsAction(
       name,
       enabled: !!r.enabled,
       trigger: isColumnTrigger ? 'CARD_ENTERS_COLUMN' : 'TASK_CREATED',
-      triggerConfig: isColumnTrigger ? { status: r.triggerStatus } : {},
+      triggerConfig: isColumnTrigger
+        ? isColumnKeyed
+          ? { columnId: triggerColumnId }
+          : { status: r.triggerStatus }
+        : {},
       actionType: r.actionType,
       actionConfig,
       order,

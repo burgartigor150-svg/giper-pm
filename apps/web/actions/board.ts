@@ -8,6 +8,7 @@ import { getEffectiveCapsForProject } from '@/lib/capabilities';
 import { categoryToTaskStatus } from '@/lib/status/category';
 import { STATUS_SEED, materializeProjectColumns } from '@/lib/status/backfillStatuses';
 import { setInternalStatus } from '@/lib/tasks/setInternalStatus';
+import { runColumnEnterAutomations } from '@/lib/automations/runColumnEnterAutomations';
 import type { ActionResult } from './projects';
 
 const VALID_STATUSES: readonly TaskStatus[] = [
@@ -643,12 +644,27 @@ export async function setTaskColumnAction(taskId: string, columnId: string): Pro
     if (task.internalStatus !== col.status) {
       // Category change → the workflow-gated core enforces the transition + runs
       // side effects (it also rejects a forbidden move / a DONE without an итог).
-      await setInternalStatus(taskId, col.status, me);
+      // Thread the destination columnId so per-column automation rules fire too.
+      await setInternalStatus(taskId, col.status, me, { columnId });
+      await prisma.task.update({
+        where: { id: taskId },
+        data: { columnId, ...(col.statusId ? { internalStatusId: col.statusId } : {}) },
+      });
+    } else {
+      // Same-category move (e.g. «Code Review» → «QA», both REVIEW): re-pin the
+      // column only — internalStatus / startedAt / completedAt / TaskStatusChange
+      // are deliberately left untouched so reports, burndown, versions and the
+      // mirror stay correct. The status core is skipped, so fire the column-enter
+      // automations here (best-effort; never throws) — historically this move
+      // fired nothing at all. columnRulesOnly: the card entered a new COLUMN but
+      // not a new CATEGORY, so only the destination column's rules run; a
+      // category-keyed rule must not re-fire on an intra-category shuffle.
+      await prisma.task.update({
+        where: { id: taskId },
+        data: { columnId, ...(col.statusId ? { internalStatusId: col.statusId } : {}) },
+      });
+      await runColumnEnterAutomations(taskId, col.status, columnId, { columnRulesOnly: true });
     }
-    await prisma.task.update({
-      where: { id: taskId },
-      data: { columnId, ...(col.statusId ? { internalStatusId: col.statusId } : {}) },
-    });
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Не удалось переместить задачу';
     return { ok: false, error: { code: 'VALIDATION', message } };
