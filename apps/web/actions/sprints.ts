@@ -1,10 +1,15 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { z } from 'zod';
 import { prisma } from '@giper/db';
+import { taskListFilterSchema } from '@giper/shared';
 import { requireAuth } from '@/lib/auth';
 import { canEditProject, canEditTaskInternal } from '@/lib/permissions';
 import { getEffectiveCapsForProject } from '@/lib/capabilities';
+import { listTasksForProject } from '@/lib/tasks';
+import { setTaskSprint } from '@/lib/tasks/setTaskSprint';
+import { DomainError } from '@/lib/errors';
 
 type ActionResult<T = unknown> =
   | { ok: true; data?: T }
@@ -236,4 +241,125 @@ export async function assignTaskToSprintAction(
   await prisma.task.update({ where: { id: taskId }, data: { sprintId } });
   revalidatePath(`/projects/${task.project.key}/sprints`);
   return { ok: true };
+}
+
+// ---- Sprint planning (add/remove tasks from a sprint, in one place) --------
+
+export type SprintPlanningTask = {
+  id: string;
+  number: number;
+  title: string;
+  internalStatus: string;
+  /** Whether the task is currently in THIS sprint. */
+  inSprint: boolean;
+};
+
+/**
+ * Candidate tasks for the sprint-planning dialog: the project's tasks the user
+ * can see (reuses listTasksForProject — same per-stake visibility/leak-guard +
+ * `q` search), each flagged with whether it's already in `sprintId`. Capped to
+ * one page; `hasMore` hints the user to narrow the search.
+ */
+export async function listSprintPlanningTasksAction(
+  projectKey: string,
+  sprintId: string,
+  query: string,
+): Promise<ActionResult<{ items: SprintPlanningTask[]; hasMore: boolean }>> {
+  const me = await requireAuth();
+  // Defense-in-depth: the sprint must belong to the project named by projectKey,
+  // so the inSprint flag is meaningful and a foreign sprintId can't be probed.
+  const sprint = await prisma.sprint.findUnique({
+    where: { id: sprintId },
+    select: { project: { select: { key: true } } },
+  });
+  if (!sprint || sprint.project.key !== projectKey) {
+    return { ok: false, error: { code: 'NOT_FOUND', message: 'Спринт не найден в этом проекте' } };
+  }
+  const q = (typeof query === 'string' ? query : '').trim();
+  const filter = taskListFilterSchema.parse({ q: q || undefined });
+  try {
+    const res = await listTasksForProject(projectKey, filter, { id: me.id, role: me.role });
+    const items: SprintPlanningTask[] = res.items.map((t) => ({
+      id: t.id,
+      number: t.number,
+      title: t.title,
+      internalStatus: t.internalStatus,
+      inSprint: t.sprintId === sprintId,
+    }));
+    return { ok: true, data: { items, hasMore: res.total > res.items.length } };
+  } catch (e) {
+    if (e instanceof DomainError) return { ok: false, error: { code: e.code, message: 'Нет доступа' } };
+    throw e;
+  }
+}
+
+/** Hard cap per planning save — keeps one action from looping unbounded work. */
+const MAX_PLANNING = 200;
+
+/**
+ * Apply sprint membership changes from the planning dialog: add `addIds` to the
+ * sprint and clear `removeIds` back to the backlog. Authorization is PER TASK
+ * (each id routed through the gated `setTaskSprint` — canEditTaskInternal + the
+ * sprint must belong to the task's project); a task the caller can't touch is
+ * counted failed and skipped, the batch never aborts. Returns a tally.
+ */
+export async function updateSprintMembershipAction(
+  sprintId: string,
+  addIds: string[],
+  removeIds: string[],
+): Promise<ActionResult<{ added: number; removed: number; failed: number }>> {
+  const me = await requireAuth();
+
+  const idSchema = z.array(z.string().min(1));
+  const addParsed = idSchema.safeParse(addIds);
+  const removeParsed = idSchema.safeParse(removeIds);
+  if (!addParsed.success || !removeParsed.success) {
+    return { ok: false, error: { code: 'VALIDATION', message: 'Некорректный список задач' } };
+  }
+  const add = Array.from(new Set(addParsed.data));
+  const remove = Array.from(new Set(removeParsed.data)).filter((id) => !add.includes(id));
+  if (add.length + remove.length === 0) {
+    return { ok: false, error: { code: 'VALIDATION', message: 'Нет изменений' } };
+  }
+  if (add.length + remove.length > MAX_PLANNING) {
+    return { ok: false, error: { code: 'VALIDATION', message: `Не более ${MAX_PLANNING} задач за раз` } };
+  }
+
+  const user = { id: me.id, role: me.role };
+  let added = 0;
+  let removed = 0;
+  let failed = 0;
+  let projectKey: string | null = null;
+
+  for (const id of add) {
+    try {
+      await setTaskSprint(id, sprintId, user);
+      added++;
+    } catch (e) {
+      failed++;
+      if (!(e instanceof DomainError)) console.error('updateSprintMembershipAction: add failed', id, e);
+    }
+  }
+  for (const id of remove) {
+    try {
+      await setTaskSprint(id, null, user);
+      removed++;
+    } catch (e) {
+      failed++;
+      if (!(e instanceof DomainError)) console.error('updateSprintMembershipAction: remove failed', id, e);
+    }
+  }
+
+  // Resolve the project key from the sprint for a targeted revalidate (best-effort).
+  const sprint = await prisma.sprint
+    .findUnique({ where: { id: sprintId }, select: { project: { select: { key: true } } } })
+    .catch(() => null);
+  projectKey = sprint?.project.key ?? null;
+  if (projectKey) {
+    revalidatePath(`/projects/${projectKey}/sprints`);
+    revalidatePath(`/projects/${projectKey}/board`);
+  } else {
+    revalidatePath('/projects', 'layout');
+  }
+  return { ok: true, data: { added, removed, failed } };
 }
