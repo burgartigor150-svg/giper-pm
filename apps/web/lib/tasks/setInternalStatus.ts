@@ -116,6 +116,16 @@ export async function setInternalStatus(
     },
   });
 
+  // Kaiten parity: when a card first ENTERS an "in progress / done" column and
+  // has no responsible yet, the actor who moved it becomes the responsible
+  // (assignee). Queue categories (BACKLOG/TODO) and CANCELED never auto-assign,
+  // and an existing assignee is never overwritten — this only fills an empty slot
+  // on a real category transition (the no-op guard above already returned).
+  const startsWork = cat !== 'BACKLOG' && cat !== 'TODO' && cat !== 'CANCELED';
+  if (startsWork && !task.assigneeId) {
+    await prisma.task.update({ where: { id: taskId }, data: { assigneeId: user.id } });
+  }
+
   if (isTerminal(cat)) {
     await autoUnblockDependents(taskId, user.id);
   }

@@ -8,10 +8,25 @@ import { cn } from '@giper/ui/cn';
 import { Button } from '@giper/ui/components/Button';
 import { useT } from '@/lib/useT';
 import type { BoardTask, BoardSubColumnView } from '@/lib/tasks';
+import type { StatusCategory } from '@giper/db';
 import { KanbanCard } from './KanbanCard';
 
 type Status = BoardTask['status'];
 const NO_LANE = 'none';
+
+/**
+ * Column "type" options (Kaiten: the type drives card status, not the name).
+ * CANCELED is omitted — a CANCELED column is hidden from the board, so it isn't
+ * a sensible re-type target (the server action rejects it too).
+ */
+const COLUMN_TYPE_OPTIONS: { value: StatusCategory; label: string }[] = [
+  { value: 'BACKLOG', label: 'Бэклог' },
+  { value: 'TODO', label: 'К работе' },
+  { value: 'IN_PROGRESS', label: 'В работе' },
+  { value: 'REVIEW', label: 'Ревью' },
+  { value: 'BLOCKED', label: 'Заблок.' },
+  { value: 'DONE', label: 'Готово' },
+];
 
 type Props = {
   projectKey: string;
@@ -36,6 +51,8 @@ type Props = {
   onRenameColumn?: (columnId: string, name: string) => void;
   onDeleteColumn?: (columnId: string) => void;
   onMoveColumn?: (columnId: string, dir: -1 | 1) => void;
+  /** Change the column's TYPE (status category) — cascades cards to it. */
+  onSetColumnCategory?: (columnId: string, category: StatusCategory) => void;
   /** Disable ← / → at the ends of the row. */
   isFirstColumn?: boolean;
   isLastColumn?: boolean;
@@ -82,6 +99,7 @@ function PlainColumn({
   onRenameColumn,
   onDeleteColumn,
   onMoveColumn,
+  onSetColumnCategory,
   isFirstColumn,
   isLastColumn,
 }: Props) {
@@ -168,6 +186,23 @@ function PlainColumn({
           </button>
         )}
         <div className="flex shrink-0 items-center gap-0.5">
+          {manageable && !editing && onSetColumnCategory ? (
+            <select
+              value={status}
+              onChange={(e) =>
+                columnId && onSetColumnCategory(columnId, e.target.value as StatusCategory)
+              }
+              className="mr-0.5 max-w-[5.5rem] rounded border border-border bg-background px-1 py-0.5 text-xs text-muted-foreground"
+              title="Тип колонки (категория) — изменит статус карточек в ней"
+              aria-label="Тип колонки"
+            >
+              {COLUMN_TYPE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          ) : null}
           {manageable && !editing ? (
             <>
               <button
