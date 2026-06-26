@@ -37,6 +37,7 @@ import {
 } from '@/actions/board';
 import type { StatusCategory } from '@giper/db';
 import { useT } from '@/lib/useT';
+import { cn } from '@giper/ui/cn';
 import { isClosing, statusCategory } from '@/lib/status/category';
 import { KanbanCard } from './KanbanCard';
 import { KanbanColumn } from './KanbanColumn';
@@ -87,19 +88,26 @@ type Props = {
 type DropTarget = { status: Status; laneKey: string; subColumnId?: string; columnId?: string };
 
 /**
- * Collision routing: a swimlane drag (active.data.type==='lane') only considers
- * lane droppables; a card drag only considers the rest. This keeps the large
- * lane droppable from stealing card drops and vice-versa, so the existing card
- * DnD behaves exactly as before.
+ * Collision routing: each drag kind only sees its own droppables, so the large
+ * lane/column-reorder droppables never steal a card drop and vice-versa, and the
+ * existing card DnD behaves exactly as before. Three kinds:
+ *   - lane reorder    (active.data.type==='lane')    → lane droppables only
+ *   - column reorder  (active.data.type==='colhead') → column-head droppables only
+ *   - card move       (anything else)                → all the rest
  */
 const boardCollision: CollisionDetection = (args) => {
-  const isLane = args.active.data.current?.type === 'lane';
-  const droppableContainers = args.droppableContainers.filter((c) =>
-    isLane ? c.data.current?.type === 'lane' : c.data.current?.type !== 'lane',
-  );
-  return isLane
-    ? closestCenter({ ...args, droppableContainers })
-    : rectIntersection({ ...args, droppableContainers });
+  const kind = args.active.data.current?.type;
+  if (kind === 'lane' || kind === 'colhead') {
+    const droppableContainers = args.droppableContainers.filter(
+      (c) => c.data.current?.type === kind,
+    );
+    return closestCenter({ ...args, droppableContainers });
+  }
+  const droppableContainers = args.droppableContainers.filter((c) => {
+    const t = c.data.current?.type;
+    return t !== 'lane' && t !== 'colhead';
+  });
+  return rectIntersection({ ...args, droppableContainers });
 };
 
 export function KanbanBoard({
@@ -118,6 +126,7 @@ export function KanbanBoard({
   const [tasks, setTasks] = useState<BoardTask[]>(initialTasks);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [activeLaneId, setActiveLaneId] = useState<string | null>(null);
+  const [activeColumnId, setActiveColumnId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [, startTransition] = useTransition();
 
@@ -240,6 +249,10 @@ export function KanbanBoard({
       setActiveLaneId(String(e.active.id).replace(/^lane-/, ''));
       return;
     }
+    if (e.active.data.current?.type === 'colhead') {
+      setActiveColumnId(String(e.active.id).replace(/^colhead-/, ''));
+      return;
+    }
     setActiveId(String(e.active.id));
   }
 
@@ -269,6 +282,32 @@ export function KanbanBoard({
           setLaneOrder(prevOrder);
           setError(res.error.message);
         }
+      });
+      return;
+    }
+
+    // Column reorder — drag a free-form column head onto another (routed by
+    // boardCollision to `colhead` droppables only). Mirrors the ←/→ buttons'
+    // reorderBoardColumnsAction; refreshes from the server (no optimistic state,
+    // since `columns` is a prop).
+    if (active.data.current?.type === 'colhead') {
+      setActiveColumnId(null);
+      if (!over) return;
+      const fromId = String(active.id).replace(/^colhead-/, '');
+      const overId = String(over.id);
+      const toId = overId.startsWith('coldrop-')
+        ? overId.slice('coldrop-'.length)
+        : overId.replace(/^colhead-/, '');
+      if (!toId || toId === fromId) return;
+      const ids = columns.map((c) => c.id);
+      const fromIdx = ids.indexOf(fromId);
+      const toIdx = ids.indexOf(toId);
+      if (fromIdx < 0 || toIdx < 0) return;
+      const next = arrayMove(ids, fromIdx, toIdx);
+      startTransition(async () => {
+        const res = await reorderBoardColumnsAction(projectId, next);
+        if (res.ok) router.refresh();
+        else setError(res.error.message);
       });
       return;
     }
@@ -571,6 +610,7 @@ export function KanbanBoard({
     tasks.filter((t) => (t.swimlaneId ?? NO_LANE) === laneId).length;
 
   const activeLane = activeLaneId ? swimlanes.find((s) => s.id === activeLaneId) ?? null : null;
+  const activeColumn = activeColumnId ? columns.find((c) => c.id === activeColumnId) ?? null : null;
 
   return (
     <div className="flex flex-col gap-2">
@@ -587,6 +627,7 @@ export function KanbanBoard({
         onDragCancel={() => {
           setActiveId(null);
           setActiveLaneId(null);
+          setActiveColumnId(null);
         }}
       >
         {hasLanes ? (
@@ -619,27 +660,41 @@ export function KanbanBoard({
         ) : (
           <div className="flex flex-col gap-3">
             <div className="flex gap-3 overflow-x-auto pb-4">
-              {columns.map((col, i) => (
-                <KanbanColumn
-                  key={col.id}
-                  projectKey={projectKey}
-                  status={col.status}
-                  name={col.name}
-                  columnId={col.id}
-                  useColumnId={freeFormColumns}
-                  canManageColumns={canManageColumns}
-                  onRenameColumn={onRenameColumn}
-                  onDeleteColumn={onDeleteColumn}
-                  onMoveColumn={onMoveColumn}
-                  onSetColumnCategory={onSetColumnCategory}
-                  isFirstColumn={i === 0}
-                  isLastColumn={i === columns.length - 1}
-                  tasks={byColumn.get(col.id) ?? []}
-                  cap={useCap ? COLUMN_CAP : undefined}
-                  wipLimit={col.wipLimit}
-                  subColumns={col.subColumns}
-                />
-              ))}
+              {columns.map((col, i) => {
+                const column = (dragHandle?: React.ReactNode) => (
+                  <KanbanColumn
+                    projectKey={projectKey}
+                    status={col.status}
+                    name={col.name}
+                    columnId={col.id}
+                    useColumnId={freeFormColumns}
+                    canManageColumns={canManageColumns}
+                    onRenameColumn={onRenameColumn}
+                    onDeleteColumn={onDeleteColumn}
+                    onMoveColumn={onMoveColumn}
+                    onSetColumnCategory={onSetColumnCategory}
+                    dragHandle={dragHandle}
+                    isFirstColumn={i === 0}
+                    isLastColumn={i === columns.length - 1}
+                    tasks={byColumn.get(col.id) ?? []}
+                    cap={useCap ? COLUMN_CAP : undefined}
+                    wipLimit={col.wipLimit}
+                    subColumns={col.subColumns}
+                  />
+                );
+                // Free-form + manageable: wrap in a drag shell so the column can be
+                // dragged to reorder (in addition to the ←/→ buttons). Otherwise
+                // render the column directly — the non-free-form path is unchanged.
+                return canManageColumns && freeFormColumns ? (
+                  <ColumnDragShell key={col.id} columnId={col.id}>
+                    {column}
+                  </ColumnDragShell>
+                ) : (
+                  <div key={col.id} className="shrink-0">
+                    {column()}
+                  </div>
+                );
+              })}
               {canManageColumns ? <AddColumnControl onAdd={onAddColumn} /> : null}
             </div>
             {canManage ? <AddLaneControl onAdd={onAddLane} /> : null}
@@ -653,9 +708,62 @@ export function KanbanBoard({
               <GripVertical className="h-4 w-4 text-muted-foreground" />
               {activeLane.name}
             </div>
+          ) : activeColumn ? (
+            <div className="flex items-center gap-2 rounded-md border border-border bg-background px-3 py-1.5 text-sm font-semibold shadow-lg">
+              <GripVertical className="h-4 w-4 text-muted-foreground" />
+              {activeColumn.name}
+            </div>
           ) : null}
         </DragOverlay>
       </DndContext>
+    </div>
+  );
+}
+
+/**
+ * Wraps a free-form column so it can be dragged to reorder (in addition to the
+ * ←/→ buttons). Owns the column-reorder droppable (`coldrop-<id>`, type
+ * `colhead`) and supplies a drag handle (`colhead-<id>`) the column renders in
+ * its header. The distinct `colhead` type keeps card and lane DnD untouched
+ * (see boardCollision).
+ */
+function ColumnDragShell({
+  columnId,
+  children,
+}: {
+  columnId: string;
+  children: (dragHandle: ReactNode) => ReactNode;
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id: `coldrop-${columnId}`, data: { type: 'colhead' } });
+  const {
+    attributes,
+    listeners,
+    setNodeRef: setDragRef,
+    isDragging,
+  } = useDraggable({ id: `colhead-${columnId}`, data: { type: 'colhead' } });
+  const handle = (
+    <button
+      ref={setDragRef}
+      type="button"
+      {...attributes}
+      {...listeners}
+      className="shrink-0 cursor-grab touch-none rounded p-0.5 text-muted-foreground hover:bg-muted active:cursor-grabbing"
+      title="Перетащить колонку"
+      aria-label="Перетащить колонку"
+    >
+      <GripVertical className="h-3.5 w-3.5" />
+    </button>
+  );
+  return (
+    <div
+      ref={setNodeRef}
+      className={cn(
+        'shrink-0 rounded-md',
+        isDragging ? 'opacity-50' : '',
+        isOver ? 'ring-2 ring-primary/40' : '',
+      )}
+    >
+      {children(handle)}
     </div>
   );
 }
