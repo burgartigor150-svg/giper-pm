@@ -128,6 +128,7 @@ export default async function CalendarPage({
         isAllDay: true,
         location: true,
         createdById: true,
+        externalSource: true,
       },
     }),
   ]);

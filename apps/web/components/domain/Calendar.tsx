@@ -16,9 +16,14 @@ import {
   CalendarIcon,
   CalendarDays,
   CalendarRange,
+  Clock,
   Filter,
+  MapPin,
+  RefreshCw,
+  Video,
   X,
   Trash2,
+  type LucideIcon,
 } from 'lucide-react';
 import type { TaskStatus } from '@giper/db';
 import { isCanceled, isClosing, isTerminal, statusCategory } from '@/lib/status/category';
@@ -69,7 +74,52 @@ export type CalendarEventItem = {
   /** "meeting:<id>" marker for call-type events, otherwise location text. */
   location: string | null;
   createdById: string;
+  /** 'bitrix24' for events mirrored from a user's B24 calendar (read-only). */
+  externalSource?: string | null;
 };
+
+/** The three calendar-event kinds the colour system distinguishes. Task
+ *  deadlines are a separate visual family (cards with a priority bar). */
+type EventKind = 'call' | 'bitrix' | 'event';
+
+/**
+ * Type → palette + glyph for chips, legend and the dialog. Each kind pairs a
+ * colour with a distinct Lucide icon so it's never colour-only (MASTER §10/§11).
+ */
+const EVENT_KIND: Record<
+  EventKind,
+  { label: string; dot: string; chip: string; Icon: LucideIcon }
+> = {
+  call: {
+    label: 'Созвон',
+    dot: 'bg-blue-500',
+    chip: 'bg-blue-500/12 text-blue-700 hover:bg-blue-500/20 dark:text-blue-300',
+    Icon: Video,
+  },
+  bitrix: {
+    label: 'Событие Bitrix24',
+    dot: 'bg-violet-500',
+    chip: 'bg-violet-500/12 text-violet-700 hover:bg-violet-500/20 dark:text-violet-300',
+    Icon: RefreshCw,
+  },
+  event: {
+    label: 'Личное событие',
+    dot: 'bg-emerald-500',
+    chip: 'bg-emerald-500/12 text-emerald-700 hover:bg-emerald-500/20 dark:text-emerald-300',
+    Icon: CalendarIcon,
+  },
+};
+
+/**
+ * Classify a calendar event into its colour kind. B24-mirrored events are
+ * checked first so a coincidental `meeting:`-prefixed LOCATION from Bitrix24
+ * can't be mistaken for a native call (which would render a dead call-link).
+ */
+function eventKind(ev: CalendarEventItem): EventKind {
+  if (ev.externalSource === 'bitrix24') return 'bitrix';
+  if (ev.location && ev.location.startsWith('meeting:')) return 'call';
+  return 'event';
+}
 
 type Filters = {
   scope?: 'mine' | 'team';
@@ -641,6 +691,9 @@ export function Calendar({
           </div>
         ) : null}
 
+        {/* Legend — colour key for the event types on the grid. */}
+        <CalendarLegend />
+
         {/* Layout: grid + sidebar */}
         <div className="grid gap-3 lg:grid-cols-[1fr_280px]">
           <div>
@@ -715,6 +768,37 @@ export function Calendar({
 }
 
 // ---------------- subcomponents ----------------
+
+/** Colour key shown above the grid: task deadlines vs the three event kinds. */
+function CalendarLegend() {
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
+      <span className="inline-flex items-center gap-1.5">
+        <span
+          className="inline-flex h-4 w-5 items-center overflow-hidden rounded-sm bg-muted/70"
+          aria-hidden="true"
+        >
+          <span className="h-full w-1 bg-amber-500" />
+        </span>
+        Дедлайн задачи
+      </span>
+      {(['call', 'bitrix', 'event'] as const).map((kind) => {
+        const { Icon, chip, label } = EVENT_KIND[kind];
+        return (
+          <span key={kind} className="inline-flex items-center gap-1.5">
+            <span
+              className={`inline-flex size-4 items-center justify-center rounded-sm ${chip}`}
+              aria-hidden="true"
+            >
+              <Icon className="size-2.5" />
+            </span>
+            {label}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
 
 function ViewBtn({
   active,
@@ -989,7 +1073,12 @@ function DayCell({
           />
         ))}
         {events.length > 0 ? (
-          <span className="ml-0.5 inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden />
+          // Neutral marker: kind isn't legible at this size, so don't assert
+          // a colour. Tapping the day opens the popover with per-kind chips.
+          <span
+            className="ml-0.5 inline-flex h-1.5 w-1.5 rounded-full bg-muted-foreground/60"
+            aria-hidden
+          />
         ) : null}
       </div>
       <div className="hidden min-h-0 flex-col gap-0.5 md:flex">
@@ -1030,7 +1119,9 @@ function EventChip({
   currentUserId: string;
 }) {
   const [open, setOpen] = useState(false);
-  const isCall = !!ev.location && ev.location.startsWith('meeting:');
+  const kind = eventKind(ev);
+  const palette = EVENT_KIND[kind];
+  const Icon = palette.Icon;
   const time = ev.isAllDay
     ? null
     : new Date(ev.startAt).toLocaleTimeString('ru-RU', {
@@ -1043,15 +1134,17 @@ function EventChip({
         type="button"
         onClick={() => setOpen(true)}
         className={[
-          'flex w-full items-center gap-1 truncate rounded px-1.5 py-0.5 text-left text-[10px] transition-colors',
-          isCall
-            ? 'bg-blue-500/15 text-blue-700 hover:bg-blue-500/25 dark:text-blue-300'
-            : 'bg-emerald-500/15 text-emerald-700 hover:bg-emerald-500/25 dark:text-emerald-300',
+          'flex w-full items-center gap-1 truncate rounded px-1.5 py-0.5 text-left text-[10px] transition-colors duration-150',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          palette.chip,
         ].join(' ')}
-        title={ev.title}
+        title={`${palette.label}: ${ev.title}`}
       >
+        {/* Icon (not just colour) carries the kind — MASTER §10/§11. */}
+        <Icon className="size-2.5 shrink-0" aria-hidden="true" />
         {time ? <span className="font-mono tabular-nums">{time}</span> : null}
         <span className="truncate">{ev.title}</span>
+        <span className="sr-only">· {palette.label}</span>
       </button>
       {open ? (
         <EventDetailDialog
@@ -1080,9 +1173,14 @@ function EventDetailDialog({
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const isCall = !!ev.location && ev.location.startsWith('meeting:');
+  const kind = eventKind(ev);
+  const KindIcon = EVENT_KIND[kind].Icon;
+  const isBitrix = kind === 'bitrix';
+  const isCall = kind === 'call';
   const meetingId = isCall ? ev.location!.slice('meeting:'.length) : null;
-  const isCreator = ev.createdById === currentUserId;
+  // Mirrored B24 events are read-only here (edited in Bitrix24) — even though
+  // createdById matches, deleting would just be undone by the next sync.
+  const canDelete = ev.createdById === currentUserId && !isBitrix;
 
   const when = ev.isAllDay
     ? `${new Date(ev.startAt).toLocaleDateString('ru-RU', { day: '2-digit', month: 'long' })} · весь день`
@@ -1133,41 +1231,63 @@ function EventDetailDialog({
       />
       <div className="relative z-10 w-full max-w-sm rounded-lg border border-border bg-background p-4 shadow-lg">
         <div className="mb-3 flex items-start justify-between gap-2">
-          <h3 className="text-base font-semibold">{ev.title}</h3>
+          <div className="flex min-w-0 items-center gap-2">
+            <span
+              className={`inline-flex size-5 shrink-0 items-center justify-center rounded ${EVENT_KIND[kind].chip}`}
+              aria-hidden="true"
+            >
+              <KindIcon className="size-3" />
+            </span>
+            <h3 className="truncate text-base font-semibold">{ev.title}</h3>
+            <span className="sr-only">· {EVENT_KIND[kind].label}</span>
+          </div>
           <button
             type="button"
             onClick={onClose}
             aria-label="Закрыть"
-            className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <X className="size-4" />
           </button>
         </div>
-        <div className="space-y-1 text-sm text-muted-foreground">
-          <div>{when}</div>
+        <div className="space-y-1.5 text-sm text-muted-foreground">
+          <div className="flex items-center gap-1.5">
+            <Clock className="size-3.5 shrink-0" aria-hidden="true" />
+            <span>{when}</span>
+          </div>
           {isCall ? (
             <Link
               href={`/meetings/${meetingId}`}
-              className="inline-block text-blue-600 hover:underline dark:text-blue-400"
+              className="inline-flex items-center gap-1.5 text-blue-600 transition-colors hover:underline dark:text-blue-400"
             >
+              <Video className="size-3.5 shrink-0" aria-hidden="true" />
               Перейти к звонку
             </Link>
           ) : ev.location ? (
-            <div>{ev.location}</div>
+            <div className="flex items-center gap-1.5">
+              <MapPin className="size-3.5 shrink-0" aria-hidden="true" />
+              <span className="truncate">{ev.location}</span>
+            </div>
+          ) : null}
+          {isBitrix ? (
+            <div className="inline-flex items-center gap-1.5 rounded-full bg-violet-500/12 px-2 py-0.5 text-xs font-medium text-violet-700 dark:text-violet-300">
+              <RefreshCw className="size-3 shrink-0" aria-hidden="true" />
+              Из Bitrix24 · только просмотр
+            </div>
           ) : null}
         </div>
         <div className="mt-4 flex justify-end">
-          {isCreator ? (
+          {canDelete ? (
             <button
               type="button"
               onClick={del}
               disabled={pending}
-              className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm text-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
             >
               <Trash2 className="size-3.5" aria-hidden="true" />
               {pending ? 'Удаляю…' : 'Удалить'}
             </button>
-          ) : (
+          ) : isBitrix ? null : (
             <p className="text-xs text-muted-foreground">
               Удалить может только создатель
             </p>
@@ -1484,7 +1604,15 @@ function UpcomingSidebar({
             return (
               <li key={key} className="flex flex-col gap-1">
                 <div className="flex items-baseline justify-between text-xs uppercase">
-                  <span className={isToday ? 'font-semibold text-foreground' : 'text-muted-foreground'}>
+                  <span
+                    className={
+                      isOverdue
+                        ? 'font-semibold text-destructive'
+                        : isToday
+                          ? 'font-semibold text-primary'
+                          : 'text-muted-foreground'
+                    }
+                  >
                     {dayLabel}
                   </span>
                   <span className="text-muted-foreground">{list.length}</span>

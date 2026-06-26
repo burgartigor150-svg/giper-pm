@@ -198,4 +198,26 @@ describe('deleteCalendarEventAction', () => {
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error.code).toBe('NOT_FOUND');
   });
+
+  it('cannot delete a mirrored Bitrix24 event even as its createdBy owner', async () => {
+    // B24 calendar mirrors set createdById = the local user, so the creator
+    // check alone would pass — the externalSource guard must block it.
+    const u = await makeUser();
+    mockMe.id = u.id;
+    const mirror = await prisma.calendarEvent.create({
+      data: {
+        title: 'B24 mirror',
+        startAt: new Date('2026-05-12T09:00:00.000Z'),
+        endAt: new Date('2026-05-12T10:00:00.000Z'),
+        createdById: u.id,
+        externalSource: 'bitrix24',
+        externalId: `bxcal:${u.id}:42`,
+      },
+    });
+    const r = await deleteCalendarEventAction(mirror.id);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error.code).toBe('FORBIDDEN');
+    const after = await prisma.calendarEvent.findUnique({ where: { id: mirror.id } });
+    expect(after).not.toBeNull();
+  });
 });
