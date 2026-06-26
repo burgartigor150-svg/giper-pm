@@ -32,6 +32,11 @@ const TABLES_IN_DELETE_ORDER = [
   'UserCustomRole',
   'ProjectMemberCustomRole',
   'CustomRole',
+  // User groups (members before the group; both before User/Project). These
+  // were previously un-reset, so groups accumulated across local runs and the
+  // unique-name assertions in user-groups.test.ts went red on a re-run.
+  'UserGroupMember',
+  'UserGroup',
   // Saved filter presets (FK → User + Project).
   'SavedFilter',
   // CRM (Lead → Contact/Deal SetNull; Deal → Pipeline/Stage/Contact) + Sprint + Space.

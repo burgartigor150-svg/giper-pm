@@ -28,6 +28,7 @@ import {
 } from '@/lib/savedFilters/listSavedFiltersForView';
 import { listVersionsForProject } from '@/lib/versions/listVersionsForProject';
 import { listComponentsForProject } from '@/lib/components/listComponentsForProject';
+import { getSprints } from '@/lib/sprints';
 import { SortHeader } from '@/components/domain/SortHeader';
 import { Pagination } from '@/components/domain/Pagination';
 import { TaskStatusBadge } from '@/components/domain/TaskStatusBadge';
@@ -81,13 +82,14 @@ export default async function ProjectTasksListPage({
     ? parsed.data
     : taskListFilterSchema.parse({});
 
-  const [result, availableTags, presets, projCaps, versions, components] = await Promise.all([
+  const [result, availableTags, presets, projCaps, versions, components, sprints] = await Promise.all([
     listTasksForProject(projectKey, filter, { id: me.id, role: me.role }),
     listTagsForProject(project.id),
     listSavedFiltersForView(project.id, 'LIST', me.id),
     getEffectiveCapsForProject({ id: me.id, role: me.role }, project.id),
     listVersionsForProject(project.id),
     listComponentsForProject(project.id),
+    getSprints(project.id),
   ]);
   const canShare = canEditProject(
     { id: me.id, role: me.role },
@@ -298,7 +300,14 @@ export default async function ProjectTasksListPage({
         <Pagination page={result.page} pageCount={result.pageCount} />
       </Card>
       {canBulk ? (
-        <BulkTaskActionBar members={members.map((m) => ({ id: m.id, name: m.name }))} />
+        <BulkTaskActionBar
+          members={members.map((m) => ({ id: m.id, name: m.name }))}
+          tags={availableTags.map((tg) => ({ id: tg.id, name: tg.name, color: tg.color }))}
+          // Only PLANNED/ACTIVE sprints are sensible bulk-assign targets.
+          sprints={sprints
+            .filter((s) => s.status !== 'CLOSED')
+            .map((s) => ({ id: s.id, name: s.name }))}
+        />
       ) : null}
       </TaskSelectionProvider>
     </div>

@@ -17,7 +17,7 @@ vi.mock('@/lib/auth', () => ({
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }));
 
 import { prisma } from '@giper/db';
-import { bulkUpdateTasksAction } from '@/actions/bulkTasks';
+import { bulkUpdateTasksAction, bulkDeleteTasksAction } from '@/actions/bulkTasks';
 import { makeUser, makeProject, addMember, makeTask } from './helpers/factories';
 
 function as(user: { id: string; role: 'ADMIN' | 'PM' | 'MEMBER' | 'VIEWER' }) {
@@ -130,5 +130,166 @@ describe('bulkUpdateTasksAction', () => {
     as(admin);
     const res = await bulkUpdateTasksAction([t.id, t.id, t.id], { kind: 'status', status: 'DONE' });
     expect(res.ok && res.data.succeeded).toBe(1); // counted once
+  });
+});
+
+describe('bulkUpdateTasksAction — tags & sprints (Jira-port #2 v2)', () => {
+  it('bulk add-tag assigns a project tag to many tasks (idempotent)', async () => {
+    const admin = await makeUser({ role: 'ADMIN' });
+    const p = await makeProject({ ownerId: admin.id, key: 'BLKTAG' });
+    const tag = await prisma.tag.create({ data: { projectId: p.id, name: 'Backend', slug: 'backend' } });
+    const t1 = await makeTask({ projectId: p.id, creatorId: admin.id });
+    const t2 = await makeTask({ projectId: p.id, creatorId: admin.id });
+    as(admin);
+
+    const res = await bulkUpdateTasksAction([t1.id, t2.id], { kind: 'addTag', tagId: tag.id });
+    expect(res.ok && res.data.succeeded).toBe(2);
+    expect(await prisma.taskTag.count({ where: { tagId: tag.id } })).toBe(2);
+
+    // Re-adding an existing link is a no-op success (no duplicate rows).
+    const again = await bulkUpdateTasksAction([t1.id], { kind: 'addTag', tagId: tag.id });
+    expect(again.ok && again.data.succeeded).toBe(1);
+    expect(await prisma.taskTag.count({ where: { tagId: tag.id } })).toBe(2);
+  });
+
+  it('a tag from another project is skipped per-item (cross-project hardening)', async () => {
+    const admin = await makeUser({ role: 'ADMIN' });
+    const p = await makeProject({ ownerId: admin.id, key: 'BLKTGA' });
+    const other = await makeProject({ ownerId: admin.id, key: 'BLKTGB' });
+    const foreignTag = await prisma.tag.create({ data: { projectId: other.id, name: 'Foreign', slug: 'foreign' } });
+    const t = await makeTask({ projectId: p.id, creatorId: admin.id });
+    as(admin);
+
+    const res = await bulkUpdateTasksAction([t.id], { kind: 'addTag', tagId: foreignTag.id });
+    expect(res.ok && res.data.failed).toBe(1);
+    expect(await prisma.taskTag.count({ where: { taskId: t.id } })).toBe(0);
+  });
+
+  it('PER-ITEM authz for add-tag: a non-stakeholder member is skipped', async () => {
+    const admin = await makeUser({ role: 'ADMIN' });
+    const p = await makeProject({ ownerId: admin.id, key: 'BLKTGC' });
+    const member = await makeUser({ role: 'MEMBER' });
+    await addMember(p.id, member.id, 'CONTRIBUTOR');
+    const tag = await prisma.tag.create({ data: { projectId: p.id, name: 'X', slug: 'x' } });
+    const mine = await makeTask({ projectId: p.id, creatorId: admin.id, assigneeId: member.id });
+    const notMine = await makeTask({ projectId: p.id, creatorId: admin.id });
+    as(member);
+
+    const res = await bulkUpdateTasksAction([mine.id, notMine.id], { kind: 'addTag', tagId: tag.id });
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.data.succeeded).toBe(1);
+      expect(res.data.failed).toBe(1);
+    }
+    expect(await prisma.taskTag.count({ where: { taskId: mine.id } })).toBe(1);
+    expect(await prisma.taskTag.count({ where: { taskId: notMine.id } })).toBe(0);
+  });
+
+  it('bulk sprint sets and clears the sprint', async () => {
+    const admin = await makeUser({ role: 'ADMIN' });
+    const p = await makeProject({ ownerId: admin.id, key: 'BLKSPR' });
+    const sprint = await prisma.sprint.create({ data: { projectId: p.id, name: 'S1' } });
+    const t1 = await makeTask({ projectId: p.id, creatorId: admin.id });
+    const t2 = await makeTask({ projectId: p.id, creatorId: admin.id });
+    as(admin);
+
+    const set = await bulkUpdateTasksAction([t1.id, t2.id], { kind: 'sprint', sprintId: sprint.id });
+    expect(set.ok && set.data.succeeded).toBe(2);
+    const inSprint = await prisma.task.findMany({
+      where: { id: { in: [t1.id, t2.id] } },
+      select: { sprintId: true },
+    });
+    expect(inSprint.every((t) => t.sprintId === sprint.id)).toBe(true);
+
+    const clear = await bulkUpdateTasksAction([t1.id], { kind: 'sprint', sprintId: null });
+    expect(clear.ok).toBe(true);
+    expect((await prisma.task.findUniqueOrThrow({ where: { id: t1.id } })).sprintId).toBeNull();
+  });
+
+  it('a sprint from another project is skipped per-item', async () => {
+    const admin = await makeUser({ role: 'ADMIN' });
+    const p = await makeProject({ ownerId: admin.id, key: 'BLKSPA' });
+    const other = await makeProject({ ownerId: admin.id, key: 'BLKSPB' });
+    const foreignSprint = await prisma.sprint.create({ data: { projectId: other.id, name: 'Foreign' } });
+    const t = await makeTask({ projectId: p.id, creatorId: admin.id });
+    as(admin);
+
+    const res = await bulkUpdateTasksAction([t.id], { kind: 'sprint', sprintId: foreignSprint.id });
+    expect(res.ok && res.data.failed).toBe(1);
+    expect((await prisma.task.findUniqueOrThrow({ where: { id: t.id } })).sprintId).toBeNull();
+  });
+});
+
+describe('bulkDeleteTasksAction', () => {
+  it('admin bulk-deletes many tasks', async () => {
+    const admin = await makeUser({ role: 'ADMIN' });
+    const p = await makeProject({ ownerId: admin.id, key: 'BLKDEL' });
+    const t1 = await makeTask({ projectId: p.id, creatorId: admin.id });
+    const t2 = await makeTask({ projectId: p.id, creatorId: admin.id });
+    as(admin);
+
+    const res = await bulkDeleteTasksAction([t1.id, t2.id]);
+    expect(res.ok && res.data.succeeded).toBe(2);
+    expect(await prisma.task.count({ where: { id: { in: [t1.id, t2.id] } } })).toBe(0);
+  });
+
+  it('PER-ITEM: a task the caller cannot delete is skipped, not aborted', async () => {
+    const admin = await makeUser({ role: 'ADMIN' });
+    const p = await makeProject({ ownerId: admin.id, key: 'BLKDLB' });
+    const member = await makeUser({ role: 'MEMBER' });
+    await addMember(p.id, member.id, 'CONTRIBUTOR');
+    // A contributor can't delete even tasks they created (delete = LEAD/owner/admin).
+    const a = await makeTask({ projectId: p.id, creatorId: member.id });
+    const b = await makeTask({ projectId: p.id, creatorId: admin.id });
+    as(member);
+
+    const res = await bulkDeleteTasksAction([a.id, b.id]);
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.data.failed).toBe(2);
+    expect(await prisma.task.count({ where: { id: { in: [a.id, b.id] } } })).toBe(2); // both survive
+  });
+
+  it('a task with subtasks is counted failed; the batch continues', async () => {
+    const admin = await makeUser({ role: 'ADMIN' });
+    const p = await makeProject({ ownerId: admin.id, key: 'BLKDLC' });
+    const parent = await makeTask({ projectId: p.id, creatorId: admin.id });
+    const child = await makeTask({ projectId: p.id, creatorId: admin.id });
+    await prisma.task.update({ where: { id: child.id }, data: { parentId: parent.id } });
+    const lone = await makeTask({ projectId: p.id, creatorId: admin.id });
+    as(admin);
+
+    const res = await bulkDeleteTasksAction([parent.id, lone.id]);
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.data.succeeded).toBe(1); // lone deleted
+      expect(res.data.failed).toBe(1); // parent blocked by its subtask
+    }
+    expect(await prisma.task.count({ where: { id: parent.id } })).toBe(1); // parent survived
+    expect(await prisma.task.count({ where: { id: lone.id } })).toBe(0);
+  });
+
+  it('externally-mirrored tasks cannot be bulk-deleted', async () => {
+    const admin = await makeUser({ role: 'ADMIN' });
+    const p = await makeProject({ ownerId: admin.id, key: 'BLKDLD' });
+    const mirror = await makeTask({ projectId: p.id, creatorId: admin.id });
+    await prisma.task.update({
+      where: { id: mirror.id },
+      data: { externalSource: 'bitrix24', externalId: 'X1' },
+    });
+    as(admin);
+
+    const res = await bulkDeleteTasksAction([mirror.id]);
+    expect(res.ok && res.data.failed).toBe(1);
+    expect(await prisma.task.count({ where: { id: mirror.id } })).toBe(1);
+  });
+
+  it('validates empty and oversize batches', async () => {
+    const admin = await makeUser({ role: 'ADMIN' });
+    await makeProject({ ownerId: admin.id, key: 'BLKDLE' });
+    as(admin);
+    expect((await bulkDeleteTasksAction([])).ok).toBe(false);
+    expect(
+      (await bulkDeleteTasksAction(Array.from({ length: 201 }, (_, i) => `id${i}`))).ok,
+    ).toBe(false);
   });
 });
