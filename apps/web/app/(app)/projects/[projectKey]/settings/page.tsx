@@ -71,6 +71,12 @@ export default async function ProjectSettingsPage({
   }
 
   const boardColumns = await getBoardColumns(project.id);
+  // Column-keyed automation triggers only fire on the free-form board path, so
+  // the per-column trigger mode is offered only when free-form columns are on.
+  const freeFormProject = await prisma.project.findUnique({
+    where: { id: project.id },
+    select: { freeFormColumnsEnabled: true },
+  });
   const boardSwimlanes = await getBoardSwimlanes(project.id);
   const customFields = await getCustomFields(project.id);
   const components = await listComponentsForProject(project.id);
@@ -212,7 +218,8 @@ export default async function ProjectSettingsPage({
           <AutomationsForm
             projectId={project.id}
             initial={automations}
-            columns={boardColumns.map((c) => ({ status: c.status, name: c.name }))}
+            columns={boardColumns.map((c) => ({ id: c.id, status: c.status, name: c.name }))}
+            freeFormEnabled={!!freeFormProject?.freeFormColumnsEnabled}
             swimlanes={boardSwimlanes.map((s) => ({ id: s.id, name: s.name }))}
             members={project.members.map((m) => ({
               id: m.user.id,

@@ -30,6 +30,8 @@ type Row = {
   enabled: boolean;
   triggerType: 'CARD_ENTERS_COLUMN' | 'TASK_CREATED';
   triggerStatus: string;
+  /** Non-empty = column-keyed trigger (fires only on that exact board column). */
+  triggerColumnId: string;
   actionType: AutomationActionKind;
   actionValue: string;
 };
@@ -37,8 +39,10 @@ type Row = {
 type Props = {
   projectId: string;
   initial: AutomationView[];
-  /** Board columns (status → label) for the trigger picker. */
-  columns: { status: string; name: string }[];
+  /** Board columns for the trigger picker. Synthesized defaults have `default-*` ids. */
+  columns: { id: string; status: string; name: string }[];
+  /** Whether free-form columns are on — gates the per-column trigger mode. */
+  freeFormEnabled: boolean;
   /** Swimlanes for the SET_SWIMLANE action. */
   swimlanes: { id: string; name: string }[];
   /** Project members for the SET_ASSIGNEE action. */
@@ -49,12 +53,27 @@ type Props = {
  * Manage a project's automation rules: "when a card enters column X → do Y".
  * Reconciles the full set on save.
  */
-export function AutomationsForm({ projectId, initial, columns, swimlanes, members }: Props) {
+export function AutomationsForm({ projectId, initial, columns, freeFormEnabled, swimlanes, members }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const firstStatus = columns[0]?.status ?? 'DONE';
+  // Category options: one entry per distinct status (back-compat with the
+  // status-keyed picker; in 1:1 mode this is just the default columns).
+  const categoryOptions = (() => {
+    const seen = new Set<string>();
+    const out: { status: string; name: string }[] = [];
+    for (const c of columns) {
+      if (seen.has(c.status)) continue;
+      seen.add(c.status);
+      out.push({ status: c.status, name: c.name });
+    }
+    return out;
+  })();
+  const firstStatus = categoryOptions[0]?.status ?? 'DONE';
+  // Real (materialized) columns — the only valid targets for a per-column rule.
+  const realColumns = columns.filter((c) => !c.id.startsWith('default-'));
+  const canUseColumnMode = freeFormEnabled && realColumns.length > 0;
   const [rows, setRows] = useState<Row[]>(() =>
     [...initial].map((r) => ({
       id: r.id,
@@ -62,6 +81,7 @@ export function AutomationsForm({ projectId, initial, columns, swimlanes, member
       enabled: r.enabled,
       triggerType: r.triggerType === 'TASK_CREATED' ? 'TASK_CREATED' : 'CARD_ENTERS_COLUMN',
       triggerStatus: r.triggerStatus || firstStatus,
+      triggerColumnId: r.triggerColumnId || '',
       actionType: (ACTION_KINDS as string[]).includes(r.actionType)
         ? (r.actionType as AutomationActionKind)
         : 'SET_PRIORITY',
@@ -80,6 +100,21 @@ export function AutomationsForm({ projectId, initial, columns, swimlanes, member
       setError('У каждого правила должно быть название');
       return;
     }
+    // A column-keyed rule whose column was deleted would be rejected server-side,
+    // and because the save is an all-or-nothing reconcile it would block EVERY
+    // edit (even to unrelated rules). Surface it here, before the round-trip, so
+    // the user knows which rule to fix (switch its trigger back to «категорию»).
+    if (
+      rows.some(
+        (r) =>
+          r.triggerType === 'CARD_ENTERS_COLUMN' &&
+          r.triggerColumnId &&
+          !realColumns.some((c) => c.id === r.triggerColumnId),
+      )
+    ) {
+      setError('Одно из правил ссылается на удалённую колонку — переключите его триггер на «категорию».');
+      return;
+    }
     startTransition(async () => {
       const payload: AutomationRuleInput[] = rows.map((r, i) => ({
         id: r.id,
@@ -87,6 +122,7 @@ export function AutomationsForm({ projectId, initial, columns, swimlanes, member
         enabled: r.enabled,
         triggerType: r.triggerType,
         triggerStatus: r.triggerStatus,
+        triggerColumnId: r.triggerType === 'CARD_ENTERS_COLUMN' ? r.triggerColumnId : '',
         actionType: r.actionType,
         actionValue: r.actionValue,
         order: i,
@@ -111,6 +147,7 @@ export function AutomationsForm({ projectId, initial, columns, swimlanes, member
         enabled: true,
         triggerType: 'CARD_ENTERS_COLUMN',
         triggerStatus: firstStatus,
+        triggerColumnId: '',
         actionType: 'SET_PRIORITY',
         actionValue: 'HIGH',
       },
@@ -175,18 +212,59 @@ export function AutomationsForm({ projectId, initial, columns, swimlanes, member
                   <option value="TASK_CREATED">создаётся задача</option>
                 </select>
                 {r.triggerType === 'CARD_ENTERS_COLUMN' ? (
-                  <select
-                    value={r.triggerStatus}
-                    onChange={(e) => patch(i, { triggerStatus: e.target.value })}
-                    disabled={pending}
-                    className={sel}
-                  >
-                    {columns.map((c) => (
-                      <option key={c.status} value={c.status}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
+                  <>
+                    {canUseColumnMode || r.triggerColumnId ? (
+                      <select
+                        value={r.triggerColumnId ? 'column' : 'category'}
+                        onChange={(e) =>
+                          patch(
+                            i,
+                            e.target.value === 'column'
+                              ? { triggerColumnId: realColumns[0]?.id ?? r.triggerColumnId }
+                              : { triggerColumnId: '' },
+                          )
+                        }
+                        disabled={pending}
+                        className={sel}
+                        aria-label="Тип триггера"
+                      >
+                        <option value="category">категорию</option>
+                        <option value="column">колонку</option>
+                      </select>
+                    ) : null}
+                    {r.triggerColumnId ? (
+                      <select
+                        value={r.triggerColumnId}
+                        onChange={(e) => patch(i, { triggerColumnId: e.target.value })}
+                        disabled={pending}
+                        className={sel}
+                        aria-label="Колонка-триггер"
+                      >
+                        {realColumns.some((c) => c.id === r.triggerColumnId) ? null : (
+                          <option value={r.triggerColumnId}>(колонка недоступна)</option>
+                        )}
+                        {realColumns.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <select
+                        value={r.triggerStatus}
+                        onChange={(e) => patch(i, { triggerStatus: e.target.value })}
+                        disabled={pending}
+                        className={sel}
+                        aria-label="Категория-триггер"
+                      >
+                        {categoryOptions.map((c) => (
+                          <option key={c.status} value={c.status}>
+                            {c.name}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </>
                 ) : null}
                 <span>→</span>
                 <select

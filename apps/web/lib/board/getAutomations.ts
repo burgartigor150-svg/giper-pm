@@ -6,8 +6,16 @@ export type AutomationView = {
   enabled: boolean;
   /** 'CARD_ENTERS_COLUMN' | 'TASK_CREATED'. */
   triggerType: string;
-  /** Column (status) whose entry fires the rule (CARD_ENTERS_COLUMN only). */
+  /**
+   * Status category whose entry fires the rule (CARD_ENTERS_COLUMN, category
+   * mode). Empty when the rule is column-keyed.
+   */
   triggerStatus: string;
+  /**
+   * Specific board column whose entry fires the rule (CARD_ENTERS_COLUMN,
+   * column mode). Empty when the rule is category-keyed.
+   */
+  triggerColumnId: string;
   actionType: string;
   /** userId / priority / swimlaneId, flattened from actionConfig. */
   actionValue: string;
@@ -25,7 +33,7 @@ export async function getAutomations(projectId: string): Promise<AutomationView[
       orderBy: { order: 'asc' },
     });
     return rows.map((r) => {
-      const trig = (r.triggerConfig ?? {}) as { status?: string };
+      const trig = (r.triggerConfig ?? {}) as { status?: string; columnId?: string };
       const cfg = (r.actionConfig ?? {}) as Record<string, unknown>;
       let actionValue = '';
       if (r.actionType === 'SET_ASSIGNEE' && typeof cfg.userId === 'string') {
@@ -41,6 +49,7 @@ export async function getAutomations(projectId: string): Promise<AutomationView[
         enabled: r.enabled,
         triggerType: r.trigger,
         triggerStatus: trig.status ?? '',
+        triggerColumnId: trig.columnId ?? '',
         actionType: r.actionType,
         actionValue,
         order: r.order,
