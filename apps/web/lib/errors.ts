@@ -5,6 +5,7 @@ export type DomainErrorCode =
   | 'VALIDATION'
   | 'CONFLICT'
   | 'TRANSITION_NOT_ALLOWED'
+  | 'WIP_EXCEEDED'
   | 'INTERNAL';
 
 export class DomainError extends Error {
