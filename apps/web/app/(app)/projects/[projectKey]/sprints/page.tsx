@@ -12,6 +12,7 @@ import { getActiveSprint } from '@/lib/sprints/getActiveSprint';
 import { getSprintBurndown } from '@/lib/sprints/getSprintBurndown';
 import { SprintsForm } from '@/components/domain/SprintsForm';
 import { SprintBurndownChart } from '@/components/domain/SprintBurndownChart';
+import { SprintPlanningDialog } from '@/components/domain/SprintPlanningDialog';
 import { KanbanBoard } from '@/components/domain/KanbanBoard';
 
 export const dynamic = 'force-dynamic';
@@ -74,7 +75,9 @@ export default async function ProjectSprintsPage({
         <CardContent>
           <SprintsForm projectKey={project.key} initial={sprints} canManage={canManage} />
           <p className="mt-3 text-xs text-muted-foreground">
-            Добавить карточку в спринт можно из самой карточки (в правой панели «Спринт»).
+            {active
+              ? 'Наполнить активный спринт задачами можно кнопкой «Добавить задачи» над доской спринта ниже (или из правой панели «Спринт» в самой карточке).'
+              : 'Создайте спринт и нажмите «Старт», затем добавьте в него задачи.'}
           </p>
         </CardContent>
       </Card>
@@ -96,7 +99,16 @@ export default async function ProjectSprintsPage({
 
           {board ? (
             <div>
-              <h2 className="mb-2 text-sm font-medium text-muted-foreground">Доска активного спринта</h2>
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <h2 className="text-sm font-medium text-muted-foreground">Доска активного спринта</h2>
+                {canManage ? (
+                  <SprintPlanningDialog
+                    projectKey={project.key}
+                    sprintId={active.id}
+                    sprintName={active.name}
+                  />
+                ) : null}
+              </div>
               <KanbanBoard
                 projectKey={project.key}
                 projectId={project.id}

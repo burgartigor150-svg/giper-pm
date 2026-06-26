@@ -115,6 +115,7 @@ export async function listTasksForProject(
         tags: true,
         updatedAt: true,
         parentId: true,
+        sprintId: true,
         _count: { select: { subtasks: true } },
         assignee: { select: { id: true, name: true, image: true } },
       },
