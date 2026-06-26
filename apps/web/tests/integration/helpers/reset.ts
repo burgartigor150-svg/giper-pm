@@ -50,6 +50,7 @@ const TABLES_IN_DELETE_ORDER = [
   'Version',
   'Component',
   'WorkflowTransition',
+  'WorkflowColumnTransition',
   'Space',
   'Ticket',
   // Leaves first (no incoming FKs that matter).

@@ -22,6 +22,8 @@ import { ComponentsManager } from '@/components/domain/ComponentsManager';
 import { listComponentsForProject } from '@/lib/components/listComponentsForProject';
 import { WorkflowMatrixEditor } from '@/components/domain/WorkflowMatrixEditor';
 import { listWorkflowTransitions } from '@/lib/workflow/isTransitionAllowed';
+import { WorkflowColumnGraphEditor } from '@/components/domain/WorkflowColumnGraphEditor';
+import { listWorkflowColumnTransitions } from '@/lib/workflow/isColumnTransitionAllowed';
 import { getBoardColumns } from '@/lib/board/getBoardColumns';
 import { getBoardSwimlanes } from '@/lib/board/getBoardSwimlanes';
 import { getCustomFields } from '@/lib/board/getCustomFields';
@@ -81,6 +83,11 @@ export default async function ProjectSettingsPage({
   const customFields = await getCustomFields(project.id);
   const components = await listComponentsForProject(project.id);
   const workflowTransitions = await listWorkflowTransitions(project.id);
+  // Only needed for the free-form column-transition editor below; skip the query
+  // for the (common) non-free-form projects.
+  const workflowColumnTransitions = freeFormProject?.freeFormColumnsEnabled
+    ? await listWorkflowColumnTransitions(project.id)
+    : [];
   const automations = await getAutomations(project.id);
   const cardTemplates = await getCardTemplates(project.id);
   const recurringTasks = await getRecurringTasks(project.id);
@@ -209,6 +216,24 @@ export default async function ProjectSettingsPage({
           <WorkflowMatrixEditor projectKey={project.key} initial={workflowTransitions} canManage />
         </CardContent>
       </Card>
+
+      {freeFormProject?.freeFormColumnsEnabled ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Переходы между колонками</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <WorkflowColumnGraphEditor
+              projectKey={project.key}
+              columns={boardColumns
+                .filter((c) => !c.id.startsWith('default-'))
+                .map((c) => ({ id: c.id, name: c.name, status: c.status }))}
+              initial={workflowColumnTransitions}
+              canManage
+            />
+          </CardContent>
+        </Card>
+      ) : null}
 
       <Card>
         <CardHeader>

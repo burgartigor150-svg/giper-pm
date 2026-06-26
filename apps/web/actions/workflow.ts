@@ -70,3 +70,72 @@ export async function setWorkflowTransitionsAction(
   revalidatePath(`/projects/${project.key}/board`);
   return { ok: true };
 }
+
+/** Generous cap for the per-column allowlist (columns × columns). */
+const MAX_COLUMN_EDGES = 400;
+
+/**
+ * Replace a project's per-COLUMN transition allowlist (free-form boards). Empty
+ * `edges` clears it → same-category column moves are UNRESTRICTED again (inert).
+ * Gated on canEditProject. Edges reference BoardColumn ids; any id not belonging
+ * to this project is dropped (so a crafted/foreign id can't be stored). A
+ * separate table from the category allowlist, so clearing column rules never
+ * touches the category workflow.
+ */
+export async function setWorkflowColumnTransitionsAction(
+  projectKey: string,
+  edges: { from: string; to: string }[],
+): Promise<ActionResult> {
+  const me = await requireAuth();
+
+  let project;
+  try {
+    project = await getProject(projectKey, { id: me.id, role: me.role });
+  } catch (e) {
+    if (e instanceof DomainError) return { ok: false, error: { code: e.code, message: 'Нет доступа к проекту' } };
+    throw e;
+  }
+  const caps = await getEffectiveCapsForProject({ id: me.id, role: me.role }, project.id);
+  if (!canEditProject({ id: me.id, role: me.role }, project, caps)) {
+    return { ok: false, error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' } };
+  }
+
+  if (!Array.isArray(edges) || edges.length > MAX_COLUMN_EDGES) {
+    return { ok: false, error: { code: 'VALIDATION', message: 'Некорректный набор переходов' } };
+  }
+  // Scope every column id to THIS project — drop self-edges, foreign/unknown ids,
+  // and duplicates.
+  const cols = await prisma.boardColumn.findMany({
+    where: { projectId: project.id },
+    select: { id: true },
+  });
+  const colIds = new Set(cols.map((c) => c.id));
+  const seen = new Set<string>();
+  const clean: { fromColumnId: string; toColumnId: string }[] = [];
+  for (const e of edges) {
+    if (!e || !colIds.has(e.from) || !colIds.has(e.to) || e.from === e.to) continue;
+    const k = `${e.from}->${e.to}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    clean.push({ fromColumnId: e.from, toColumnId: e.to });
+  }
+
+  await prisma.$transaction([
+    prisma.workflowColumnTransition.deleteMany({ where: { projectId: project.id } }),
+    ...(clean.length > 0
+      ? [
+          prisma.workflowColumnTransition.createMany({
+            data: clean.map((c) => ({
+              projectId: project.id,
+              fromColumnId: c.fromColumnId,
+              toColumnId: c.toColumnId,
+            })),
+          }),
+        ]
+      : []),
+  ]);
+
+  revalidatePath(`/projects/${project.key}/settings`);
+  revalidatePath(`/projects/${project.key}/board`);
+  return { ok: true };
+}

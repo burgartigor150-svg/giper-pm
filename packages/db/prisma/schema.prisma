@@ -515,6 +515,9 @@ model Project {
   /// Configurable-workflow transition allowlist (Jira workflow). Empty = no
   /// restriction (any status move allowed) — inert until the project adds rows.
   workflowTransitions WorkflowTransition[]
+  /// Per-COLUMN transition allowlist for free-form boards (gates same-category
+  /// column→column moves). Empty = no restriction — inert until rows are added.
+  workflowColumnTransitions WorkflowColumnTransition[]
   /// CRM deals linked to this project (org-level sales → delivery handoff).
   deals           Deal[]          @relation("DealProject")
   /// Per-project custom-role assignments. Reserved for v2 — no writer in v1.
@@ -699,6 +702,32 @@ model WorkflowTransition {
   createdAt  DateTime   @default(now())
 
   @@unique([projectId, fromStatus, toStatus])
+  @@index([projectId])
+}
+
+/// One allowed COLUMN move in a free-form board's workflow. Where
+/// WorkflowTransition gates CATEGORY moves, this gates same-category column→
+/// column moves (e.g. «Code Review» → «QA», both REVIEW) so multiple columns in
+/// one category act as distinct workflow nodes.
+///
+/// A project with ZERO rows has NO restriction (every same-category column move
+/// allowed) — the inert default. Once any row exists, a same-category move is
+/// allowed only if a matching row exists (a move into a CANCELED-category column
+/// is always allowed; enforced in code). Cross-category moves are NOT gated here
+/// — they stay on WorkflowTransition / the category engine. A separate table
+/// (not nullable FKs on WorkflowTransition) keeps the category engine untouched
+/// and lets a column-only save never clobber category rows.
+model WorkflowColumnTransition {
+  id           String      @id @default(cuid())
+  projectId    String
+  project      Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  fromColumnId String
+  fromColumn   BoardColumn @relation("WctFromColumn", fields: [fromColumnId], references: [id], onDelete: Cascade)
+  toColumnId   String
+  toColumn     BoardColumn @relation("WctToColumn", fields: [toColumnId], references: [id], onDelete: Cascade)
+  createdAt    DateTime    @default(now())
+
+  @@unique([projectId, fromColumnId, toColumnId])
   @@index([projectId])
 }
 
@@ -1481,6 +1510,9 @@ model BoardColumn {
   updatedAt DateTime   @updatedAt
   tasks     Task[]
   subColumns BoardSubColumn[]
+  /// Per-column workflow transition rules referencing this column as source/target.
+  wctFrom   WorkflowColumnTransition[] @relation("WctFromColumn")
+  wctTo     WorkflowColumnTransition[] @relation("WctToColumn")
 
   // S6: free-form columns — multiple columns may share a status category, so the
   // 1:1 (projectId,status) UNIQUE is dropped. A plain index keeps the
