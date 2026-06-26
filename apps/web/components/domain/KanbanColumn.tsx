@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useDroppable } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { ChevronLeft, ChevronRight, Check, X, Pencil, Trash2 } from 'lucide-react';
@@ -53,6 +53,8 @@ type Props = {
   onMoveColumn?: (columnId: string, dir: -1 | 1) => void;
   /** Change the column's TYPE (status category) — cascades cards to it. */
   onSetColumnCategory?: (columnId: string, category: StatusCategory) => void;
+  /** Drag handle for column reorder (free-form), rendered at the header's left. */
+  dragHandle?: ReactNode;
   /** Disable ← / → at the ends of the row. */
   isFirstColumn?: boolean;
   isLastColumn?: boolean;
@@ -100,6 +102,7 @@ function PlainColumn({
   onDeleteColumn,
   onMoveColumn,
   onSetColumnCategory,
+  dragHandle,
   isFirstColumn,
   isLastColumn,
 }: Props) {
@@ -147,6 +150,7 @@ function PlainColumn({
           overLimit ? 'border-red-300 bg-red-50' : 'border-border',
         )}
       >
+        {dragHandle && manageable && !editing ? dragHandle : null}
         {editing && manageable ? (
           <input
             autoFocus
