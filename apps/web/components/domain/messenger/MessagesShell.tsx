@@ -503,8 +503,31 @@ function MessageRow({
                   />
                 );
               }
-              // FILE / AUDIO_NOTE / IMAGE → generic download link
-              // for now. Specialised renderers can land later.
+              if (a.kind === 'IMAGE') {
+                // Inline thumbnail; click opens the full image in a new tab
+                // (served via the hardened attachment proxy).
+                return (
+                  <a
+                    key={a.id}
+                    href={`/api/messages/attachments/${a.id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block overflow-hidden rounded-md border border-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    title={a.filename}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={`/api/messages/attachments/${a.id}`}
+                      alt={a.filename}
+                      width={a.width ?? undefined}
+                      height={a.height ?? undefined}
+                      loading="lazy"
+                      className="max-h-80 max-w-[20rem] object-cover"
+                    />
+                  </a>
+                );
+              }
+              // FILE / AUDIO_NOTE → generic download chip.
               return (
                 <a
                   key={a.id}

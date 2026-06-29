@@ -169,3 +169,20 @@ export function buildVideoNoteKey(channelId: string, ext: 'webm' | 'mp4'): strin
   const rand = Math.random().toString(36).slice(2, 12);
   return `messages/${channelId}/${yyyy}/${mm}/video-note-${rand}.${ext}`;
 }
+
+/**
+ * Key layout for generic messenger file/image attachments. Same channel +
+ * year-month partitioning as video-notes; random prefix avoids collisions
+ * and the original (sanitized) filename is preserved for the download.
+ */
+export function buildMessageFileKey(channelId: string, filename: string): string {
+  const now = new Date();
+  const yyyy = now.getUTCFullYear();
+  const mm = String(now.getUTCMonth() + 1).padStart(2, '0');
+  const rand = Math.random().toString(36).slice(2, 10);
+  const safe = filename
+    .normalize('NFKD')
+    .replace(/[^\w.\-]+/g, '_')
+    .slice(0, 80) || 'file';
+  return `messages/${channelId}/${yyyy}/${mm}/${rand}-${safe}`;
+}
