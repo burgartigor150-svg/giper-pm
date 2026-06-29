@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
-import { canEditTaskInternal } from '@/lib/permissions';
+import { canEditTaskInternal, canViewTask } from '@/lib/permissions';
 import { getEffectiveCapsForProject } from '@/lib/capabilities';
 import type { TaskLinkType } from '@giper/db';
 
@@ -63,11 +63,33 @@ export async function addDependencyAction(
     };
   }
 
+  // The target must be VISIBLE to the actor — otherwise linking to an arbitrary
+  // id would leak the foreign task's key/title/status into the actor's
+  // dependency list (cross-project IDOR). Load the full canViewTask projection.
   const to = await prisma.task.findUnique({
     where: { id: toTaskId },
-    select: { id: true },
+    select: {
+      id: true,
+      creatorId: true,
+      assigneeId: true,
+      reviewerId: true,
+      testerId: true,
+      assignments: { select: { userId: true } },
+      watchers: { select: { userId: true } },
+      project: {
+        select: {
+          ownerId: true,
+          externalSource: true,
+          members: { select: { userId: true, role: true } },
+        },
+      },
+    },
   });
-  if (!to) return { ok: false, error: { code: 'NOT_FOUND', message: 'Целевая задача не найдена' } };
+  // Same opaque NOT_FOUND for "doesn't exist" and "exists but you can't see it"
+  // so the endpoint never confirms a foreign task's existence.
+  if (!to || !canViewTask({ id: me.id, role: me.role }, to)) {
+    return { ok: false, error: { code: 'NOT_FOUND', message: 'Целевая задача не найдена' } };
+  }
 
   if (linkType === 'BLOCKS' && (await wouldCreateCycle(fromTaskId, toTaskId))) {
     return {

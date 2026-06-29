@@ -212,7 +212,8 @@ export async function deleteTagAction(
 ): Promise<ActionResult> {
   const me = await requireAuth();
   const caps = await getEffectiveCaps({ id: me.id, role: me.role });
-  if (!caps.has('settings.tags.manageOrg')) {
+  const isOrgManager = caps.has('settings.tags.manageOrg');
+  if (!isOrgManager) {
     const project = await prisma.project.findUnique({
       where: { id: projectId },
       select: { ownerId: true },
@@ -221,7 +222,13 @@ export async function deleteTagAction(
       return { ok: false, error: { code: 'FORBIDDEN', message: 'Только владелец/ADMIN' } };
     }
   }
-  await prisma.tag.delete({ where: { id: tagId } }).catch(() => null);
+  // Scope the delete to the named project unless the caller holds the org-wide
+  // cap — otherwise a project owner could pass a tagId from a DIFFERENT project
+  // (they only proved ownership of `projectId`). deleteMany is a safe no-op when
+  // the tag isn't in scope.
+  await prisma.tag.deleteMany({
+    where: isOrgManager ? { id: tagId } : { id: tagId, projectId },
+  });
   revalidatePath(`/projects`);
   return { ok: true };
 }

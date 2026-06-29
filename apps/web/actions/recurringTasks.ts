@@ -85,6 +85,10 @@ export async function updateRecurringTasksAction(
     where: { projectId },
     select: { id: true },
   });
+  // Only THIS project's existing rows may be updated by id — otherwise a crafted
+  // row.id belonging to another project would be overwritten (cross-project
+  // IDOR). A stale/foreign id falls through to a create scoped to projectId.
+  const existingIds = new Set(existing.map((e) => e.id));
   const keepIds = new Set(rows.map((r) => r.id).filter(Boolean) as string[]);
   const toDelete = existing.filter((e) => !keepIds.has(e.id)).map((e) => e.id);
 
@@ -101,7 +105,7 @@ export async function updateRecurringTasksAction(
         nextRunAt,
         active: row.active,
       };
-      if (row.id && keepIds.has(row.id)) {
+      if (row.id && existingIds.has(row.id)) {
         await tx.recurringTask.update({ where: { id: row.id }, data });
       } else {
         await tx.recurringTask.create({
