@@ -8,6 +8,7 @@ import {
   ACCESS_TTL_SEC,
   REFRESH_TTL_SEC,
 } from '@/lib/oauth/core';
+import { rateLimit, clientIp } from '@/lib/api/rateLimit';
 
 /**
  * OAuth Token Endpoint. Supports authorization_code (with PKCE) and
@@ -16,6 +17,10 @@ import {
  */
 export const dynamic = 'force-dynamic';
 
+// Per-IP brake on code/refresh redemption attempts (brute force / reuse).
+const TOKEN_RL_MAX = 30;
+const TOKEN_RL_WINDOW_SEC = 60;
+
 /** Thrown inside the rotation transaction to roll back on token reuse/conflict. */
 class RotationConflict extends Error {}
 
@@ -23,6 +28,13 @@ function bad(error: string, description?: string, status = 400) {
   return NextResponse.json(
     { error, ...(description ? { error_description: description } : {}) },
     { status },
+  );
+}
+
+function tooMany(retryAfter: number) {
+  return NextResponse.json(
+    { error: 'rate_limited', error_description: `Слишком много запросов, повторите через ~${retryAfter}с` },
+    { status: 429, headers: { 'retry-after': String(retryAfter) } },
   );
 }
 
@@ -57,6 +69,9 @@ async function authClient(clientId: string, clientSecret: string | null): Promis
 }
 
 export async function POST(req: Request) {
+  const rl = await rateLimit(`oauth:token:${clientIp(req)}`, TOKEN_RL_MAX, TOKEN_RL_WINDOW_SEC);
+  if (!rl.ok) return tooMany(rl.retryAfter ?? TOKEN_RL_WINDOW_SEC);
+
   const p = await readParams(req);
   const grantType = p.get('grant_type') ?? '';
   const clientId = p.get('client_id') ?? '';

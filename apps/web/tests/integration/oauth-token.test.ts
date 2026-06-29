@@ -40,10 +40,17 @@ async function seedRefreshToken(clientId: string, userId: string, opts: { expire
   return raw;
 }
 
+let ipSeq = 0;
+
 function refreshReq(params: Record<string, string>): Request {
+  // Unique per-request IP so the (real) per-IP rate limiter never accumulates
+  // a shared bucket across these calls / repeated local runs.
   return new Request('http://test.local/api/oauth/token', {
     method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    headers: {
+      'content-type': 'application/x-www-form-urlencoded',
+      'x-forwarded-for': `10.9.${(ipSeq >> 8) & 255}.${ipSeq++ & 255}`,
+    },
     body: new URLSearchParams(params).toString(),
   });
 }
