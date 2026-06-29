@@ -4,8 +4,9 @@ import { DomainError } from '../errors';
 import { internalStatusWrite } from '../status/refs';
 import type { SessionUser } from '../permissions';
 import { isTransitionAllowed } from '../workflow/isTransitionAllowed';
-import { isClosing as isClosingCat, isTerminal, statusCategory } from '../status/category';
+import { isClosing as isClosingCat, isTerminal, statusCategory, startsWork as startsWorkCat } from '../status/category';
 import { autoUnblockDependents } from './autoTransitions';
+import { rollupParentFromChild } from './rollupParentOnChild';
 import { assertWipNotExceeded } from '../board/assertWipNotExceeded';
 import { runColumnEnterAutomations } from '../automations/runColumnEnterAutomations';
 import { dispatchWebhooks } from '../webhooks/dispatchWebhooks';
@@ -54,8 +55,14 @@ export async function setInternalStatus(
       externalSource: true,
       creatorId: true,
       assigneeId: true,
+      parentId: true,
       project: {
-        select: { key: true, ownerId: true, members: { select: { userId: true, role: true } } },
+        select: {
+          key: true,
+          ownerId: true,
+          autoMoveParentOnChild: true,
+          members: { select: { userId: true, role: true } },
+        },
       },
     },
   });
@@ -133,8 +140,7 @@ export async function setInternalStatus(
   // (assignee). Queue categories (BACKLOG/TODO) and CANCELED never auto-assign,
   // and an existing assignee is never overwritten — this only fills an empty slot
   // on a real category transition (the no-op guard above already returned).
-  const startsWork = cat !== 'BACKLOG' && cat !== 'TODO' && cat !== 'CANCELED';
-  if (startsWork && !task.assigneeId) {
+  if (startsWorkCat(cat) && !task.assigneeId) {
     await prisma.task.update({ where: { id: taskId }, data: { assigneeId: user.id } });
   }
 
@@ -166,6 +172,15 @@ export async function setInternalStatus(
     // Best-effort: close in Bitrix (STATUS=5) + post the итог comment + mark it
     // as the native Bitrix "Result". No-op for native tasks / no webhook URL.
     await closeBitrixTaskBestEffort(taskId, comment.id);
+  }
+
+  // Parent rollup (Kaiten parity, opt-in per project): this card's status change
+  // may advance its parent (→ IN_PROGRESS when work starts, → DONE when all
+  // subtasks are done). Gated on parentId + the (same-project) flag here so an
+  // opted-out project pays zero extra reads; the helper re-checks the parent's
+  // own flag for the cross-project/cascade callers. Best-effort — never throws.
+  if (task.parentId && task.project.autoMoveParentOnChild) {
+    await rollupParentFromChild(taskId, user.id);
   }
 
   return { projectKey: task.project.key, number: task.number };

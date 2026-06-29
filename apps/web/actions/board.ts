@@ -11,6 +11,7 @@ import { setInternalStatus } from '@/lib/tasks/setInternalStatus';
 import { runColumnEnterAutomations } from '@/lib/automations/runColumnEnterAutomations';
 import { isColumnTransitionAllowed } from '@/lib/workflow/isColumnTransitionAllowed';
 import { autoUnblockDependents } from '@/lib/tasks/autoTransitions';
+import { rollupParentFromChild } from '@/lib/tasks/rollupParentOnChild';
 import { assertWipNotExceeded } from '@/lib/board/assertWipNotExceeded';
 import { DomainError } from '@/lib/errors';
 import type { ActionResult } from './projects';
@@ -656,6 +657,24 @@ export async function setBoardColumnCategoryAction(
     }
   }
 
+  // Best-effort parent rollup: this structural re-type changed the cards'
+  // category, so their parents may advance (e.g. re-typing a column to DONE
+  // completes the last open subtask of a parent). Gated on the project flag up
+  // front so a flag-off project does no extra work. Outside the transaction.
+  const proj = await prisma.project.findUnique({
+    where: { id: col.projectId },
+    select: { autoMoveParentOnChild: true },
+  });
+  if (proj?.autoMoveParentOnChild) {
+    const childCards = await prisma.task.findMany({
+      where: { columnId, parentId: { not: null } },
+      select: { id: true },
+    });
+    for (const c of childCards) {
+      await rollupParentFromChild(c.id, me.id).catch(() => {});
+    }
+  }
+
   revalidatePath(`/projects/${col.key}/board`);
   return { ok: true };
 }
@@ -860,6 +879,26 @@ export async function setFreeFormColumnsEnabledAction(
   });
   revalidatePath(`/projects/${gate.key}/board`);
   revalidatePath(`/projects/${gate.key}/settings`);
+  return { ok: true };
+}
+
+/**
+ * Toggle the per-project opt-in "auto-move parent by subtasks' status" (Kaiten
+ * parity). Off by default; forward-only when on. Same editor gate as the other
+ * board/project-meta toggles.
+ */
+export async function setAutoMoveParentOnChildAction(
+  projectId: string,
+  enabled: boolean,
+): Promise<ActionResult> {
+  const gate = await editableProjectOrError(projectId);
+  if (!gate.ok) return gate;
+  await prisma.project.update({
+    where: { id: projectId },
+    data: { autoMoveParentOnChild: Boolean(enabled) },
+  });
+  revalidatePath(`/projects/${gate.key}/settings`);
+  revalidatePath(`/projects/${gate.key}/board`);
   return { ok: true };
 }
 
