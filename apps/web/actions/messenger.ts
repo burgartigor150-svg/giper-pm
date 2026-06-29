@@ -195,7 +195,7 @@ export async function inviteToChannelAction(
   }
   const validUsers = await prisma.user.findMany({
     where: { id: { in: cleanIds }, isActive: true },
-    select: { id: true },
+    select: { id: true, name: true },
   });
   // Find who's already in to compute the truthful "added" count.
   // Then bulk-create the new rows (skipDuplicates as a safety net
@@ -206,13 +206,37 @@ export async function inviteToChannelAction(
   });
   const existingIds = new Set(existing.map((e) => e.userId));
   const toAdd = validUsers.filter((u) => !existingIds.has(u.id));
+  // Add members AND drop one SYSTEM "added" service message per new member,
+  // in the same transaction, so everyone currently in the channel sees the
+  // roster change live (SystemEventCard renders MEMBER_CHANGED) instead of
+  // only after their own reload. Mirrors meetings.ts CALL_STARTED.
+  const systemMsgIds: string[] = [];
   if (toAdd.length > 0) {
-    await prisma.channelMember.createMany({
-      data: toAdd.map((u) => ({ channelId, userId: u.id, role: 'MEMBER' as const })),
-      skipDuplicates: true,
+    await prisma.$transaction(async (tx) => {
+      await tx.channelMember.createMany({
+        data: toAdd.map((u) => ({ channelId, userId: u.id, role: 'MEMBER' as const })),
+        skipDuplicates: true,
+      });
+      for (const u of toAdd) {
+        const sys = await tx.message.create({
+          data: {
+            channelId,
+            authorId: me.id,
+            body: '',
+            source: 'SYSTEM',
+            eventKind: 'MEMBER_CHANGED',
+            eventPayload: { action: 'added', userName: u.name ?? '' },
+          },
+          select: { id: true },
+        });
+        systemMsgIds.push(sys.id);
+      }
     });
   }
   const added = toAdd.length;
+  for (const messageId of systemMsgIds) {
+    await publishChatEvent({ kind: 'message.new', channelId, messageId, authorId: me.id, parentId: null });
+  }
   revalidatePath('/messages');
   revalidatePath(`/messages/${channelId}`);
   return { ok: true, data: { added } };
@@ -250,9 +274,33 @@ export async function removeFromChannelAction(
   if (!myMembership || myMembership.role !== 'ADMIN') {
     return { ok: false, error: { code: 'FORBIDDEN', message: 'Только админ канала может удалять' } };
   }
-  await prisma.channelMember
-    .delete({ where: { channelId_userId: { channelId, userId } } })
-    .catch(() => null); // already gone is fine
+  // Only emit the service message if the member actually existed (deleteMany
+  // count), so a no-op remove doesn't post a phantom "removed" card.
+  const removed = await prisma.channelMember.findUnique({
+    where: { channelId_userId: { channelId, userId } },
+    select: { user: { select: { name: true } } },
+  });
+  let systemMsgId: string | null = null;
+  if (removed) {
+    await prisma.$transaction(async (tx) => {
+      await tx.channelMember.delete({ where: { channelId_userId: { channelId, userId } } });
+      const sys = await tx.message.create({
+        data: {
+          channelId,
+          authorId: me.id,
+          body: '',
+          source: 'SYSTEM',
+          eventKind: 'MEMBER_CHANGED',
+          eventPayload: { action: 'removed', userName: removed.user.name ?? '' },
+        },
+        select: { id: true },
+      });
+      systemMsgId = sys.id;
+    });
+  }
+  if (systemMsgId) {
+    await publishChatEvent({ kind: 'message.new', channelId, messageId: systemMsgId, authorId: me.id, parentId: null });
+  }
   revalidatePath('/messages');
   revalidatePath(`/messages/${channelId}`);
   return { ok: true };
