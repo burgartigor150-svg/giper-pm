@@ -926,6 +926,141 @@ export async function sendVideoNoteAction(
   return { ok: true, data: { id: created.id } };
 }
 
+// ---------------------------------------------------------------------------
+// Generic file / image attachments
+// ---------------------------------------------------------------------------
+
+const FILE_MAX_BYTES = 25 * 1024 * 1024; // 25 MB per file — matches task attachments
+const FILE_ALLOWED_MIME = /^(image|video|audio|application|text)\//;
+
+/**
+ * Upload a generic file/image as a Message + MessageAttachment. image/* lands
+ * as kind=IMAGE (rendered inline), everything else as kind=FILE (download
+ * chip). Same auth/access/thread-parent rules as postMessageAction; the
+ * download route (api/messages/attachments/[id]) forces unsafe mimes to
+ * download as octet-stream so an uploaded SVG/HTML can't execute in-origin.
+ *
+ * FormData fields: channelId, optional parentId, file (Blob), optional
+ * filename / mime overrides, optional width/height (for images).
+ */
+export async function sendFileAction(fd: FormData): Promise<ActionResult<{ id: string }>> {
+  const me = await requireAuth();
+  const channelId = String(fd.get('channelId') ?? '');
+  const parentIdRaw = fd.get('parentId');
+  const parentId = typeof parentIdRaw === 'string' && parentIdRaw ? parentIdRaw : null;
+  const file = fd.get('file');
+
+  if (!channelId) {
+    return { ok: false, error: { code: 'VALIDATION', message: 'channelId не указан' } };
+  }
+  if (!(file instanceof Blob)) {
+    return { ok: false, error: { code: 'VALIDATION', message: 'Файл не передан' } };
+  }
+  if (file.size === 0) {
+    return { ok: false, error: { code: 'VALIDATION', message: 'Пустой файл' } };
+  }
+  if (file.size > FILE_MAX_BYTES) {
+    return {
+      ok: false,
+      error: {
+        code: 'VALIDATION',
+        message: `Файл слишком большой (${(file.size / 1_048_576).toFixed(1)} МБ, лимит 25 МБ)`,
+      },
+    };
+  }
+  // Filename: explicit field first (SA transport can drop File.name), then the
+  // Blob's own name if it's a File, then a fallback.
+  const filenameField = String(fd.get('filename') ?? '').trim();
+  const blobName = file instanceof File ? file.name : '';
+  const filename = (filenameField || blobName || 'file').slice(0, 200);
+  // MIME: explicit field first (SA can flatten Blob.type to text/plain).
+  const mimeField = String(fd.get('mime') ?? '').trim();
+  const mime = mimeField || file.type || 'application/octet-stream';
+  if (!FILE_ALLOWED_MIME.test(mime)) {
+    return { ok: false, error: { code: 'VALIDATION', message: `Тип файла "${mime}" не поддерживается` } };
+  }
+  const isImage = mime.startsWith('image/');
+  const widthRaw = Number(fd.get('width'));
+  const heightRaw = Number(fd.get('height'));
+  const width = isImage && Number.isFinite(widthRaw) && widthRaw > 0 ? Math.round(widthRaw) : null;
+  const height = isImage && Number.isFinite(heightRaw) && heightRaw > 0 ? Math.round(heightRaw) : null;
+
+  const access = await resolveChannelAccess(channelId, me.id);
+  if (!access) return { ok: false, error: { code: 'NOT_FOUND', message: 'Канал не найден' } };
+  if (!access.canPost) {
+    if (access.kind === 'PUBLIC') {
+      await ensureMembership(channelId, me.id);
+    } else {
+      return { ok: false, error: { code: 'FORBIDDEN', message: 'Нет прав на запись' } };
+    }
+  }
+
+  let finalParentId: string | null = null;
+  if (parentId) {
+    const parent = await prisma.message.findUnique({
+      where: { id: parentId },
+      select: { channelId: true, parentId: true },
+    });
+    if (!parent || parent.channelId !== channelId) {
+      return { ok: false, error: { code: 'NOT_FOUND', message: 'Родительское сообщение не найдено' } };
+    }
+    finalParentId = parent.parentId ?? parentId;
+  }
+
+  const { putObject, buildMessageFileKey } = await import('@/lib/storage/s3');
+  const key = buildMessageFileKey(channelId, filename);
+  const buf = Buffer.from(await file.arrayBuffer());
+  await putObject({ key, body: buf, contentType: mime });
+
+  const created = await prisma.$transaction(async (tx) => {
+    const msg = await tx.message.create({
+      data: {
+        channelId,
+        authorId: me.id,
+        body: '',
+        parentId: finalParentId,
+        attachments: {
+          create: {
+            filename,
+            mimeType: mime,
+            sizeBytes: file.size,
+            storageKey: key,
+            kind: isImage ? 'IMAGE' : 'FILE',
+            width,
+            height,
+          },
+        },
+      },
+      select: { id: true, parentId: true },
+    });
+    if (msg.parentId) {
+      await tx.message.update({ where: { id: msg.parentId }, data: { replyCount: { increment: 1 } } });
+    }
+    await tx.channel.update({ where: { id: channelId }, data: { updatedAt: new Date() } });
+    return msg;
+  });
+
+  await publishChatEvent({
+    kind: 'message.new',
+    channelId,
+    messageId: created.id,
+    authorId: me.id,
+    parentId: created.parentId ?? null,
+  });
+  // DM/mention notifications use the filename as the preview text.
+  await notifyNewMessage({
+    channelId,
+    messageId: created.id,
+    authorId: me.id,
+    authorName: me.name ?? null,
+    body: filename,
+    mentionedIds: [],
+  });
+  revalidatePath('/messages');
+  revalidatePath(`/messages/${channelId}`);
+  return { ok: true, data: { id: created.id } };
+}
+
 export async function editMessageAction(
   messageId: string,
   body: string,

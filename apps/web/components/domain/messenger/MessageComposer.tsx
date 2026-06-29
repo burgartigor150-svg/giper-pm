@@ -7,11 +7,28 @@ import {
   useTransition,
   type KeyboardEvent,
 } from 'react';
-import { Send, Camera } from 'lucide-react';
+import { Send, Camera, Paperclip } from 'lucide-react';
 import { Avatar } from '@giper/ui/components/Avatar';
 import { Button } from '@giper/ui/components/Button';
-import { searchUsersForMention } from '@/actions/messenger';
+import { searchUsersForMention, sendFileAction } from '@/actions/messenger';
 import { VideoNoteRecorder } from './VideoNoteRecorder';
+
+/** Best-effort natural dimensions of an image File (so layout doesn't shift). */
+function readImageDims(file: File): Promise<{ w: number; h: number } | null> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      resolve({ w: img.naturalWidth, h: img.naturalHeight });
+      URL.revokeObjectURL(url);
+    };
+    img.onerror = () => {
+      resolve(null);
+      URL.revokeObjectURL(url);
+    };
+    img.src = url;
+  });
+}
 
 type MentionUser = {
   id: string;
@@ -55,7 +72,41 @@ export function MessageComposer({
   const [draft, setDraft] = useState('');
   const [pending, startTransition] = useTransition();
   const [recorderOpen, setRecorderOpen] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  async function uploadFiles(files: FileList | null) {
+    if (!files || files.length === 0 || !channelId) return;
+    setUploading(true);
+    try {
+      for (const file of Array.from(files)) {
+        const form = new FormData();
+        form.set('channelId', channelId);
+        if (parentId) form.set('parentId', parentId);
+        form.set('file', file);
+        form.set('filename', file.name);
+        form.set('mime', file.type || 'application/octet-stream');
+        if (file.type.startsWith('image/')) {
+          const dims = await readImageDims(file);
+          if (dims) {
+            form.set('width', String(dims.w));
+            form.set('height', String(dims.h));
+          }
+        }
+        const res = await sendFileAction(form);
+        if (!res.ok) {
+          // eslint-disable-next-line no-alert
+          alert(res.error.message);
+          break;
+        }
+      }
+      onVideoNoteSent?.();
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  }
 
   const [mentionState, setMentionState] = useState<{
     query: string;
@@ -251,17 +302,37 @@ export function MessageComposer({
         ) : null}
       </div>
       {channelId ? (
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          disabled={pending || disabled}
-          onClick={() => setRecorderOpen(true)}
-          aria-label="Записать видеосообщение"
-          title="Видеосообщение (до 60 сек)"
-        >
-          <Camera className="size-4" />
-        </Button>
+        <>
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            onChange={(e) => void uploadFiles(e.target.files)}
+          />
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            disabled={pending || disabled || uploading}
+            onClick={() => fileInputRef.current?.click()}
+            aria-label="Прикрепить файл"
+            title="Прикрепить файл или изображение"
+          >
+            <Paperclip className="size-4" />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            disabled={pending || disabled || uploading}
+            onClick={() => setRecorderOpen(true)}
+            aria-label="Записать видеосообщение"
+            title="Видеосообщение (до 60 сек)"
+          >
+            <Camera className="size-4" />
+          </Button>
+        </>
       ) : null}
       <Button
         type="submit"
