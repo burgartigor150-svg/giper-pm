@@ -23,6 +23,22 @@ import { resolveChannelAccess } from '@/lib/messenger/access';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
 
+// Only these (attacker-uninteresting) types are served inline; everything else
+// (html, svg, xml, office docs, unknown…) is forced to download as octet-stream
+// so a mislabelled/hostile upload can't run scripts in our origin. Mirrors the
+// task/KB attachment routes. Video/audio notes stay inline so the player works.
+const SAFE_INLINE = new Set([
+  'application/pdf',
+  'text/plain',
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+]);
+function isInlineSafe(mime: string): boolean {
+  return SAFE_INLINE.has(mime) || mime.startsWith('video/') || mime.startsWith('audio/');
+}
+
 type Ctx = { params: Promise<{ id: string }> };
 
 export async function GET(req: Request, { params }: Ctx) {
@@ -60,21 +76,24 @@ export async function GET(req: Request, { params }: Ctx) {
   }
 
   const headers = new Headers();
-  headers.set(
-    'content-type',
-    attachment.mimeType || stream.ContentType || 'application/octet-stream',
-  );
+  const mime = attachment.mimeType || stream.ContentType || 'application/octet-stream';
+  const inline = isInlineSafe(mime);
+  // Unsafe mimes (svg/html/xml/office/unknown) are forced to download as
+  // octet-stream so a hostile upload can't execute in our origin.
+  headers.set('content-type', inline ? mime : 'application/octet-stream');
   if (stream.ContentLength != null) {
     headers.set('content-length', String(stream.ContentLength));
   }
   if (stream.AcceptRanges) headers.set('accept-ranges', stream.AcceptRanges);
   if (stream.ContentRange) headers.set('content-range', stream.ContentRange);
-  // Video notes are inline-played; downloads still use Content-Disposition.
+  // Inline for media (video/audio notes, images, pdf); attachment otherwise.
   const safe = attachment.filename.replace(/[\r\n"]/g, '_');
   headers.set(
     'content-disposition',
-    `inline; filename="${asciiFallback(safe)}"; filename*=UTF-8''${encodeURIComponent(safe)}`,
+    `${inline ? 'inline' : 'attachment'}; filename="${asciiFallback(safe)}"; filename*=UTF-8''${encodeURIComponent(safe)}`,
   );
+  headers.set('x-content-type-options', 'nosniff');
+  if (!inline) headers.set('content-security-policy', "default-src 'none'; sandbox");
   headers.set('cache-control', 'private, max-age=3600');
 
   const status = stream.ContentRange ? 206 : 200;
