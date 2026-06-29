@@ -82,6 +82,8 @@ type Props = {
   freeFormColumns?: boolean;
   /** Editor + free-form on — show the inline column-management controls. */
   canManageColumns?: boolean;
+  /** Non-VIEWER — render the per-card bulk-selection checkboxes + select-all. */
+  canBulk?: boolean;
 };
 
 /** A drop target resolved from a droppable/card id: which column + which lane. */
@@ -119,6 +121,7 @@ export function KanbanBoard({
   canManage = false,
   freeFormColumns = false,
   canManageColumns = false,
+  canBulk = false,
 }: Props) {
   const router = useRouter();
   const tBoard = useT('tasks.board');
@@ -601,6 +604,7 @@ export function KanbanBoard({
           cap={useCap ? COLUMN_CAP : undefined}
           wipLimit={col.wipLimit}
           subColumns={col.subColumns}
+          selectable={canBulk}
         />
       ))}
     </div>
@@ -734,6 +738,7 @@ export function KanbanBoard({
                     cap={useCap ? COLUMN_CAP : undefined}
                     wipLimit={col.wipLimit}
                     subColumns={col.subColumns}
+                    selectable={canBulk}
                   />
                 );
                 // Free-form + manageable: wrap in a drag shell so the column can be

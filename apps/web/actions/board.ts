@@ -8,11 +8,9 @@ import { getEffectiveCapsForProject } from '@/lib/capabilities';
 import { categoryToTaskStatus } from '@/lib/status/category';
 import { STATUS_SEED, materializeProjectColumns } from '@/lib/status/backfillStatuses';
 import { setInternalStatus } from '@/lib/tasks/setInternalStatus';
-import { runColumnEnterAutomations } from '@/lib/automations/runColumnEnterAutomations';
-import { isColumnTransitionAllowed } from '@/lib/workflow/isColumnTransitionAllowed';
 import { autoUnblockDependents } from '@/lib/tasks/autoTransitions';
 import { rollupParentFromChild } from '@/lib/tasks/rollupParentOnChild';
-import { assertWipNotExceeded } from '@/lib/board/assertWipNotExceeded';
+import { moveTaskToColumn } from '@/lib/tasks/moveTaskToColumn';
 import { DomainError } from '@/lib/errors';
 import type { ActionResult } from './projects';
 
@@ -742,98 +740,21 @@ export async function reorderBoardColumnsAction(
  */
 export async function setTaskColumnAction(taskId: string, columnId: string): Promise<ActionResult> {
   const me = await requireAuth();
-  const task = await prisma.task.findUnique({
-    where: { id: taskId },
-    select: {
-      projectId: true,
-      internalStatus: true,
-      columnId: true,
-      creatorId: true,
-      assigneeId: true,
-      project: {
-        select: { key: true, ownerId: true, members: { select: { userId: true, role: true } } },
-      },
-    },
-  });
-  if (!task) return { ok: false, error: { code: 'NOT_FOUND', message: 'Задача не найдена' } };
-  // Board move gate — same stakeholder/leadership predicate as setInternalStatus
-  // (the status core). The cross-category branch below re-checks it inside
-  // setInternalStatus, but the same-category fast path skips the core, so gate
-  // here too or it would be an unauthenticated-edit (IDOR) hole.
-  const allow =
-    me.role === 'ADMIN' ||
-    me.role === 'PM' ||
-    task.creatorId === me.id ||
-    task.assigneeId === me.id ||
-    task.project.ownerId === me.id ||
-    task.project.members.some((m) => m.userId === me.id && m.role === 'LEAD');
-  if (!allow) {
-    return { ok: false, error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Недостаточно прав' } };
-  }
-  const col = await prisma.boardColumn.findUnique({
-    where: { id: columnId },
-    select: { projectId: true, status: true, statusId: true },
-  });
-  if (!col || col.projectId !== task.projectId) {
-    return { ok: false, error: { code: 'VALIDATION', message: 'Колонка не найдена' } };
-  }
   try {
-    // WIP: entering a DIFFERENT column → enforce the EXPLICIT target column's
-    // limit up-front, before any write, so a rejected move commits nothing. The
-    // cross-category core call below gets skipWip so it doesn't ALSO check the
-    // default column the category resolves to.
-    if (task.columnId !== columnId) {
-      await assertWipNotExceeded(task.projectId, { columnId, status: col.status }, taskId);
-    }
-    if (task.internalStatus !== col.status) {
-      // Category change → the workflow-gated core enforces the transition + runs
-      // side effects (it also rejects a forbidden move / a DONE without an итог).
-      // Thread the destination columnId so per-column automation rules fire too.
-      await setInternalStatus(taskId, col.status, me, { columnId, skipWip: true });
-      await prisma.task.update({
-        where: { id: taskId },
-        data: { columnId, ...(col.statusId ? { internalStatusId: col.statusId } : {}) },
-      });
-    } else {
-      // Same-category move (e.g. «Code Review» → «QA», both REVIEW). The category
-      // engine doesn't see this move, so enforce the per-column transition
-      // allowlist here (inert when the project has no column rules). Reject
-      // BEFORE writing anything so a denied move commits nothing.
-      if (!(await isColumnTransitionAllowed(task.projectId, task.columnId, columnId))) {
-        return {
-          ok: false,
-          error: {
-            code: 'TRANSITION_NOT_ALLOWED',
-            message: 'Переход между колонками запрещён правилами рабочего процесса',
-          },
-        };
-      }
-      // Re-pin the column only — internalStatus / startedAt / completedAt /
-      // TaskStatusChange are deliberately left untouched so reports, burndown,
-      // versions and the mirror stay correct. The status core is skipped, so fire
-      // the column-enter automations here (best-effort; never throws) —
-      // historically this move fired nothing at all. columnRulesOnly: the card
-      // entered a new COLUMN but not a new CATEGORY, so only the destination
-      // column's rules run; a category-keyed rule must not re-fire on an
-      // intra-category shuffle.
-      await prisma.task.update({
-        where: { id: taskId },
-        data: { columnId, ...(col.statusId ? { internalStatusId: col.statusId } : {}) },
-      });
-      await runColumnEnterAutomations(taskId, col.status, columnId, { columnRulesOnly: true });
-    }
+    const { projectKey } = await moveTaskToColumn(taskId, columnId, me);
+    revalidatePath(`/projects/${projectKey}/board`);
+    return { ok: true };
   } catch (e) {
     // Preserve the DomainError code (WIP_EXCEEDED / TRANSITION_NOT_ALLOWED /
-    // NOT_FOUND / …) so callers can distinguish a WIP/workflow rejection from a
-    // generic failure — mirrors setInternalStatusAction.
+    // NOT_FOUND / INSUFFICIENT_PERMISSIONS / VALIDATION) so callers can
+    // distinguish a WIP/workflow rejection from a generic failure — mirrors
+    // setInternalStatusAction.
     if (e instanceof DomainError) {
       return { ok: false, error: { code: e.code, message: e.message } };
     }
     const message = e instanceof Error ? e.message : 'Не удалось переместить задачу';
     return { ok: false, error: { code: 'INTERNAL', message } };
   }
-  revalidatePath(`/projects/${task.project.key}/board`);
-  return { ok: true };
 }
 
 /** Toggle the per-project free-form-columns mode (the inline column-management UI). */

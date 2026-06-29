@@ -9,6 +9,7 @@ import { getT } from '@/lib/i18n';
 import { KanbanBoard } from '@/components/domain/KanbanBoard';
 import { FreeFormColumnsToggle } from '@/components/domain/FreeFormColumnsToggle';
 import { KanbanFilters } from '@/components/domain/KanbanFilters';
+import { TaskSelectionProvider, BulkTaskActionBar } from '@/components/domain/TaskBulkActions';
 import { SavedFilterBar } from '@/components/domain/SavedFilterBar';
 import { TemplatePicker } from '@/components/domain/TemplatePicker';
 import { RevalidateOnEvent } from '@/components/domain/RevalidateOnEvent';
@@ -108,6 +109,9 @@ export default async function ProjectBoardPage({
     { ownerId: project.ownerId, members: project.members },
     projCaps,
   );
+  // Bulk select/act on the board — any non-VIEWER (mirrors the list view). The
+  // bulk actions are gated per-task server-side; the affordance just appears.
+  const canBulk = me.role !== 'VIEWER';
 
   // Card templates: only offer the picker to users who can create
   // tasks here, and only when the project actually has templates.
@@ -172,16 +176,30 @@ export default async function ProjectBoardPage({
         />
       </Card>
 
-      <KanbanBoard
-        projectKey={project.key}
-        projectId={project.id}
-        initialTasks={tasks}
-        columns={columns}
-        swimlanes={swimlanes}
-        canManage={canShare}
-        freeFormColumns={project.freeFormColumnsEnabled}
-        canManageColumns={canShare && project.freeFormColumnsEnabled}
-      />
+      <TaskSelectionProvider key={JSON.stringify(sp)}>
+        <KanbanBoard
+          projectKey={project.key}
+          projectId={project.id}
+          initialTasks={tasks}
+          columns={columns}
+          swimlanes={swimlanes}
+          canManage={canShare}
+          freeFormColumns={project.freeFormColumnsEnabled}
+          canManageColumns={canShare && project.freeFormColumnsEnabled}
+          canBulk={canBulk}
+        />
+        {canBulk ? (
+          <BulkTaskActionBar
+            members={members}
+            tags={availableTags}
+            showStatus={false}
+            boardMove={{
+              freeForm: project.freeFormColumnsEnabled,
+              columns: columns.map((c) => ({ id: c.id, name: c.name, status: c.status })),
+            }}
+          />
+        ) : null}
+      </TaskSelectionProvider>
     </div>
   );
 }

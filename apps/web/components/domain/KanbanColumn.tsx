@@ -10,6 +10,7 @@ import { useT } from '@/lib/useT';
 import type { BoardTask, BoardSubColumnView } from '@/lib/tasks';
 import type { StatusCategory } from '@giper/db';
 import { KanbanCard } from './KanbanCard';
+import { BoardColumnSelectAll } from './TaskBulkActions';
 
 type Status = BoardTask['status'];
 const NO_LANE = 'none';
@@ -58,6 +59,8 @@ type Props = {
   /** Disable ← / → at the ends of the row. */
   isFirstColumn?: boolean;
   isLastColumn?: boolean;
+  /** Board bulk mode: render a per-card selection checkbox + a column select-all. */
+  selectable?: boolean;
 };
 
 export const COLUMN_BG: Record<Exclude<Status, 'CANCELED'>, string> = {
@@ -291,6 +294,7 @@ function PlainColumn({
   dragHandle,
   isFirstColumn,
   isLastColumn,
+  selectable,
 }: Props) {
   const tBoard = useT('tasks.board');
 
@@ -339,13 +343,19 @@ function PlainColumn({
         strategy={verticalListSortingStrategy}
       >
         <div className="flex flex-1 flex-col gap-2 p-2">
+          {selectable ? <BoardColumnSelectAll taskIds={visible.map((t) => t.id)} /> : null}
           {visible.length === 0 ? (
             <div className="rounded-md border border-dashed border-border p-3 text-center text-xs text-muted-foreground">
               {tBoard('empty')}
             </div>
           ) : (
             visible.map((task) => (
-              <KanbanCard key={task.id} projectKey={projectKey} task={task} />
+              <KanbanCard
+                key={task.id}
+                projectKey={projectKey}
+                task={task}
+                selectable={selectable}
+              />
             ))
           )}
           {hidden > 0 ? (
@@ -373,6 +383,7 @@ function SubColumnedColumn({
   wipLimit,
   laneKey,
   subColumns,
+  selectable,
 }: Props & { subColumns: BoardSubColumnView[] }) {
   const tStatus = useT('tasks.status');
   const overLimit = wipLimit != null && tasks.length > wipLimit;
@@ -416,6 +427,7 @@ function SubColumnedColumn({
             laneKey={laneKey}
             sub={sub}
             tasks={bySub.get(sub.id) ?? []}
+            selectable={selectable}
           />
         ))}
       </div>
@@ -429,12 +441,14 @@ function SubZone({
   laneKey,
   sub,
   tasks,
+  selectable,
 }: {
   projectKey: string;
   status: Status;
   laneKey?: string;
   sub: BoardSubColumnView;
   tasks: BoardTask[];
+  selectable?: boolean;
 }) {
   const tBoard = useT('tasks.board');
   const overLimit = sub.wipLimit != null && tasks.length > sub.wipLimit;
@@ -472,7 +486,12 @@ function SubZone({
             </div>
           ) : (
             tasks.map((task) => (
-              <KanbanCard key={task.id} projectKey={projectKey} task={task} />
+              <KanbanCard
+                key={task.id}
+                projectKey={projectKey}
+                task={task}
+                selectable={selectable}
+              />
             ))
           )}
         </div>
