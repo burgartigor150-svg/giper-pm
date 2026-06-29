@@ -23,6 +23,7 @@ import { TaskPreviewCard } from './TaskPreviewCard';
 import { CreateChannelDialog } from './CreateChannelDialog';
 import { ChannelHeader } from './ChannelHeader';
 import { VideoNotePlayer } from './VideoNotePlayer';
+import { AudioNotePlayer } from './AudioNotePlayer';
 import { SystemEventCard, type SystemEvent } from './SystemEventCard';
 import { MessageActions } from './MessageActions';
 import { Pin, MessageSquareReply } from 'lucide-react';
@@ -497,6 +498,15 @@ function MessageRow({
               if (a.kind === 'VIDEO_NOTE') {
                 return (
                   <VideoNotePlayer
+                    key={a.id}
+                    attachmentId={a.id}
+                    durationSec={a.durationSec}
+                  />
+                );
+              }
+              if (a.kind === 'AUDIO_NOTE') {
+                return (
+                  <AudioNotePlayer
                     key={a.id}
                     attachmentId={a.id}
                     durationSec={a.durationSec}

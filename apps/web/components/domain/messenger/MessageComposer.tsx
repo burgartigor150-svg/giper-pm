@@ -7,11 +7,12 @@ import {
   useTransition,
   type KeyboardEvent,
 } from 'react';
-import { Send, Camera, Paperclip } from 'lucide-react';
+import { Send, Camera, Paperclip, Mic } from 'lucide-react';
 import { Avatar } from '@giper/ui/components/Avatar';
 import { Button } from '@giper/ui/components/Button';
 import { searchUsersForMention, sendFileAction } from '@/actions/messenger';
 import { VideoNoteRecorder } from './VideoNoteRecorder';
+import { AudioNoteRecorder } from './AudioNoteRecorder';
 
 /** Best-effort natural dimensions of an image File (so layout doesn't shift). */
 function readImageDims(file: File): Promise<{ w: number; h: number } | null> {
@@ -72,6 +73,7 @@ export function MessageComposer({
   const [draft, setDraft] = useState('');
   const [pending, startTransition] = useTransition();
   const [recorderOpen, setRecorderOpen] = useState(false);
+  const [audioRecorderOpen, setAudioRecorderOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -251,6 +253,20 @@ export function MessageComposer({
     );
   }
 
+  if (audioRecorderOpen && channelId) {
+    return (
+      <AudioNoteRecorder
+        channelId={channelId}
+        parentId={parentId}
+        onSent={() => {
+          setAudioRecorderOpen(false);
+          onVideoNoteSent?.();
+        }}
+        onClose={() => setAudioRecorderOpen(false)}
+      />
+    );
+  }
+
   return (
     <form
       onSubmit={(e) => {
@@ -320,6 +336,17 @@ export function MessageComposer({
             title="Прикрепить файл или изображение"
           >
             <Paperclip className="size-4" />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            disabled={pending || disabled || uploading}
+            onClick={() => setAudioRecorderOpen(true)}
+            aria-label="Записать голосовое сообщение"
+            title="Голосовое сообщение (до 5 мин)"
+          >
+            <Mic className="size-4" />
           </Button>
           <Button
             type="button"
