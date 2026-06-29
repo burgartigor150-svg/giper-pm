@@ -45,6 +45,7 @@ const TABLES_IN_DELETE_ORDER = [
   'PipelineStage',
   'Pipeline',
   'Contact',
+  'StatusSnapshot',
   'SprintSnapshot',
   'Sprint',
   'Version',

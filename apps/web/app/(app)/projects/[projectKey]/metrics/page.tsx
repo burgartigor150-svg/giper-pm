@@ -5,7 +5,9 @@ import { requireAuth } from '@/lib/auth';
 import { getProject } from '@/lib/projects';
 import { DomainError } from '@/lib/errors';
 import { getBoardMetrics } from '@/lib/board/getBoardMetrics';
+import { getCumulativeFlow } from '@/lib/board/getCumulativeFlow';
 import { BoardMetricsCharts } from '@/components/domain/BoardMetricsCharts';
+import { CumulativeFlowChart } from '@/components/domain/CumulativeFlowChart';
 
 function fmtDur(hours: number | null): string {
   if (hours == null) return '—';
@@ -35,6 +37,7 @@ export default async function ProjectMetricsPage({
   }
 
   const metrics = await getBoardMetrics(project.id, Date.now());
+  const cfd = await getCumulativeFlow(project.id, 30);
 
   return (
     <div className="mx-auto max-w-[1100px] space-y-4">
@@ -93,6 +96,20 @@ export default async function ProjectMetricsPage({
       <Card>
         <CardContent className="pt-6">
           <BoardMetricsCharts metrics={metrics} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Кумулятивный поток (CFD)</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <CumulativeFlowChart data={cfd} />
+          <p className="mt-3 text-xs text-muted-foreground">
+            Количество карточек в каждом статусе по дням. Расширяющаяся полоса «В
+            работе» — копится незавершёнка; растущий разрыв между «Бэклог» и
+            «Готово» — растёт время цикла. Считается по суточным снимкам (cron).
+          </p>
         </CardContent>
       </Card>
 
