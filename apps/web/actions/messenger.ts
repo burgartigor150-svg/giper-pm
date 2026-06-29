@@ -1061,6 +1061,136 @@ export async function sendFileAction(fd: FormData): Promise<ActionResult<{ id: s
   return { ok: true, data: { id: created.id } };
 }
 
+// ---------------------------------------------------------------------------
+// Voice / audio notes (TG-style push-to-record voice messages)
+// ---------------------------------------------------------------------------
+
+const AUDIO_NOTE_MAX_DURATION_SEC = 300; // 5 minutes
+const AUDIO_NOTE_MAX_BYTES = 12 * 1024 * 1024; // 12 MB
+
+/**
+ * Persist a recorded voice message as Message + MessageAttachment
+ * (kind=AUDIO_NOTE). Mirrors sendVideoNoteAction: server is the final word on
+ * size/mime/duration; posting permission via resolveChannelAccess. Served
+ * inline by the hardened attachment route (audio/* is inline-safe).
+ *
+ * FormData: channelId, optional parentId, file (Blob audio/*), duration (sec),
+ * optional mime override.
+ */
+export async function sendAudioNoteAction(fd: FormData): Promise<ActionResult<{ id: string }>> {
+  const me = await requireAuth();
+  const channelId = String(fd.get('channelId') ?? '');
+  const parentIdRaw = fd.get('parentId');
+  const parentId = typeof parentIdRaw === 'string' && parentIdRaw ? parentIdRaw : null;
+  const file = fd.get('file');
+  const durationRaw = Number(fd.get('duration'));
+
+  if (!channelId) return { ok: false, error: { code: 'VALIDATION', message: 'channelId не указан' } };
+  if (!(file instanceof Blob)) return { ok: false, error: { code: 'VALIDATION', message: 'Файл не передан' } };
+  if (file.size === 0) return { ok: false, error: { code: 'VALIDATION', message: 'Пустой файл' } };
+  if (file.size > AUDIO_NOTE_MAX_BYTES) {
+    return {
+      ok: false,
+      error: { code: 'VALIDATION', message: `Файл слишком большой (лимит ${AUDIO_NOTE_MAX_BYTES / 1_048_576} МБ)` },
+    };
+  }
+  const mimeField = String(fd.get('mime') ?? '').trim();
+  const mime = mimeField || file.type || 'application/octet-stream';
+  if (!mime.startsWith('audio/')) {
+    return { ok: false, error: { code: 'VALIDATION', message: `Тип файла "${mime}" не поддерживается` } };
+  }
+  if (!Number.isFinite(durationRaw) || durationRaw <= 0) {
+    return { ok: false, error: { code: 'VALIDATION', message: 'Длительность не указана' } };
+  }
+  if (durationRaw > AUDIO_NOTE_MAX_DURATION_SEC + 0.5) {
+    return {
+      ok: false,
+      error: { code: 'VALIDATION', message: `Слишком длинная запись (лимит ${AUDIO_NOTE_MAX_DURATION_SEC}с)` },
+    };
+  }
+  const duration = Math.min(AUDIO_NOTE_MAX_DURATION_SEC, Math.max(1, Math.round(durationRaw)));
+
+  const access = await resolveChannelAccess(channelId, me.id);
+  if (!access) return { ok: false, error: { code: 'NOT_FOUND', message: 'Канал не найден' } };
+  if (!access.canPost) {
+    if (access.kind === 'PUBLIC') {
+      await ensureMembership(channelId, me.id);
+    } else {
+      return { ok: false, error: { code: 'FORBIDDEN', message: 'Нет прав на запись' } };
+    }
+  }
+
+  let finalParentId: string | null = null;
+  if (parentId) {
+    const parent = await prisma.message.findUnique({
+      where: { id: parentId },
+      select: { channelId: true, parentId: true },
+    });
+    if (!parent || parent.channelId !== channelId) {
+      return { ok: false, error: { code: 'NOT_FOUND', message: 'Родительское сообщение не найдено' } };
+    }
+    finalParentId = parent.parentId ?? parentId;
+  }
+
+  const ext = mime.includes('mp4')
+    ? 'm4a'
+    : mime.includes('mpeg')
+      ? 'mp3'
+      : mime.includes('ogg')
+        ? 'ogg'
+        : 'webm';
+  const { putObject, buildMessageFileKey } = await import('@/lib/storage/s3');
+  const key = buildMessageFileKey(channelId, `voice.${ext}`);
+  const buf = Buffer.from(await file.arrayBuffer());
+  await putObject({ key, body: buf, contentType: mime });
+
+  const created = await prisma.$transaction(async (tx) => {
+    const msg = await tx.message.create({
+      data: {
+        channelId,
+        authorId: me.id,
+        body: '',
+        parentId: finalParentId,
+        attachments: {
+          create: {
+            filename: `voice.${ext}`,
+            mimeType: mime,
+            sizeBytes: file.size,
+            storageKey: key,
+            kind: 'AUDIO_NOTE',
+            durationSec: duration,
+          },
+        },
+      },
+      select: { id: true, parentId: true },
+    });
+    if (msg.parentId) {
+      await tx.message.update({ where: { id: msg.parentId }, data: { replyCount: { increment: 1 } } });
+    }
+    await tx.channel.update({ where: { id: channelId }, data: { updatedAt: new Date() } });
+    return msg;
+  });
+
+  await publishChatEvent({
+    kind: 'message.new',
+    channelId,
+    messageId: created.id,
+    authorId: me.id,
+    parentId: created.parentId ?? null,
+  });
+  await notifyNewMessage({
+    channelId,
+    messageId: created.id,
+    authorId: me.id,
+    authorName: me.name ?? null,
+    body: '🎤 Голосовое сообщение',
+    mentionedIds: [],
+  });
+  revalidatePath('/messages');
+  revalidatePath(`/messages/${channelId}`);
+  return { ok: true, data: { id: created.id } };
+}
+
 export async function editMessageAction(
   messageId: string,
   body: string,
