@@ -359,12 +359,21 @@ async function collectMyGroupIds(
   return [...ids];
 }
 
-/** Watermark for incremental sync — the latest successful run's startedAt. */
+/**
+ * Watermark for incremental sync — the latest FULLY successful run's startedAt.
+ *
+ * A PARTIAL run (one with item-level errors) must NOT advance the cursor: the
+ * tasks that errored in it were changed before its startedAt, so the next run —
+ * fetching only `>=CHANGED_DATE = watermark` — would never re-scan them and the
+ * failures would become permanent drops. Anchoring on the last SUCCESS makes the
+ * next run re-scan from the last clean point and re-attempt the errored items
+ * (at the cost of re-processing already-synced ones, which is idempotent).
+ */
 export async function lastSuccessfulSyncStart(prisma: PrismaClient): Promise<Date | null> {
   const log = await prisma.integrationSyncLog.findFirst({
     where: {
       integration: { kind: 'BITRIX24' },
-      status: { in: ['SUCCESS', 'PARTIAL'] },
+      status: 'SUCCESS',
     },
     orderBy: { startedAt: 'desc' },
     select: { startedAt: true },

@@ -306,7 +306,7 @@ export async function runKaitenSync(
 
         const prior = await prisma.task.findFirst({
           where: { projectId: params.projectId, externalSource: KAITEN_SOURCE, externalId },
-          select: { id: true },
+          select: { id: true, completedAt: true },
         });
 
         let taskId: string;
@@ -315,7 +315,19 @@ export async function runKaitenSync(
             where: { id: prior.id },
             // Only set the assignee when the owner maps to a local user — never
             // clear a manually-set assignee just because the owner is unmapped.
-            data: { title, description, status, ...mirrorStatusFk(params.projectId, status), dueDate, ...(ownerLocalId ? { assigneeId: ownerLocalId } : {}) },
+            // A card that has moved to DONE needs completedAt (throughput /
+            // cycle-time / burndown all key off it) — stamp it once, on the
+            // first close, mirroring the create path; never overwrite an earlier
+            // close on a re-sync.
+            data: {
+              title,
+              description,
+              status,
+              ...mirrorStatusFk(params.projectId, status),
+              dueDate,
+              ...(ownerLocalId ? { assigneeId: ownerLocalId } : {}),
+              ...(status === 'DONE' && !prior.completedAt ? { completedAt: new Date() } : {}),
+            },
           });
           taskId = prior.id;
           updated++;
@@ -426,14 +438,22 @@ export async function runKaitenSync(
           if (seenLiveIds.has(externalId)) continue;
           const local = await prisma.task.findFirst({
             where: { projectId: params.projectId, externalSource: KAITEN_SOURCE, externalId },
-            select: { id: true, status: true },
+            select: { id: true, status: true, completedAt: true },
           });
           if (!local) continue;
           const target = card.state === 3 ? 'DONE' : 'CANCELED';
           if (local.status !== target) {
             await prisma.task.update({
               where: { id: local.id },
-              data: { status: target, ...mirrorStatusFk(params.projectId, target) },
+              // A reconciled DONE card needs completedAt too (see the live-update
+              // path) — otherwise an archived-while-done card stays invisible to
+              // throughput / cycle-time / burndown. CANCELED is terminal but not
+              // "completed", matching the create path.
+              data: {
+                status: target,
+                ...mirrorStatusFk(params.projectId, target),
+                ...(target === 'DONE' && !local.completedAt ? { completedAt: new Date() } : {}),
+              },
             });
             reconciled++;
           }
