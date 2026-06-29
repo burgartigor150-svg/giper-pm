@@ -7,6 +7,7 @@ import { BITRIX_BOT_EMAIL } from '@giper/integrations/bitrix24';
 import { getEffectiveCaps } from '@/lib/capabilities';
 import { ensureMembership, resolveChannelAccess } from '@/lib/messenger/access';
 import { publishChatEvent } from '@/lib/realtime/publishChat';
+import { createNotification } from '@/lib/notifications/createNotifications';
 import { extractTaskRefs } from '@/lib/text/taskRefs';
 import { loadTaskPreviewsForRefs } from '@/lib/tasks/loadTaskPreviews';
 
@@ -69,7 +70,42 @@ export async function listMyChannels() {
       },
     }),
   ]);
-  return { memberChannels, publicChannels };
+  const unread = await unreadCountsFor(
+    me.id,
+    memberChannels.map((c) => c.id),
+  );
+  return {
+    memberChannels: memberChannels.map((c) => ({ ...c, unreadCount: unread.get(c.id) ?? 0 })),
+    publicChannels,
+  };
+}
+
+/**
+ * Per-channel unread message count for a user, in one round-trip. A message
+ * is unread when it was authored by someone else, is not a SYSTEM service
+ * message, is not deleted, and was created after the member's lastReadAt
+ * (or ever, if they've never read the channel). The sidebar badge keys off
+ * this. Muted channels still count here — the UI dims them rather than
+ * zeroing, so the user can still see there's activity.
+ */
+async function unreadCountsFor(
+  userId: string,
+  channelIds: string[],
+): Promise<Map<string, number>> {
+  if (channelIds.length === 0) return new Map();
+  const rows = await prisma.$queryRaw<Array<{ channelId: string; count: bigint }>>`
+    SELECT m."channelId" AS "channelId", COUNT(*)::bigint AS count
+    FROM "Message" m
+    JOIN "ChannelMember" cm
+      ON cm."channelId" = m."channelId" AND cm."userId" = ${userId}
+    WHERE m."channelId" IN (${Prisma.join(channelIds)})
+      AND m."authorId" <> ${userId}
+      AND m.source <> 'SYSTEM'
+      AND m."deletedAt" IS NULL
+      AND m."createdAt" > COALESCE(cm."lastReadAt", '-infinity'::timestamp)
+    GROUP BY m."channelId"
+  `;
+  return new Map(rows.map((r) => [r.channelId, Number(r.count)]));
 }
 
 export async function createChannelAction(input: {
@@ -605,53 +641,104 @@ export async function postMessageAction(input: {
     await pushCollabChatMessageBestEffort(created.id);
   })();
 
-  // Push to mentioned users — minus the author (who already saw
-  // what they typed).
-  if (validMentions.length > 0) {
-    void (async () => {
-      try {
-        const channel = await prisma.channel.findUnique({
-          where: { id: input.channelId },
-          select: { name: true, kind: true },
-        });
-        const url =
-          channel?.kind === 'DM' || channel?.kind === 'GROUP_DM'
-            ? `/messages/${input.channelId}`
-            : `/messages/${input.channelId}`;
-        const headline = channel?.kind === 'DM'
-          ? `Сообщение от ${me.name ?? 'кого-то'}`
-          : `${me.name ?? 'Кто-то'} упомянул вас в «${channel?.name ?? 'чате'}»`;
-        // Exclude mentioned users who muted this channel — even
-        // explicit @ doesn't override mute. They'll see the message
-        // when they open the chat, just no OS toast.
-        const mentionedNotMuted = await prisma.channelMember.findMany({
-          where: {
-            channelId: input.channelId,
-            userId: { in: validMentions.map((u) => u.id), not: me.id },
-            isMuted: false,
-          },
-          select: { userId: true },
-        });
-        const { sendPushToUsers } = await import('@/lib/push/sendPush');
-        await sendPushToUsers(
-          mentionedNotMuted.map((m) => m.userId),
-          {
-            title: headline,
-            body: body.slice(0, 160),
-            url,
-            tag: `mention:${created.id}`,
-            data: { messageId: created.id, channelId: input.channelId },
-          },
-        );
-      } catch (e) {
-        // eslint-disable-next-line no-console
-        console.warn('[messenger] mention push failed:', e);
-      }
-    })();
-  }
+  // Notify recipients: mentions (CHAT_MENTION, in any channel) + DM/GROUP_DM
+  // peers (CHAT_DM). Best-effort; never blocks the send. Plain public/private
+  // channel messages deliberately do NOT toast — they only bump the sidebar
+  // unread badge, so a busy group channel doesn't spam every member.
+  // Awaited (not fire-and-forget) so the notification rows are guaranteed
+  // created before we return — recipients/badge are correct on the next read.
+  await notifyNewMessage({
+    channelId: input.channelId,
+    messageId: created.id,
+    authorId: me.id,
+    authorName: me.name ?? null,
+    body,
+    mentionedIds: validMentions.map((u) => u.id),
+  });
 
   revalidatePath('/messages');
   return { ok: true, data: { id: created.id } };
+}
+
+/**
+ * Create in-app Notification rows (which also push a `notification:new`
+ * realtime event so the inbox bell lights) + web push for a new message.
+ *   - @mentions → CHAT_MENTION in every channel kind.
+ *   - DM/GROUP_DM → CHAT_DM for the other participants.
+ *   - plain PUBLIC/PRIVATE/BROADCAST messages → nothing (badge only).
+ * Muted members are skipped entirely (no row, no toast); they still see the
+ * unread badge. createNotification dedups by (kind, link) within 1h, so a
+ * burst of DMs collapses into one bell entry.
+ */
+async function notifyNewMessage(args: {
+  channelId: string;
+  messageId: string;
+  authorId: string;
+  authorName: string | null;
+  body: string;
+  mentionedIds: string[];
+}): Promise<void> {
+  try {
+    const channel = await prisma.channel.findUnique({
+      where: { id: args.channelId },
+      select: {
+        name: true,
+        kind: true,
+        members: {
+          where: { isMuted: false, userId: { not: args.authorId } },
+          select: { userId: true },
+        },
+      },
+    });
+    if (!channel) return;
+    const nonMuted = new Set(channel.members.map((m) => m.userId));
+    const mentioned = args.mentionedIds.filter((id) => nonMuted.has(id));
+    const mentionedSet = new Set(mentioned);
+    const link = `/messages/${args.channelId}`;
+    const preview = args.body.slice(0, 160);
+    const who = args.authorName ?? 'Кто-то';
+
+    for (const userId of mentioned) {
+      await createNotification({
+        userId,
+        kind: 'CHAT_MENTION',
+        title: `${who} упомянул(а) вас в «${channel.name}»`,
+        body: preview,
+        link,
+        payload: { messageId: args.messageId, channelId: args.channelId },
+      });
+    }
+
+    const dmRecipients =
+      channel.kind === 'DM' || channel.kind === 'GROUP_DM'
+        ? [...nonMuted].filter((id) => !mentionedSet.has(id))
+        : [];
+    for (const userId of dmRecipients) {
+      await createNotification({
+        userId,
+        kind: 'CHAT_DM',
+        title: channel.kind === 'DM' ? `Сообщение от ${who}` : `${who} · «${channel.name}»`,
+        body: preview,
+        link,
+        payload: { messageId: args.messageId, channelId: args.channelId },
+      });
+    }
+
+    const pushTargets = [...new Set([...mentioned, ...dmRecipients])];
+    if (pushTargets.length > 0) {
+      const { sendPushToUsers } = await import('@/lib/push/sendPush');
+      await sendPushToUsers(pushTargets, {
+        title: channel.kind === 'DM' ? `Сообщение от ${who}` : (channel.name ?? 'Новое сообщение'),
+        body: preview,
+        url: link,
+        tag: `chat:${args.channelId}`,
+        data: { messageId: args.messageId, channelId: args.channelId },
+      });
+    }
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.warn('[messenger] notify failed:', e);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1032,12 +1119,21 @@ export async function markChannelReadAction(
   channelId: string,
 ): Promise<ActionResult> {
   const me = await requireAuth();
-  await prisma.channelMember
+  const updated = await prisma.channelMember
     .update({
       where: { channelId_userId: { channelId, userId: me.id } },
       data: { lastReadAt: new Date() },
+      select: { channelId: true },
     })
     .catch(() => null);
+  // Tell the user's OTHER tabs (and, for read-receipts later, the channel)
+  // that this user has caught up, so the sidebar badge clears live.
+  if (updated) {
+    await publishChatEvent(
+      { kind: 'channel.read', channelId, userId: me.id },
+      { notifyUserIds: [me.id] },
+    );
+  }
   return { ok: true };
 }
 
