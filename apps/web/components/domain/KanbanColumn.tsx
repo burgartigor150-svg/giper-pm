@@ -109,6 +109,10 @@ export function KanbanColumnHeader({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(name ?? '');
   const overLimit = wipLimit != null && count > wipLimit;
+  // Display label, reused for the visible name and the icon buttons' accessible
+  // names — in a swimlane header band there can be many identical controls, so
+  // each one gets column context for screen-reader users.
+  const colLabel = name ?? tStatus(status);
   const commitRename = () => {
     const clean = draft.trim();
     setEditing(false);
@@ -155,7 +159,7 @@ export function KanbanColumnHeader({
           )}
           title={manageable ? 'Переименовать колонку' : undefined}
         >
-          <span className="truncate">{name ?? tStatus(status)}</span>
+          <span className="truncate">{colLabel}</span>
           {manageable ? (
             <Pencil className="h-3 w-3 shrink-0 opacity-0 group-hover:opacity-60" />
           ) : null}
@@ -170,7 +174,7 @@ export function KanbanColumnHeader({
             }
             className="mr-0.5 max-w-[5.5rem] rounded border border-border bg-background px-1 py-0.5 text-xs text-muted-foreground"
             title="Тип колонки (категория) — изменит статус карточек в ней"
-            aria-label="Тип колонки"
+            aria-label={`Тип колонки «${colLabel}»`}
           >
             {COLUMN_TYPE_OPTIONS.map((o) => (
               <option key={o.value} value={o.value}>
@@ -187,6 +191,7 @@ export function KanbanColumnHeader({
               onClick={() => columnId && onMoveColumn?.(columnId, -1)}
               className="rounded p-0.5 text-muted-foreground hover:bg-muted disabled:opacity-30"
               title="Левее"
+              aria-label={`Сдвинуть колонку «${colLabel}» левее`}
             >
               <ChevronLeft className="h-3.5 w-3.5" />
             </button>
@@ -196,6 +201,7 @@ export function KanbanColumnHeader({
               onClick={() => columnId && onMoveColumn?.(columnId, 1)}
               className="rounded p-0.5 text-muted-foreground hover:bg-muted disabled:opacity-30"
               title="Правее"
+              aria-label={`Сдвинуть колонку «${colLabel}» правее`}
             >
               <ChevronRight className="h-3.5 w-3.5" />
             </button>
@@ -204,6 +210,7 @@ export function KanbanColumnHeader({
               onClick={() => columnId && onDeleteColumn?.(columnId)}
               className="rounded p-0.5 text-muted-foreground hover:bg-red-100 hover:text-red-700"
               title="Удалить колонку"
+              aria-label={`Удалить колонку «${colLabel}»`}
             >
               <Trash2 className="h-3.5 w-3.5" />
             </button>
@@ -211,7 +218,7 @@ export function KanbanColumnHeader({
         ) : null}
         {editing && manageable ? (
           <>
-            <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={commitRename} className="rounded p-0.5 text-green-700 hover:bg-green-100" title="Сохранить">
+            <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={commitRename} className="rounded p-0.5 text-green-700 hover:bg-green-100" title="Сохранить" aria-label="Сохранить название колонки">
               <Check className="h-3.5 w-3.5" />
             </button>
             <button
@@ -223,6 +230,7 @@ export function KanbanColumnHeader({
               }}
               className="rounded p-0.5 text-muted-foreground hover:bg-muted"
               title="Отмена"
+              aria-label="Отменить переименование колонки"
             >
               <X className="h-3.5 w-3.5" />
             </button>

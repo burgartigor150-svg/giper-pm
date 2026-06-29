@@ -795,18 +795,19 @@ function ColumnDragShell({
     setNodeRef: setDragRef,
     isDragging,
   } = useDraggable({ id: `colhead-${columnId}`, data: { type: 'colhead' } });
+  // Non-button (a11y): dnd-kit `attributes` already supplies role/tabIndex, so a
+  // native <button>'s Space/Enter default doesn't fight the keyboard drag sensor
+  // (mirrors the lane handle in LaneSection).
   const handle = (
-    <button
+    <span
       ref={setDragRef}
-      type="button"
+      aria-label="Перетащить колонку"
+      className="inline-flex shrink-0 cursor-grab touch-none rounded p-0.5 text-muted-foreground hover:bg-muted active:cursor-grabbing"
       {...attributes}
       {...listeners}
-      className="shrink-0 cursor-grab touch-none rounded p-0.5 text-muted-foreground hover:bg-muted active:cursor-grabbing"
-      title="Перетащить колонку"
-      aria-label="Перетащить колонку"
     >
       <GripVertical className="h-3.5 w-3.5" />
-    </button>
+    </span>
   );
   return (
     <div
