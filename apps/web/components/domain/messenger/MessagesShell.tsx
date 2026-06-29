@@ -35,6 +35,8 @@ type ChannelLite = {
   slug: string;
   name: string;
   projectId: string | null;
+  /** Unread messages for the current user (sidebar badge). */
+  unreadCount?: number;
 };
 
 type MessageAttachmentLite = {
@@ -399,6 +401,14 @@ function ChannelLink({
       >
         <Icon className="h-3.5 w-3.5 shrink-0 opacity-70" />
         <span className="truncate">{channel.name}</span>
+        {channel.unreadCount && channel.unreadCount > 0 ? (
+          <span
+            className="ml-auto shrink-0 rounded-full bg-primary px-1.5 py-0.5 text-[0.6875rem] font-semibold leading-none text-primary-foreground"
+            aria-label={`${channel.unreadCount} непрочитанных`}
+          >
+            {channel.unreadCount > 99 ? '99+' : channel.unreadCount}
+          </span>
+        ) : null}
       </Link>
     </li>
   );
