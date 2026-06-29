@@ -522,6 +522,8 @@ model Project {
   /// Per-COLUMN transition allowlist for free-form boards (gates same-category
   /// column→column moves). Empty = no restriction — inert until rows are added.
   workflowColumnTransitions WorkflowColumnTransition[]
+  /// Daily per-status card counts for the cumulative-flow diagram.
+  statusSnapshots StatusSnapshot[]
   /// CRM deals linked to this project (org-level sales → delivery handoff).
   deals           Deal[]          @relation("DealProject")
   /// Per-project custom-role assignments. Reserved for v2 — no writer in v1.
@@ -733,6 +735,26 @@ model WorkflowColumnTransition {
 
   @@unique([projectId, fromColumnId, toColumnId])
   @@index([projectId])
+}
+
+/// Daily snapshot of how many cards sit in each internal status for a project —
+/// the data behind the cumulative-flow diagram (CFD). Written by
+/// /api/cron/status-snapshot; one row per project per status per calendar day
+/// (idempotent). The board logs no per-day history, so without these the CFD has
+/// nothing to plot.
+model StatusSnapshot {
+  id        String     @id @default(cuid())
+  projectId String
+  project   Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  /// Calendar day (UTC) this snapshot represents.
+  date      DateTime   @db.Date
+  status    TaskStatus
+  /// Card count in `status` on `date`.
+  count     Int        @default(0)
+  takenAt   DateTime   @default(now())
+
+  @@unique([projectId, date, status])
+  @@index([projectId, date])
 }
 
 /// Daily point-in-time snapshot of a sprint's remaining work, written by
