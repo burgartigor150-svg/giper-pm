@@ -355,6 +355,97 @@ describe('setInternalStatus — TESTING leave-gate', () => {
   });
 });
 
+describe('setInternalStatus — REVIEW leave-gate (reviewer sign-off)', () => {
+  it('no reviewer set → any editor may close out of REVIEW', async () => {
+    const owner = await makeUser();
+    const project = await makeProject({ ownerId: owner.id, key: 'RV0' });
+    const t = await makeTask({ projectId: project.id, creatorId: owner.id, assigneeId: owner.id, number: 1 });
+    await prisma.task.update({ where: { id: t.id }, data: { internalStatus: 'REVIEW' } });
+    await expect(
+      setInternalStatus(t.id, 'DONE', { id: owner.id, role: 'MEMBER' }, { result: 'ок' }),
+    ).resolves.toMatchObject({ projectKey: project.key });
+    expect((await prisma.task.findUnique({ where: { id: t.id } }))?.internalStatus).toBe('DONE');
+  });
+
+  it('reviewer set → the ASSIGNEE (non-reviewer) cannot self-approve their own card', async () => {
+    const owner = await makeUser();
+    const reviewer = await makeUser();
+    const assignee = await makeUser();
+    const project = await makeProject({ ownerId: owner.id, key: 'RV1' });
+    // assignee passes the BASE gate (they're the assignee) — so the ONLY thing
+    // that can block them is the reviewer gate.
+    const t = await makeTask({ projectId: project.id, creatorId: owner.id, assigneeId: assignee.id, number: 1 });
+    await prisma.task.update({
+      where: { id: t.id },
+      data: { internalStatus: 'REVIEW', reviewerId: reviewer.id },
+    });
+    await expect(
+      setInternalStatus(t.id, 'DONE', { id: assignee.id, role: 'MEMBER' }, { result: 'готово' }),
+    ).rejects.toMatchObject({ code: 'INSUFFICIENT_PERMISSIONS' });
+    expect((await prisma.task.findUnique({ where: { id: t.id } }))?.internalStatus).toBe('REVIEW');
+  });
+
+  it('reviewer set → sending BACK to IN_PROGRESS is also reviewer-gated', async () => {
+    const owner = await makeUser();
+    const reviewer = await makeUser();
+    const assignee = await makeUser();
+    const project = await makeProject({ ownerId: owner.id, key: 'RV2' });
+    const t = await makeTask({ projectId: project.id, creatorId: owner.id, assigneeId: assignee.id, number: 1 });
+    await prisma.task.update({
+      where: { id: t.id },
+      data: { internalStatus: 'REVIEW', reviewerId: reviewer.id },
+    });
+    await expect(
+      setInternalStatus(t.id, 'IN_PROGRESS', { id: assignee.id, role: 'MEMBER' }),
+    ).rejects.toMatchObject({ code: 'INSUFFICIENT_PERMISSIONS' });
+  });
+
+  it('reviewer set → the reviewer themselves may close out of REVIEW', async () => {
+    const owner = await makeUser();
+    const reviewer = await makeUser();
+    const project = await makeProject({ ownerId: owner.id, key: 'RV3' });
+    // reviewer is also the assignee here only so the base gate passes.
+    const t = await makeTask({ projectId: project.id, creatorId: owner.id, assigneeId: reviewer.id, number: 1 });
+    await prisma.task.update({
+      where: { id: t.id },
+      data: { internalStatus: 'REVIEW', reviewerId: reviewer.id },
+    });
+    await expect(
+      setInternalStatus(t.id, 'DONE', { id: reviewer.id, role: 'MEMBER' }, { result: 'одобрено' }),
+    ).resolves.toMatchObject({ projectKey: project.key });
+  });
+
+  it('reviewer set → a cap-holder (ADMIN) may close out of REVIEW', async () => {
+    const owner = await makeUser();
+    const reviewer = await makeUser();
+    const admin = await makeUser({ role: 'ADMIN' });
+    const project = await makeProject({ ownerId: owner.id, key: 'RV4' });
+    const t = await makeTask({ projectId: project.id, creatorId: owner.id, number: 1 });
+    await prisma.task.update({
+      where: { id: t.id },
+      data: { internalStatus: 'REVIEW', reviewerId: reviewer.id },
+    });
+    await expect(
+      setInternalStatus(t.id, 'DONE', { id: admin.id, role: 'ADMIN' }, { result: 'ok' }),
+    ).resolves.toMatchObject({ projectKey: project.key });
+  });
+
+  it('moving INTO review is never gated by the reviewer gate', async () => {
+    const owner = await makeUser();
+    const reviewer = await makeUser();
+    const project = await makeProject({ ownerId: owner.id, key: 'RV5' });
+    const t = await makeTask({ projectId: project.id, creatorId: owner.id, assigneeId: owner.id, number: 1 });
+    await prisma.task.update({
+      where: { id: t.id },
+      data: { internalStatus: 'IN_PROGRESS', reviewerId: reviewer.id },
+    });
+    await expect(
+      setInternalStatus(t.id, 'REVIEW', { id: owner.id, role: 'MEMBER' }),
+    ).resolves.toMatchObject({ projectKey: project.key });
+    expect((await prisma.task.findUnique({ where: { id: t.id } }))?.internalStatus).toBe('REVIEW');
+  });
+});
+
 describe('visibility — a tester-only user sees the task on the board', () => {
   it('listTasksForBoard returns a task where the viewer is ONLY the tester', async () => {
     const { listTasksForBoard } = await import('@/lib/tasks/listTasksForBoard');

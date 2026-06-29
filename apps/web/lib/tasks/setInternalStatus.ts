@@ -57,6 +57,7 @@ export async function setInternalStatus(
       externalSource: true,
       creatorId: true,
       assigneeId: true,
+      reviewerId: true,
       testerId: true,
       parentId: true,
       project: {
@@ -95,6 +96,27 @@ export async function setInternalStatus(
           'INSUFFICIENT_PERMISSIONS',
           403,
           'Только назначенный тестировщик может вывести задачу из тестирования',
+        );
+      }
+    }
+  }
+
+  // REVIEW gate — same shape as the TESTING gate above, and the same authority
+  // model as approveTaskAction / rejectTaskAction (review.ts): when a card LEAVES
+  // the REVIEW stage and a reviewer is set, only that reviewer (or a holder of
+  // task.review.close — ADMIN/PM by baseline) may move it out, in EITHER
+  // direction (approve→DONE or send back). Without this the reviewer sign-off was
+  // bypassable on the internal track via board drag / status picker / MCP — e.g.
+  // the assignee could self-approve their own card. (Moving INTO review is never
+  // gated; a reviewer-less task is unchanged.)
+  if (task.internalStatus === 'REVIEW' && status !== 'REVIEW') {
+    if (task.reviewerId && task.reviewerId !== user.id) {
+      const caps = await getEffectiveCapsForProject(user, task.projectId);
+      if (!caps.has('task.review.close')) {
+        throw new DomainError(
+          'INSUFFICIENT_PERMISSIONS',
+          403,
+          'Только назначенный ревьюер может вывести задачу из ревью',
         );
       }
     }
