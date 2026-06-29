@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@giper/db';
 import { randomToken, sha256, isAllowedRedirectUri } from '@/lib/oauth/core';
+import { rateLimit, clientIp } from '@/lib/api/rateLimit';
 
 /**
  * RFC 7591 — Dynamic Client Registration. MCP clients (claude.ai) self-register
@@ -9,7 +10,21 @@ import { randomToken, sha256, isAllowedRedirectUri } from '@/lib/oauth/core';
  */
 export const dynamic = 'force-dynamic';
 
+// DCR is unauthenticated by design — brake per IP so it can't grow OAuthClient
+// without bound. Registration is rare (one per client), so a low hourly cap is
+// generous for real setup while stopping mass registration.
+const REGISTER_RL_MAX = 10;
+const REGISTER_RL_WINDOW_SEC = 60 * 60;
+
 export async function POST(req: Request) {
+  const rl = await rateLimit(`oauth:register:${clientIp(req)}`, REGISTER_RL_MAX, REGISTER_RL_WINDOW_SEC);
+  if (!rl.ok) {
+    return NextResponse.json(
+      { error: 'rate_limited', error_description: `Слишком много регистраций, повторите через ~${rl.retryAfter}с` },
+      { status: 429, headers: { 'retry-after': String(rl.retryAfter ?? REGISTER_RL_WINDOW_SEC) } },
+    );
+  }
+
   let body: {
     redirect_uris?: unknown;
     client_name?: unknown;

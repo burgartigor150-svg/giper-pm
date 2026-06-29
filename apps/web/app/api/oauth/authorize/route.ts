@@ -10,6 +10,7 @@ import {
   verifyConsentToken,
   type ConsentBinding,
 } from '@/lib/oauth/core';
+import { rateLimit, clientIp } from '@/lib/api/rateLimit';
 
 /**
  * OAuth Authorization Endpoint (Authorization Code + PKCE).
@@ -21,6 +22,17 @@ import {
  * code bound to the PKCE challenge and redirect back to the client.
  */
 export const dynamic = 'force-dynamic';
+
+// Generous per-IP brake (humans clicking through consent) — defense in depth.
+const AUTHORIZE_RL_MAX = 60;
+const AUTHORIZE_RL_WINDOW_SEC = 60;
+
+function tooManyPage(retryAfter: number): Response {
+  return new Response('Слишком много запросов. Повторите позже.', {
+    status: 429,
+    headers: { 'content-type': 'text/plain; charset=utf-8', 'retry-after': String(retryAfter) },
+  });
+}
 
 function errorPage(message: string): Response {
   return new Response(
@@ -118,6 +130,9 @@ function bindingOf(params: AuthorizeParams, userId: string): ConsentBinding {
  * but re-render the consent form now.)
  */
 export async function GET(req: Request) {
+  const rl = await rateLimit(`oauth:authorize:${clientIp(req)}`, AUTHORIZE_RL_MAX, AUTHORIZE_RL_WINDOW_SEC);
+  if (!rl.ok) return tooManyPage(rl.retryAfter ?? AUTHORIZE_RL_WINDOW_SEC);
+
   const url = new URL(req.url);
   const params = readParams(url.searchParams);
 
@@ -165,6 +180,9 @@ export async function GET(req: Request) {
 
 /** POST = consent approval. Validates the signed consent token, then issues a code. */
 export async function POST(req: Request) {
+  const rl = await rateLimit(`oauth:authorize:${clientIp(req)}`, AUTHORIZE_RL_MAX, AUTHORIZE_RL_WINDOW_SEC);
+  if (!rl.ok) return tooManyPage(rl.retryAfter ?? AUTHORIZE_RL_WINDOW_SEC);
+
   const url = new URL(req.url);
 
   let form: FormData;

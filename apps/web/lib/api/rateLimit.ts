@@ -25,6 +25,20 @@ function redis(): Redis | null {
 export type RateLimitResult = { ok: boolean; retryAfter?: number };
 
 /**
+ * Best-effort client IP for rate-limit keys. The app runs behind nginx, which
+ * sets X-Forwarded-For (client first) / X-Real-IP. Falls back to 'unknown' so a
+ * missing header degrades to a single shared bucket rather than throwing.
+ */
+export function clientIp(req: Request): string {
+  const xff = req.headers.get('x-forwarded-for');
+  if (xff) {
+    const first = xff.split(',')[0]?.trim();
+    if (first) return first;
+  }
+  return req.headers.get('x-real-ip')?.trim() || 'unknown';
+}
+
+/**
  * Allow up to `limit` calls per `windowSec` for `key`. Returns { ok:false,
  * retryAfter } once the window is exceeded.
  */
