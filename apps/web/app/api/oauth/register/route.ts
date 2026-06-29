@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@giper/db';
-import { randomToken, sha256 } from '@/lib/oauth/core';
+import { randomToken, sha256, isAllowedRedirectUri } from '@/lib/oauth/core';
 
 /**
  * RFC 7591 — Dynamic Client Registration. MCP clients (claude.ai) self-register
@@ -21,12 +21,17 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'invalid_client_metadata' }, { status: 400 });
   }
 
+  // Only https, or http for loopback (native clients). Plain http to a remote
+  // host would let a code be exfiltrated over cleartext to an attacker server.
   const redirectUris = Array.isArray(body.redirect_uris)
-    ? body.redirect_uris.filter((u): u is string => typeof u === 'string' && /^https?:\/\//.test(u))
+    ? body.redirect_uris.filter((u): u is string => typeof u === 'string' && isAllowedRedirectUri(u))
     : [];
   if (redirectUris.length === 0) {
     return NextResponse.json(
-      { error: 'invalid_redirect_uri', error_description: 'redirect_uris required' },
+      {
+        error: 'invalid_redirect_uri',
+        error_description: 'redirect_uris required (https, or http only for loopback)',
+      },
       { status: 400 },
     );
   }
