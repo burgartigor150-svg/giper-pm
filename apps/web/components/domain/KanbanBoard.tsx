@@ -40,7 +40,7 @@ import { useT } from '@/lib/useT';
 import { cn } from '@giper/ui/cn';
 import { isClosing, statusCategory } from '@/lib/status/category';
 import { KanbanCard } from './KanbanCard';
-import { KanbanColumn } from './KanbanColumn';
+import { KanbanColumn, KanbanColumnHeader, COLUMN_BG } from './KanbanColumn';
 
 type Status = BoardTask['status'];
 
@@ -606,6 +606,57 @@ export function KanbanBoard({
     </div>
   );
 
+  // Lanes mode: column management (rename / re-type / move / delete / add and
+  // drag-reorder) lives in ONE header band above all lanes instead of being
+  // duplicated on every lane's columns. The lane rows below stay management-free
+  // (laneCols). Rendered only when canManageColumns, so non-manager and
+  // non-lane boards are byte-identical to before. Band counts are the column's
+  // GLOBAL totals across lanes — matching the board-wide WIP check; per-lane
+  // sub-totals stay on each lane's own columns.
+  const columnHeaderBand = (
+    <div className="flex gap-3 overflow-x-auto pb-1">
+      {columns.map((col, i) => {
+        const headerCell = (dragHandle?: ReactNode) => (
+          <div
+            className={cn(
+              'w-72 overflow-hidden rounded-md border-2 bg-muted/30',
+              COLUMN_BG[col.status as Exclude<Status, 'CANCELED'>],
+            )}
+          >
+            <KanbanColumnHeader
+              name={col.name}
+              status={col.status}
+              columnId={col.id}
+              manageable={canManageColumns}
+              count={(byColumn.get(col.id) ?? []).length}
+              wipLimit={col.wipLimit}
+              dragHandle={dragHandle}
+              onRenameColumn={onRenameColumn}
+              onSetColumnCategory={onSetColumnCategory}
+              onMoveColumn={onMoveColumn}
+              onDeleteColumn={onDeleteColumn}
+              isFirstColumn={i === 0}
+              isLastColumn={i === columns.length - 1}
+            />
+          </div>
+        );
+        // Free-form + manageable: wrap in the same drag shell as the no-lanes
+        // board so a column can be dragged to reorder from the band. Otherwise
+        // render the header directly (←/→ buttons still reorder).
+        return canManageColumns && freeFormColumns ? (
+          <ColumnDragShell key={col.id} columnId={col.id}>
+            {headerCell}
+          </ColumnDragShell>
+        ) : (
+          <div key={col.id} className="shrink-0">
+            {headerCell()}
+          </div>
+        );
+      })}
+      {canManageColumns ? <AddColumnControl onAdd={onAddColumn} /> : null}
+    </div>
+  );
+
   const laneTotalOf = (laneId: string) =>
     tasks.filter((t) => (t.swimlaneId ?? NO_LANE) === laneId).length;
 
@@ -631,9 +682,11 @@ export function KanbanBoard({
         }}
       >
         {hasLanes ? (
-          <div className="flex flex-col gap-5">
-            {lanes.map((lane) =>
-              lane.id === NO_LANE ? (
+          <div className="flex flex-col gap-3">
+            {canManageColumns ? columnHeaderBand : null}
+            <div className="flex flex-col gap-5">
+              {lanes.map((lane) =>
+                lane.id === NO_LANE ? (
                 <section key={lane.id} className="flex flex-col gap-2">
                   <div className="flex items-center gap-2">
                     <h3 className="text-sm font-semibold text-muted-foreground">{lane.name}</h3>
@@ -654,8 +707,9 @@ export function KanbanBoard({
                   {laneCols(lane.id)}
                 </LaneSection>
               ),
-            )}
-            {canManage ? <AddLaneControl onAdd={onAddLane} /> : null}
+              )}
+              {canManage ? <AddLaneControl onAdd={onAddLane} /> : null}
+            </div>
           </div>
         ) : (
           <div className="flex flex-col gap-3">

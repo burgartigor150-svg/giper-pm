@@ -60,7 +60,7 @@ type Props = {
   isLastColumn?: boolean;
 };
 
-const COLUMN_BG: Record<Exclude<Status, 'CANCELED'>, string> = {
+export const COLUMN_BG: Record<Exclude<Status, 'CANCELED'>, string> = {
   BACKLOG: 'border-neutral-200',
   TODO: 'border-sky-200',
   IN_PROGRESS: 'border-blue-200',
@@ -68,6 +68,184 @@ const COLUMN_BG: Record<Exclude<Status, 'CANCELED'>, string> = {
   BLOCKED: 'border-red-200',
   DONE: 'border-green-200',
 };
+
+/**
+ * The column header (name + manage controls + WIP/count badge), extracted so it
+ * can render BOTH inline in a column (PlainColumn, no-lanes board — byte-
+ * identical) AND once in a header band above swimlanes (lanes mode). Owns its
+ * own inline-rename state; takes NO droppable (card drops stay on the column/
+ * cell zones). `manageable` already folds in canManageColumns && columnId.
+ */
+export function KanbanColumnHeader({
+  name,
+  status,
+  columnId,
+  manageable,
+  count,
+  wipLimit,
+  dragHandle,
+  onRenameColumn,
+  onSetColumnCategory,
+  onMoveColumn,
+  onDeleteColumn,
+  isFirstColumn,
+  isLastColumn,
+}: {
+  name?: string;
+  status: Status;
+  columnId?: string;
+  manageable: boolean;
+  count: number;
+  wipLimit?: number | null;
+  dragHandle?: ReactNode;
+  onRenameColumn?: (columnId: string, name: string) => void;
+  onSetColumnCategory?: (columnId: string, category: StatusCategory) => void;
+  onMoveColumn?: (columnId: string, dir: -1 | 1) => void;
+  onDeleteColumn?: (columnId: string) => void;
+  isFirstColumn?: boolean;
+  isLastColumn?: boolean;
+}) {
+  const tStatus = useT('tasks.status');
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(name ?? '');
+  const overLimit = wipLimit != null && count > wipLimit;
+  const commitRename = () => {
+    const clean = draft.trim();
+    setEditing(false);
+    if (clean && clean !== name && columnId) onRenameColumn?.(columnId, clean);
+    else setDraft(name ?? '');
+  };
+  return (
+    <div
+      className={cn(
+        'flex items-center justify-between gap-1 border-b px-3 py-2 text-sm',
+        overLimit ? 'border-red-300 bg-red-50' : 'border-border',
+      )}
+    >
+      {dragHandle && manageable && !editing ? dragHandle : null}
+      {editing && manageable ? (
+        <input
+          autoFocus
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commitRename}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') commitRename();
+            if (e.key === 'Escape') {
+              setEditing(false);
+              setDraft(name ?? '');
+            }
+          }}
+          maxLength={60}
+          className="min-w-0 flex-1 rounded border border-border bg-background px-1.5 py-0.5 text-sm"
+        />
+      ) : (
+        <button
+          type="button"
+          disabled={!manageable}
+          onClick={() => {
+            if (!manageable) return;
+            setDraft(name ?? '');
+            setEditing(true);
+          }}
+          className={cn(
+            'group flex min-w-0 items-center gap-1 truncate text-left font-medium',
+            overLimit ? 'text-red-900' : '',
+            manageable ? 'hover:underline' : 'cursor-default',
+          )}
+          title={manageable ? 'Переименовать колонку' : undefined}
+        >
+          <span className="truncate">{name ?? tStatus(status)}</span>
+          {manageable ? (
+            <Pencil className="h-3 w-3 shrink-0 opacity-0 group-hover:opacity-60" />
+          ) : null}
+        </button>
+      )}
+      <div className="flex shrink-0 items-center gap-0.5">
+        {manageable && !editing && onSetColumnCategory ? (
+          <select
+            value={status}
+            onChange={(e) =>
+              columnId && onSetColumnCategory(columnId, e.target.value as StatusCategory)
+            }
+            className="mr-0.5 max-w-[5.5rem] rounded border border-border bg-background px-1 py-0.5 text-xs text-muted-foreground"
+            title="Тип колонки (категория) — изменит статус карточек в ней"
+            aria-label="Тип колонки"
+          >
+            {COLUMN_TYPE_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        ) : null}
+        {manageable && !editing ? (
+          <>
+            <button
+              type="button"
+              disabled={isFirstColumn}
+              onClick={() => columnId && onMoveColumn?.(columnId, -1)}
+              className="rounded p-0.5 text-muted-foreground hover:bg-muted disabled:opacity-30"
+              title="Левее"
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              disabled={isLastColumn}
+              onClick={() => columnId && onMoveColumn?.(columnId, 1)}
+              className="rounded p-0.5 text-muted-foreground hover:bg-muted disabled:opacity-30"
+              title="Правее"
+            >
+              <ChevronRight className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => columnId && onDeleteColumn?.(columnId)}
+              className="rounded p-0.5 text-muted-foreground hover:bg-red-100 hover:text-red-700"
+              title="Удалить колонку"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          </>
+        ) : null}
+        {editing && manageable ? (
+          <>
+            <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={commitRename} className="rounded p-0.5 text-green-700 hover:bg-green-100" title="Сохранить">
+              <Check className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                setEditing(false);
+                setDraft(name ?? '');
+              }}
+              className="rounded p-0.5 text-muted-foreground hover:bg-muted"
+              title="Отмена"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </>
+        ) : (
+          <span
+            className={cn(
+              'rounded-full px-2 py-0.5 text-xs tabular-nums',
+              overLimit ? 'bg-red-200 text-red-900' : 'bg-background text-muted-foreground',
+            )}
+            title={
+              wipLimit != null
+                ? `WIP-лимит: ${wipLimit}${overLimit ? ` — превышен на ${count - wipLimit}` : ''}`
+                : undefined
+            }
+          >
+            {wipLimit != null ? `${count}/${wipLimit}` : count}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
 
 /**
  * Delegator: a column with no sub-columns renders exactly as before
@@ -106,17 +284,11 @@ function PlainColumn({
   isFirstColumn,
   isLastColumn,
 }: Props) {
-  const tStatus = useT('tasks.status');
   const tBoard = useT('tasks.board');
 
   const [showAll, setShowAll] = useState(false);
   const visible = cap && !showAll ? tasks.slice(0, cap) : tasks;
   const hidden = tasks.length - visible.length;
-  const overLimit = wipLimit != null && tasks.length > wipLimit;
-
-  // Inline-rename state (kept unconditional so hooks are stable).
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(name ?? '');
 
   // Free-form mode keys the droppable by columnId (two columns can share a
   // status); otherwise the original `column-<status>` id is preserved byte-for-
@@ -128,12 +300,6 @@ function PlainColumn({
   });
 
   const manageable = Boolean(canManageColumns && columnId);
-  const commitRename = () => {
-    const clean = draft.trim();
-    setEditing(false);
-    if (clean && clean !== name && columnId) onRenameColumn?.(columnId, clean);
-    else setDraft(name ?? '');
-  };
 
   return (
     <div
@@ -144,134 +310,21 @@ function PlainColumn({
         isOver ? 'bg-muted/60' : '',
       )}
     >
-      <div
-        className={cn(
-          'flex items-center justify-between gap-1 border-b px-3 py-2 text-sm',
-          overLimit ? 'border-red-300 bg-red-50' : 'border-border',
-        )}
-      >
-        {dragHandle && manageable && !editing ? dragHandle : null}
-        {editing && manageable ? (
-          <input
-            autoFocus
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onBlur={commitRename}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') commitRename();
-              if (e.key === 'Escape') {
-                setEditing(false);
-                setDraft(name ?? '');
-              }
-            }}
-            maxLength={60}
-            className="min-w-0 flex-1 rounded border border-border bg-background px-1.5 py-0.5 text-sm"
-          />
-        ) : (
-          <button
-            type="button"
-            disabled={!manageable}
-            onClick={() => {
-              if (!manageable) return;
-              setDraft(name ?? '');
-              setEditing(true);
-            }}
-            className={cn(
-              'group flex min-w-0 items-center gap-1 truncate text-left font-medium',
-              overLimit ? 'text-red-900' : '',
-              manageable ? 'hover:underline' : 'cursor-default',
-            )}
-            title={manageable ? 'Переименовать колонку' : undefined}
-          >
-            <span className="truncate">{name ?? tStatus(status)}</span>
-            {manageable ? (
-              <Pencil className="h-3 w-3 shrink-0 opacity-0 group-hover:opacity-60" />
-            ) : null}
-          </button>
-        )}
-        <div className="flex shrink-0 items-center gap-0.5">
-          {manageable && !editing && onSetColumnCategory ? (
-            <select
-              value={status}
-              onChange={(e) =>
-                columnId && onSetColumnCategory(columnId, e.target.value as StatusCategory)
-              }
-              className="mr-0.5 max-w-[5.5rem] rounded border border-border bg-background px-1 py-0.5 text-xs text-muted-foreground"
-              title="Тип колонки (категория) — изменит статус карточек в ней"
-              aria-label="Тип колонки"
-            >
-              {COLUMN_TYPE_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          ) : null}
-          {manageable && !editing ? (
-            <>
-              <button
-                type="button"
-                disabled={isFirstColumn}
-                onClick={() => columnId && onMoveColumn?.(columnId, -1)}
-                className="rounded p-0.5 text-muted-foreground hover:bg-muted disabled:opacity-30"
-                title="Левее"
-              >
-                <ChevronLeft className="h-3.5 w-3.5" />
-              </button>
-              <button
-                type="button"
-                disabled={isLastColumn}
-                onClick={() => columnId && onMoveColumn?.(columnId, 1)}
-                className="rounded p-0.5 text-muted-foreground hover:bg-muted disabled:opacity-30"
-                title="Правее"
-              >
-                <ChevronRight className="h-3.5 w-3.5" />
-              </button>
-              <button
-                type="button"
-                onClick={() => columnId && onDeleteColumn?.(columnId)}
-                className="rounded p-0.5 text-muted-foreground hover:bg-red-100 hover:text-red-700"
-                title="Удалить колонку"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
-            </>
-          ) : null}
-          {editing && manageable ? (
-            <>
-              <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={commitRename} className="rounded p-0.5 text-green-700 hover:bg-green-100" title="Сохранить">
-                <Check className="h-3.5 w-3.5" />
-              </button>
-              <button
-                type="button"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => {
-                  setEditing(false);
-                  setDraft(name ?? '');
-                }}
-                className="rounded p-0.5 text-muted-foreground hover:bg-muted"
-                title="Отмена"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            </>
-          ) : (
-            <span
-              className={cn(
-                'rounded-full px-2 py-0.5 text-xs tabular-nums',
-                overLimit ? 'bg-red-200 text-red-900' : 'bg-background text-muted-foreground',
-              )}
-              title={
-                wipLimit != null
-                  ? `WIP-лимит: ${wipLimit}${overLimit ? ` — превышен на ${tasks.length - wipLimit}` : ''}`
-                  : undefined
-              }
-            >
-              {wipLimit != null ? `${tasks.length}/${wipLimit}` : tasks.length}
-            </span>
-          )}
-        </div>
-      </div>
+      <KanbanColumnHeader
+        name={name}
+        status={status}
+        columnId={columnId}
+        manageable={manageable}
+        count={tasks.length}
+        wipLimit={wipLimit}
+        dragHandle={dragHandle}
+        onRenameColumn={onRenameColumn}
+        onSetColumnCategory={onSetColumnCategory}
+        onMoveColumn={onMoveColumn}
+        onDeleteColumn={onDeleteColumn}
+        isFirstColumn={isFirstColumn}
+        isLastColumn={isLastColumn}
+      />
 
       <SortableContext
         items={visible.map((t) => t.id)}
