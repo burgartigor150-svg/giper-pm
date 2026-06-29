@@ -152,6 +152,36 @@ describe('bulkUpdateTasksAction — tags & sprints (Jira-port #2 v2)', () => {
     expect(await prisma.taskTag.count({ where: { tagId: tag.id } })).toBe(2);
   });
 
+  it('bulk remove-tag detaches a project tag from many tasks (idempotent)', async () => {
+    const admin = await makeUser({ role: 'ADMIN' });
+    const p = await makeProject({ ownerId: admin.id, key: 'BLKRMT' });
+    const tag = await prisma.tag.create({ data: { projectId: p.id, name: 'Frontend', slug: 'frontend' } });
+    const t1 = await makeTask({ projectId: p.id, creatorId: admin.id });
+    const t2 = await makeTask({ projectId: p.id, creatorId: admin.id });
+    const t3 = await makeTask({ projectId: p.id, creatorId: admin.id }); // never tagged
+    as(admin);
+    await bulkUpdateTasksAction([t1.id, t2.id], { kind: 'addTag', tagId: tag.id });
+    expect(await prisma.taskTag.count({ where: { tagId: tag.id } })).toBe(2);
+
+    const res = await bulkUpdateTasksAction([t1.id, t2.id, t3.id], { kind: 'removeTag', tagId: tag.id });
+    // t3 had no such tag — removal is a no-op success, not a failure.
+    expect(res.ok && res.data.succeeded).toBe(3);
+    expect(res.ok && res.data.failed).toBe(0);
+    expect(await prisma.taskTag.count({ where: { tagId: tag.id } })).toBe(0);
+  });
+
+  it('bulk remove-tag: a tag from another project is skipped per-item', async () => {
+    const admin = await makeUser({ role: 'ADMIN' });
+    const p = await makeProject({ ownerId: admin.id, key: 'BLKRMX' });
+    const other = await makeProject({ ownerId: admin.id, key: 'BLKRMY' });
+    const foreignTag = await prisma.tag.create({ data: { projectId: other.id, name: 'Foreign2', slug: 'foreign2' } });
+    const t = await makeTask({ projectId: p.id, creatorId: admin.id });
+    as(admin);
+
+    const res = await bulkUpdateTasksAction([t.id], { kind: 'removeTag', tagId: foreignTag.id });
+    expect(res.ok && res.data.failed).toBe(1);
+  });
+
   it('a tag from another project is skipped per-item (cross-project hardening)', async () => {
     const admin = await makeUser({ role: 'ADMIN' });
     const p = await makeProject({ ownerId: admin.id, key: 'BLKTGA' });

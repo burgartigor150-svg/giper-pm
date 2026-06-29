@@ -8,7 +8,7 @@ import { changeTaskStatus } from '@/lib/tasks/changeTaskStatus';
 import { assignTask } from '@/lib/tasks/assignTask';
 import { updateTask } from '@/lib/tasks/updateTask';
 import { deleteTask } from '@/lib/tasks/deleteTask';
-import { addTagToTask } from '@/lib/tasks/setTaskTag';
+import { addTagToTask, removeTagFromTask } from '@/lib/tasks/setTaskTag';
 import { setTaskSprint } from '@/lib/tasks/setTaskSprint';
 import { DomainError } from '@/lib/errors';
 
@@ -20,6 +20,7 @@ const bulkOpSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('assignee'), assigneeId: z.string().min(1).nullable() }),
   z.object({ kind: z.literal('priority'), priority: taskPrioritySchema }),
   z.object({ kind: z.literal('addTag'), tagId: z.string().min(1) }),
+  z.object({ kind: z.literal('removeTag'), tagId: z.string().min(1) }),
   z.object({ kind: z.literal('sprint'), sprintId: z.string().min(1).nullable() }),
 ]);
 export type BulkTaskOp = z.infer<typeof bulkOpSchema>;
@@ -31,8 +32,8 @@ type ActionResult<T> =
   | { ok: false; error: { code: string; message: string } };
 
 /**
- * Apply one operation (status / assignee / priority / addTag / sprint) to many
- * tasks at once.
+ * Apply one operation (status / assignee / priority / addTag / removeTag /
+ * sprint) to many tasks at once.
  *
  * Authorization is PER TASK: each id is routed through the SAME gated lib
  * mutation the single-task UI uses (changeTaskStatus → canEditTask,
@@ -85,6 +86,9 @@ export async function bulkUpdateTasksAction(
           break;
         case 'addTag':
           await addTagToTask(id, o.tagId, user);
+          break;
+        case 'removeTag':
+          await removeTagFromTask(id, o.tagId, user);
           break;
         case 'sprint':
           await setTaskSprint(id, o.sprintId, user);

@@ -157,7 +157,7 @@ type SprintOption = { id: string; name: string };
 type BoardMoveColumn = { id: string; name: string; status: BulkStatus };
 /** When set, the bar shows a board-native "Переместить" menu. */
 type BoardMove = { freeForm: boolean; columns: BoardMoveColumn[] };
-type Menu = 'status' | 'move' | 'assignee' | 'priority' | 'tag' | 'sprint' | null;
+type Menu = 'status' | 'move' | 'assignee' | 'priority' | 'tag' | 'removeTag' | 'sprint' | null;
 
 export function BulkTaskActionBar({
   members,
@@ -343,6 +343,29 @@ export function BulkTaskActionBar({
             >
               {tags.map((tg) => (
                 <MenuItem key={tg.id} onClick={() => run({ kind: 'addTag', tagId: tg.id })}>
+                  <span className="inline-flex items-center gap-2">
+                    <span
+                      className="h-2.5 w-2.5 shrink-0 rounded-full"
+                      style={{ backgroundColor: tg.color }}
+                      aria-hidden
+                    />
+                    {tg.name}
+                  </span>
+                </MenuItem>
+              ))}
+            </BulkMenu>
+          ) : null}
+
+          {tags.length > 0 ? (
+            <BulkMenu
+              open={menu === 'removeTag'}
+              onToggle={() => setMenu((m) => (m === 'removeTag' ? null : 'removeTag'))}
+              label="Убрать тег"
+              icon={<Tag className="h-4 w-4" aria-hidden />}
+              disabled={pending}
+            >
+              {tags.map((tg) => (
+                <MenuItem key={tg.id} onClick={() => run({ kind: 'removeTag', tagId: tg.id })}>
                   <span className="inline-flex items-center gap-2">
                     <span
                       className="h-2.5 w-2.5 shrink-0 rounded-full"

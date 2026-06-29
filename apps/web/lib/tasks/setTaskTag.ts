@@ -59,3 +59,24 @@ export async function addTagToTask(
     update: {},
   });
 }
+
+/**
+ * Remove a project tag from a task (idempotent — removing a tag the task does
+ * not have is a no-op success, so a bulk loop never errors on a partial match).
+ * Same gate + cross-project guard as {@link addTagToTask}.
+ */
+export async function removeTagFromTask(
+  taskId: string,
+  tagId: string,
+  user: SessionUser,
+): Promise<void> {
+  const task = await assertCanEditTags(taskId, user);
+  const tag = await prisma.tag.findUnique({
+    where: { id: tagId },
+    select: { projectId: true },
+  });
+  if (!tag || tag.projectId !== task.projectId) {
+    throw new DomainError('NOT_FOUND', 404, 'Тег не из этого проекта');
+  }
+  await prisma.taskTag.deleteMany({ where: { taskId, tagId } });
+}
