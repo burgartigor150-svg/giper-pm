@@ -24,10 +24,11 @@ export const STATUS_SEED: ReadonlyArray<{
   { category: 'BACKLOG', name: 'Бэклог', order: 0, color: '#94a3b8' },
   { category: 'TODO', name: 'К выполнению', order: 1, color: '#60a5fa' },
   { category: 'IN_PROGRESS', name: 'В работе', order: 2, color: '#fbbf24' },
-  { category: 'REVIEW', name: 'На проверке', order: 3, color: '#a78bfa' },
-  { category: 'BLOCKED', name: 'Заблокировано', order: 4, color: '#f87171' },
-  { category: 'DONE', name: 'Готово', order: 5, color: '#34d399' },
-  { category: 'CANCELED', name: 'Отменено', order: 6, color: '#6b7280' },
+  { category: 'TESTING', name: 'Тестирование', order: 3, color: '#22d3ee' },
+  { category: 'REVIEW', name: 'На проверке', order: 4, color: '#a78bfa' },
+  { category: 'BLOCKED', name: 'Заблокировано', order: 5, color: '#f87171' },
+  { category: 'DONE', name: 'Готово', order: 6, color: '#34d399' },
+  { category: 'CANCELED', name: 'Отменено', order: 7, color: '#6b7280' },
 ];
 
 /** M1: seed the 7 statuses for one project (idempotent via skipDuplicates). */

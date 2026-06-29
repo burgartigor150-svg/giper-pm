@@ -13,6 +13,7 @@ export const DEFAULT_BOARD_COLUMNS: ReadonlyArray<{ status: TaskStatus; name: st
   { status: 'BACKLOG', name: 'Бэклог' },
   { status: 'TODO', name: 'К работе' },
   { status: 'IN_PROGRESS', name: 'В работе' },
+  { status: 'TESTING', name: 'Тестирование' },
   { status: 'REVIEW', name: 'На ревью' },
   { status: 'BLOCKED', name: 'Заблокирована' },
   { status: 'DONE', name: 'Готово' },

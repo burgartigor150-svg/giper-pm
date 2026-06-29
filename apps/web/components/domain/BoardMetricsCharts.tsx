@@ -16,6 +16,7 @@ const STATUS_LABEL: Record<string, string> = {
   BACKLOG: 'Бэклог',
   TODO: 'К работе',
   IN_PROGRESS: 'В работе',
+  TESTING: 'Тест',
   REVIEW: 'На ревью',
   BLOCKED: 'Заблок.',
   DONE: 'Готово',

@@ -163,6 +163,7 @@ const STATUS_RU: Record<string, string> = {
   BACKLOG: 'Бэклог',
   TODO: 'К выполнению',
   IN_PROGRESS: 'Выполняется',
+  TESTING: 'Тестирование',
   REVIEW: 'На ревью',
   BLOCKED: 'Заблокировано',
   DONE: 'Готово',
@@ -643,7 +644,7 @@ export function Calendar({
               ))}
             </select>
             <span className="text-muted-foreground">Статус:</span>
-            {(['TODO', 'IN_PROGRESS', 'REVIEW', 'BLOCKED', 'BACKLOG', 'DONE'] as const).map(
+            {(['TODO', 'IN_PROGRESS', 'TESTING', 'REVIEW', 'BLOCKED', 'BACKLOG', 'DONE'] as const).map(
               (s) => {
                 const active = filters.status?.includes(s);
                 return (

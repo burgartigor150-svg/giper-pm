@@ -1804,6 +1804,7 @@ enum TaskStatus {
   BACKLOG
   TODO
   IN_PROGRESS
+  TESTING
   REVIEW
   BLOCKED
   DONE
@@ -1817,6 +1818,7 @@ enum StatusCategory {
   BACKLOG
   TODO
   IN_PROGRESS
+  TESTING
   REVIEW
   BLOCKED
   DONE

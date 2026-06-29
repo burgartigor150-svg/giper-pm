@@ -15,7 +15,7 @@ export async function listMyInProgress(userId: string) {
   return prisma.task.findMany({
     where: {
       assigneeId: userId,
-      status: { in: ['IN_PROGRESS', 'REVIEW'] },
+      status: { in: ['IN_PROGRESS', 'TESTING', 'REVIEW'] },
     },
     orderBy: [{ status: 'asc' }, { updatedAt: 'desc' }],
     take: 5,

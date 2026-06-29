@@ -390,8 +390,8 @@ describe('runKaitenSync', () => {
     );
     expect(res.ok).toBe(true);
     expect(res.created).toBe(1);
-    // The sync seeded the 7 statuses, so the dual-write FK resolves.
-    expect(await prisma.status.count({ where: { projectId: project.id } })).toBe(7);
+    // The sync seeded the 8 statuses, so the dual-write FK resolves.
+    expect(await prisma.status.count({ where: { projectId: project.id } })).toBe(8);
     const t = await prisma.task.findFirstOrThrow({ where: { projectId: project.id, externalId: '201' } });
     expect(t.statusId).toBe(`st_${project.id}_IN_PROGRESS`);
     // internal status is seeded from the mirror status on import (not BACKLOG).

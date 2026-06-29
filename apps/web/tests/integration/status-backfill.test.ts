@@ -15,7 +15,7 @@ import { makeUser, makeProject } from './helpers/factories';
  * lives in the prod migration; this exercises the TS mirror CI/dev use).
  */
 describe('status backfill (S1)', () => {
-  it('seeds 7 statuses per project and backfills Task/BoardColumn FKs from the enum', async () => {
+  it('seeds 8 statuses per project and backfills Task/BoardColumn FKs from the enum', async () => {
     const owner = await makeUser();
     const project = await makeProject({ ownerId: owner.id });
     const t1 = await prisma.task.create({
@@ -31,9 +31,9 @@ describe('status backfill (S1)', () => {
     await backfillAllStatuses(prisma);
 
     const statuses = await prisma.status.findMany({ where: { projectId: project.id }, orderBy: { order: 'asc' } });
-    expect(statuses).toHaveLength(7);
+    expect(statuses).toHaveLength(8);
     expect(statuses.map((s) => s.category)).toEqual([
-      'BACKLOG', 'TODO', 'IN_PROGRESS', 'REVIEW', 'BLOCKED', 'DONE', 'CANCELED',
+      'BACKLOG', 'TODO', 'IN_PROGRESS', 'TESTING', 'REVIEW', 'BLOCKED', 'DONE', 'CANCELED',
     ]);
     expect(statuses.every((s) => s.isDefault)).toBe(true);
 
@@ -63,7 +63,7 @@ describe('status backfill (S1)', () => {
     await backfillAllStatuses(prisma);
     await backfillAllStatuses(prisma);
 
-    expect(await prisma.status.count({ where: { projectId: project.id } })).toBe(7);
+    expect(await prisma.status.count({ where: { projectId: project.id } })).toBe(8);
     const after = await prisma.task.findUniqueOrThrow({ where: { id: t.id } });
     expect(after.statusId).toBe(statusSeedId(project.id, 'TODO'));
   });

@@ -9,6 +9,7 @@ const STATUS_BAR: Record<GanttTask['status'], string> = {
   BACKLOG: 'bg-slate-400',
   TODO: 'bg-sky-500',
   IN_PROGRESS: 'bg-blue-500',
+  TESTING: 'bg-cyan-500',
   REVIEW: 'bg-amber-500',
   BLOCKED: 'bg-red-500',
   DONE: 'bg-emerald-500',

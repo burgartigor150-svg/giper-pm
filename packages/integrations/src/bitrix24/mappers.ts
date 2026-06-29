@@ -28,6 +28,7 @@ export type DomainTaskStatus =
   | 'BACKLOG'
   | 'TODO'
   | 'IN_PROGRESS'
+  | 'TESTING'
   | 'REVIEW'
   | 'BLOCKED'
   | 'DONE'

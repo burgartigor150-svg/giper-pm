@@ -133,11 +133,12 @@ export function BoardColumnSelectAll({ taskIds }: { taskIds: string[] }) {
   );
 }
 
-type BulkStatus = 'BACKLOG' | 'TODO' | 'IN_PROGRESS' | 'REVIEW' | 'BLOCKED' | 'DONE' | 'CANCELED';
+type BulkStatus = 'BACKLOG' | 'TODO' | 'IN_PROGRESS' | 'TESTING' | 'REVIEW' | 'BLOCKED' | 'DONE' | 'CANCELED';
 const STATUS_OPTIONS: { value: BulkStatus; label: string }[] = [
   { value: 'BACKLOG', label: 'Бэклог' },
   { value: 'TODO', label: 'К работе' },
   { value: 'IN_PROGRESS', label: 'В работе' },
+  { value: 'TESTING', label: 'Тестирование' },
   { value: 'REVIEW', label: 'На ревью' },
   { value: 'BLOCKED', label: 'Заблокирована' },
   { value: 'DONE', label: 'Готово' },

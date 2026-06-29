@@ -11,6 +11,7 @@ const STATUSES: readonly TaskStatus[] = [
   'BACKLOG',
   'TODO',
   'IN_PROGRESS',
+  'TESTING',
   'REVIEW',
   'BLOCKED',
   'DONE',

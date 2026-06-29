@@ -20,7 +20,7 @@ import { useT } from '@/lib/useT';
 import { isClosing, statusCategory } from '@/lib/status/category';
 import { UserPicker } from './UserPicker';
 
-const STATUSES = ['BACKLOG', 'TODO', 'IN_PROGRESS', 'REVIEW', 'BLOCKED', 'DONE', 'CANCELED'] as const;
+const STATUSES = ['BACKLOG', 'TODO', 'IN_PROGRESS', 'TESTING', 'REVIEW', 'BLOCKED', 'DONE', 'CANCELED'] as const;
 const PRIORITIES = ['LOW', 'MEDIUM', 'HIGH', 'URGENT'] as const;
 const POSITIONS: Position[] = [
   'FRONTEND', 'BACKEND', 'FULLSTACK', 'MOBILE',

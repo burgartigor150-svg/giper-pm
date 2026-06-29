@@ -9,6 +9,7 @@ const STATUSES = [
   { value: 'BACKLOG', label: 'Бэклог' },
   { value: 'TODO', label: 'К работе' },
   { value: 'IN_PROGRESS', label: 'В работе' },
+  { value: 'TESTING', label: 'Тест' },
   { value: 'REVIEW', label: 'Ревью' },
   { value: 'BLOCKED', label: 'Блок' },
   { value: 'DONE', label: 'Готово' },

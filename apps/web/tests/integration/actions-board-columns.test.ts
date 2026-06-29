@@ -219,7 +219,7 @@ describe('setTaskColumnAction — move card into a free-form column', () => {
 });
 
 describe('setFreeFormColumnsEnabledAction — flag toggle + materialization (S6b)', () => {
-  it('enabling materializes the 6 default columns and sets the flag', async () => {
+  it('enabling materializes the 7 default columns and sets the flag', async () => {
     const admin = await makeUser({ role: 'ADMIN' });
     mockMe.id = admin.id;
     const project = await makeProject({ ownerId: admin.id });
@@ -228,9 +228,9 @@ describe('setFreeFormColumnsEnabledAction — flag toggle + materialization (S6b
 
     const res = await setFreeFormColumnsEnabledAction(project.id, true);
     expect(res.ok).toBe(true);
-    // 6 real columns now exist (DEFAULT_BOARD_COLUMNS), each with a statusId.
+    // 7 real columns now exist (DEFAULT_BOARD_COLUMNS), each with a statusId.
     const cols = await columnsOf(project.id);
-    expect(cols).toHaveLength(6);
+    expect(cols).toHaveLength(7);
     expect(cols.every((c) => c.statusId)).toBe(true);
     expect(
       (await prisma.project.findUniqueOrThrow({ where: { id: project.id } })).freeFormColumnsEnabled,
@@ -242,10 +242,10 @@ describe('setFreeFormColumnsEnabledAction — flag toggle + materialization (S6b
     mockMe.id = admin.id;
     const project = await makeProject({ ownerId: admin.id });
     expect((await setFreeFormColumnsEnabledAction(project.id, true)).ok).toBe(true);
-    expect(await columnsOf(project.id)).toHaveLength(6);
+    expect(await columnsOf(project.id)).toHaveLength(7);
     // Re-enable: materialization must not re-add the defaults.
     expect((await setFreeFormColumnsEnabledAction(project.id, true)).ok).toBe(true);
-    expect(await columnsOf(project.id)).toHaveLength(6);
+    expect(await columnsOf(project.id)).toHaveLength(7);
   });
 
   it('refuses to disable while a status backs more than one column', async () => {

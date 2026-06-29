@@ -17,13 +17,13 @@ import { makeUser, makeProject, makeTask, sessionUser } from './helpers/factorie
  * The board still reads the enum here — these only assert the new tracks.
  */
 describe('status dual-write (S2)', () => {
-  it('createProject seeds 7 statuses + materializes 6 board columns', async () => {
+  it('createProject seeds 8 statuses + materializes 7 board columns', async () => {
     const owner = await makeUser({ role: 'ADMIN' });
     const project = await createProject({ name: 'S2 Alpha', key: 'S2A' }, sessionUser(owner));
 
-    expect(await prisma.status.count({ where: { projectId: project.id } })).toBe(7);
+    expect(await prisma.status.count({ where: { projectId: project.id } })).toBe(8);
     const cols = await prisma.boardColumn.findMany({ where: { projectId: project.id }, orderBy: { order: 'asc' } });
-    expect(cols.map((c) => c.status)).toEqual(['BACKLOG', 'TODO', 'IN_PROGRESS', 'REVIEW', 'BLOCKED', 'DONE']);
+    expect(cols.map((c) => c.status)).toEqual(['BACKLOG', 'TODO', 'IN_PROGRESS', 'TESTING', 'REVIEW', 'BLOCKED', 'DONE']);
     // Each column links its seeded Status.
     expect(cols[2]!.statusId).toBe(statusSeedId(project.id, 'IN_PROGRESS'));
   });
@@ -55,14 +55,15 @@ describe('status dual-write (S2)', () => {
     expect(t.column?.status).toBe('IN_PROGRESS');
   });
 
-  it('materializeProjectColumns is idempotent (6 columns, no dup on re-run)', async () => {
+  it('materializeProjectColumns is idempotent (7 columns, no dup on re-run)', async () => {
     const owner = await makeUser();
     const project = await makeProject({ ownerId: owner.id }); // raw — no columns
     expect(await prisma.boardColumn.count({ where: { projectId: project.id } })).toBe(0);
 
     await materializeProjectColumns(prisma, project.id);
     await materializeProjectColumns(prisma, project.id);
-    expect(await prisma.boardColumn.count({ where: { projectId: project.id } })).toBe(6);
+    // 7 default columns: Бэклог, К выполнению, В работе, Тестирование, На ревью, Заблокировано, Готово.
+    expect(await prisma.boardColumn.count({ where: { projectId: project.id } })).toBe(7);
   });
 
   it('backfillAllStatuses places existing tasks onto columnId (M5)', async () => {

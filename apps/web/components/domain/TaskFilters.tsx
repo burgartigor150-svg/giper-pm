@@ -8,7 +8,7 @@ import { useT } from '@/lib/useT';
 import type { UserSearchHit } from '@/actions/users';
 import { TagPill } from './TagPill';
 
-const STATUSES = ['BACKLOG', 'TODO', 'IN_PROGRESS', 'REVIEW', 'BLOCKED', 'DONE', 'CANCELED'] as const;
+const STATUSES = ['BACKLOG', 'TODO', 'IN_PROGRESS', 'TESTING', 'REVIEW', 'BLOCKED', 'DONE', 'CANCELED'] as const;
 const PRIORITIES = ['LOW', 'MEDIUM', 'HIGH', 'URGENT'] as const;
 const TYPES = ['TASK', 'BUG', 'FEATURE', 'EPIC', 'CHORE'] as const;
 const TYPE_LABELS: Record<(typeof TYPES)[number], string> = {
