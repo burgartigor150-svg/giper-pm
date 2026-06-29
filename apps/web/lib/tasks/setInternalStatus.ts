@@ -1,6 +1,7 @@
 import { prisma, type TaskStatus } from '@giper/db';
 import { statusSeedId } from '@giper/shared';
 import { DomainError } from '../errors';
+import { getEffectiveCapsForProject } from '../capabilities';
 import { internalStatusWrite } from '../status/refs';
 import type { SessionUser } from '../permissions';
 import { isTransitionAllowed } from '../workflow/isTransitionAllowed';
@@ -56,6 +57,7 @@ export async function setInternalStatus(
       externalSource: true,
       creatorId: true,
       assigneeId: true,
+      testerId: true,
       parentId: true,
       project: {
         select: {
@@ -79,6 +81,24 @@ export async function setInternalStatus(
     task.project.ownerId === user.id ||
     task.project.members.some((m) => m.userId === user.id && m.role === 'LEAD');
   if (!allow) throw new DomainError('INSUFFICIENT_PERMISSIONS', 403, 'Недостаточно прав');
+
+  // TESTING (QA) gate — stronger than the reviewer pattern's UI-only
+  // enforcement: when a card LEAVES the TESTING stage and a tester is set,
+  // only that tester (or a holder of task.testing.close — ADMIN/PM by
+  // baseline) may move it out. Closes the board-drag / picker / MCP loophole.
+  // We never gate moving INTO testing, and a tester-less task is unchanged.
+  if (task.internalStatus === 'TESTING' && status !== 'TESTING') {
+    if (task.testerId && task.testerId !== user.id) {
+      const caps = await getEffectiveCapsForProject(user, task.projectId);
+      if (!caps.has('task.testing.close')) {
+        throw new DomainError(
+          'INSUFFICIENT_PERMISSIONS',
+          403,
+          'Только назначенный тестировщик может вывести задачу из тестирования',
+        );
+      }
+    }
+  }
 
   // No-op when already in this status: don't re-run side effects, don't demand
   // a result again, and don't post a second "Итог" comment on a re-close.

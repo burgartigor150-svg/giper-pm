@@ -81,6 +81,7 @@ model User {
   assignedTasks     Task[]               @relation("TaskAssignee")
   createdTasks      Task[]               @relation("TaskCreator")
   reviewerTasks     Task[]               @relation("TaskReviewer")
+  testingTasks      Task[]               @relation("TaskTester")
   timeEntries       TimeEntry[]
   activities        Activity[]
   comments          Comment[]
@@ -1374,6 +1375,12 @@ model Task {
   // works the old way (anyone with edit can close).
   reviewerId    String?
   reviewer      User?        @relation("TaskReviewer", fields: [reviewerId], references: [id])
+  // Optional TESTING (QA) gate — if set and != assignee, only this user can
+  // move the task OUT of TESTING (accept → REVIEW, return → IN_PROGRESS).
+  // Without a tester the stage works the old way (any editor can move it).
+  // Mirrors the reviewer slot exactly; SetNull so removing a user keeps tasks.
+  testerId      String?
+  tester        User?        @relation("TaskTester", fields: [testerId], references: [id], onDelete: SetNull)
 
   parentId      String?
   parent        Task?        @relation("TaskSubtasks", fields: [parentId], references: [id])

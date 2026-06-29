@@ -55,6 +55,7 @@ export type TaskForPerm = {
   creatorId: string;
   assigneeId: string | null;
   reviewerId?: string | null;
+  testerId?: string | null;
   project: ProjectForPerm;
   /** When set, this task is a read-only mirror from an external system. */
   externalSource?: string | null;
@@ -201,6 +202,7 @@ export function canViewTask(user: SessionUser, task: TaskForPerm): boolean {
   if (task.creatorId === user.id) return true;
   if (task.assigneeId === user.id) return true;
   if (task.reviewerId === user.id) return true;
+  if (task.testerId === user.id) return true;
   if (task.assignments?.some((a) => a.userId === user.id)) return true;
   if (task.watchers?.some((w) => w.userId === user.id)) return true;
   return false;

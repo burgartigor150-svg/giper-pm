@@ -86,7 +86,7 @@ describe('capabilities — baseline snapshot (drift trip-wire)', () => {
   const EXPECTED_MEMBER: CapabilityKey[] = ['reports.view', 'servicedesk.workTickets'];
   const EXPECTED_PM: CapabilityKey[] = [
     'project.create', 'project.viewAll',
-    'task.delete', 'task.staff', 'task.review.close', 'task.checklist.toggle',
+    'task.delete', 'task.staff', 'task.review.close', 'task.testing.close', 'task.checklist.toggle',
     'crm.view', 'crm.edit', 'crm.scope.all',
     'servicedesk.viewQueue', 'servicedesk.workTickets',
     'reports.view', 'reports.teamScope', 'reports.viewTeamTime',

@@ -153,7 +153,7 @@ export function KanbanCard({ projectKey, task, isOverlay = false, selectable = f
         </div>
       </div>
 
-      {(visibleTags.length > 0 || task.assignee) ? (
+      {(visibleTags.length > 0 || task.assignee || (task.internalStatus === 'TESTING' && task.tester)) ? (
         <div className="mt-2 flex items-center justify-between gap-2">
           <div className="flex flex-wrap gap-1">
             {visibleTags.map((t) => (
@@ -165,13 +165,29 @@ export function KanbanCard({ projectKey, task, isOverlay = false, selectable = f
               </span>
             ) : null}
           </div>
-          {task.assignee ? (
-            <Avatar
-              src={task.assignee.image}
-              alt={task.assignee.name}
-              className="h-6 w-6"
-            />
-          ) : null}
+          <div className="flex items-center gap-1">
+            {/* QA badge: surface the tester while the card sits in TESTING. */}
+            {task.internalStatus === 'TESTING' && task.tester ? (
+              <span
+                className="flex items-center gap-1 rounded-full bg-cyan-50 px-1 text-[10px] font-medium text-cyan-700 ring-1 ring-cyan-200"
+                title={`Тестировщик: ${task.tester.name}`}
+              >
+                QA
+                <Avatar
+                  src={task.tester.image}
+                  alt={task.tester.name}
+                  className="h-5 w-5"
+                />
+              </span>
+            ) : null}
+            {task.assignee ? (
+              <Avatar
+                src={task.assignee.image}
+                alt={task.assignee.name}
+                className="h-6 w-6"
+              />
+            ) : null}
+          </div>
         </div>
       ) : null}
     </div>

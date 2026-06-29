@@ -22,6 +22,8 @@ export type BoardFilter = {
   dueWithin?: DueWithinFilter;
   /** When 'me', restrict to cards where the viewer is the reviewer. */
   reviewer?: 'me';
+  /** When 'me', restrict to cards where the viewer is the tester (QA). */
+  tester?: 'me';
   /** Release/version id the card must be slated for. */
   versionId?: string;
   /** Component id the card must belong to. */
@@ -137,6 +139,7 @@ export async function listTasksForBoard(
       { creatorId: user.id },
       { assigneeId: user.id },
       { reviewerId: user.id },
+      { testerId: user.id },
       { assignments: { some: { userId: user.id } } },
       { watchers: { some: { userId: user.id } } },
     ];
@@ -167,6 +170,7 @@ export async function listTasksForBoard(
       type: filter.type,
       dueWithin: filter.dueWithin,
       reviewerMe: filter.reviewer === 'me',
+      testerMe: filter.tester === 'me',
       versionId: filter.versionId,
       componentId: filter.componentId,
     },
@@ -205,6 +209,8 @@ export async function listTasksForBoard(
       parentId: true,
       _count: { select: { subtasks: true } },
       assignee: { select: { id: true, name: true, image: true } },
+      // Tester avatar on the card face (shown only when internalStatus === 'TESTING').
+      tester: { select: { id: true, name: true, image: true } },
       taskTags: {
         select: {
           tag: { select: { id: true, name: true, color: true } },

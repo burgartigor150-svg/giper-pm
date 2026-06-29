@@ -18,6 +18,8 @@ export type TaskFilterDims = {
   dueWithin?: DueWithinFilter;
   /** When true, restrict to tasks where the viewer is the assigned reviewer. */
   reviewerMe?: boolean;
+  /** When true, restrict to tasks where the viewer is the assigned tester (QA). */
+  testerMe?: boolean;
   /** Release/version id the task must be slated for. */
   versionId?: string;
   /** Component id the task must belong to. */
@@ -69,6 +71,8 @@ export function buildTaskFilterClauses(
   if (dims.componentId) and.push({ componentId: dims.componentId });
 
   if (dims.reviewerMe) and.push({ reviewerId: ctx.userId });
+
+  if (dims.testerMe) and.push({ testerId: ctx.userId });
 
   if (dims.dueWithin) {
     const now = ctx.now ?? new Date();

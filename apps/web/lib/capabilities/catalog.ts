@@ -19,6 +19,7 @@ export const CAPABILITY_KEYS = [
   'task.staff',
   'task.editAny',
   'task.review.close',
+  'task.testing.close',
   'task.checklist.toggle',
   'task.attachments.manageAny',
   'task.tags.assign',
@@ -88,6 +89,7 @@ export const PROJECT_CAP_KEYS = [
   'task.editAny',
   'task.delete',
   'task.review.close',
+  'task.testing.close',
   'task.checklist.toggle',
   'task.attachments.manageAny',
 ] as const satisfies readonly CapabilityKey[];
@@ -148,6 +150,7 @@ export const CAPABILITY_GROUPS: readonly CapabilityGroup[] = [
       { key: 'task.staff', label: 'Назначать исполнителей/ревьюеров' },
       { key: 'task.editAny', label: 'Редактировать любую задачу' },
       { key: 'task.review.close', label: 'Закрывать ревью' },
+      { key: 'task.testing.close', label: 'Закрывать тестирование' },
       { key: 'task.checklist.toggle', label: 'Управлять чек-листами' },
       { key: 'task.attachments.manageAny', label: 'Управлять любыми вложениями' },
       { key: 'task.tags.assign', label: 'Назначать теги' },

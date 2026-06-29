@@ -58,6 +58,7 @@ export async function loadTaskPreviewsForRefs(
       creatorId: true,
       assigneeId: true,
       reviewerId: true,
+      testerId: true,
       project: { select: { key: true } },
       assignee: { select: { id: true, name: true, image: true } },
       assignments: { select: { userId: true } },
