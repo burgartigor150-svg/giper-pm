@@ -32,7 +32,10 @@ export function computeDueAts(priority: Priority, createdAt: Date): {
  */
 export function slaStateFor(dueAt: Date | null, doneAt: Date | null, now: number): SlaState {
   if (!dueAt) return 'none';
-  if (doneAt) return 'met'; // the clock stopped (resolved/responded)
+  // The clock stopped (responded/resolved). It only counts as 'met' if it
+  // stopped BEFORE the due time — a late stop is a breach (it missed the SLA),
+  // otherwise SLA reports would hide every late response/resolution as in-срок.
+  if (doneAt) return doneAt.getTime() <= dueAt.getTime() ? 'met' : 'breached';
   const ms = dueAt.getTime() - now;
   if (ms <= 0) return 'breached';
   if (ms <= DUE_SOON_MS) return 'due-soon';
