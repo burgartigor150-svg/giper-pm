@@ -41,7 +41,28 @@ export function KbSidebar({
   const pathname = usePathname();
   const activeId = pathname?.startsWith('/knowledge/') ? pathname.slice('/knowledge/'.length).split('/')[0] : null;
   const [pending, startTransition] = useTransition();
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  // Tree is COLLAPSED by default; `expanded` holds explicit user toggles.
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+
+  // Auto-open the ancestor chain of the active article so the current page is
+  // always visible/highlighted even though everything else starts collapsed.
+  const autoOpen = useMemo(() => {
+    const set = new Set<string>();
+    if (!activeId) return set;
+    const byId = new Map(articles.map((a) => [a.id, a]));
+    const start = byId.get(activeId);
+    if (start) {
+      set.add(`space:${start.spaceId}`);
+      let p = start.parentId;
+      while (p) {
+        set.add(`art:${p}`);
+        p = byId.get(p)?.parentId ?? null;
+      }
+    }
+    return set;
+  }, [activeId, articles]);
+  // Explicit toggle wins; otherwise fall back to the auto-open set.
+  const isOpen = (key: string) => expanded[key] ?? autoOpen.has(key);
 
   const childrenOf = useMemo(() => {
     const map = new Map<string, Node[]>();
@@ -64,7 +85,8 @@ export function KbSidebar({
     return articles.filter((a) => set.has(a.id));
   }, [articles, favoriteArticleIds]);
 
-  const toggle = (key: string) => setCollapsed((s) => ({ ...s, [key]: !s[key] }));
+  const toggle = (key: string) =>
+    setExpanded((s) => ({ ...s, [key]: !(s[key] ?? autoOpen.has(key)) }));
 
   function newArticle(spaceId: string, parentId: string | null) {
     startTransition(async () => {
@@ -92,7 +114,7 @@ export function KbSidebar({
         {nodes.map((n) => {
           const ck = `art:${n.id}`;
           const kids = childrenOf.get(ck);
-          const open = !collapsed[ck];
+          const open = isOpen(ck);
           const isDraft = n.status === 'DRAFT';
           return (
             <li key={n.id}>
@@ -187,7 +209,7 @@ export function KbSidebar({
       ) : null}
       {spaces.map((sp) => {
         const sk = `space:${sp.id}`;
-        const open = !collapsed[sk];
+        const open = isOpen(sk);
         return (
           <div key={sp.id} className="mt-1">
             <div className="group flex items-center gap-1 rounded px-1.5 py-1">
