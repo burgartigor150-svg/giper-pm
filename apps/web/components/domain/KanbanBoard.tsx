@@ -18,7 +18,7 @@ import {
   type DragStartEvent,
 } from '@dnd-kit/core';
 import { sortableKeyboardCoordinates, arrayMove } from '@dnd-kit/sortable';
-import { GripVertical, Plus, Check, X, Pencil } from 'lucide-react';
+import { GripVertical, Plus, Check, X, Pencil, ChevronDown, ChevronRight } from 'lucide-react';
 import type { BoardTask, BoardColumnView, BoardSwimlaneView } from '@/lib/tasks';
 import { changeStatusAction } from '@/actions/tasks';
 import { setInternalStatusAction } from '@/actions/assignments';
@@ -138,6 +138,33 @@ export function KanbanBoard({
   const swimlaneKey = swimlanes.map((s) => s.id).join(',');
   const [laneOrder, setLaneOrder] = useState<string[]>(() => swimlanes.map((s) => s.id));
   useEffect(() => setLaneOrder(swimlanes.map((s) => s.id)), [swimlaneKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Collapsed swimlanes — a focus aid on busy boards. Client-only and persisted
+  // per board in localStorage. SSR renders all lanes expanded; the saved set is
+  // applied on mount (a useEffect, NOT a lazy initializer) to avoid a hydration
+  // mismatch.
+  const collapseKey = useMemo(() => `gpm:board:collapsedLanes:${projectId}`, [projectId]);
+  const [collapsedLanes, setCollapsedLanes] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(collapseKey);
+      if (raw) setCollapsedLanes(new Set(JSON.parse(raw) as string[]));
+    } catch {
+      /* ignore malformed/unavailable storage */
+    }
+  }, [collapseKey]);
+  const toggleLaneCollapse = (id: string) =>
+    setCollapsedLanes((cur) => {
+      const next = new Set(cur);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      try {
+        localStorage.setItem(collapseKey, JSON.stringify([...next]));
+      } catch {
+        /* ignore unavailable storage */
+      }
+      return next;
+    });
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -693,10 +720,15 @@ export function KanbanBoard({
                 lane.id === NO_LANE ? (
                 <section key={lane.id} className="flex flex-col gap-2">
                   <div className="flex items-center gap-2">
+                    <LaneCollapseToggle
+                      collapsed={collapsedLanes.has(lane.id)}
+                      onToggle={() => toggleLaneCollapse(lane.id)}
+                      name={lane.name}
+                    />
                     <h3 className="text-sm font-semibold text-muted-foreground">{lane.name}</h3>
                     <LaneCount total={laneTotalOf(lane.id)} wipLimit={lane.wipLimit} />
                   </div>
-                  {laneCols(lane.id)}
+                  {collapsedLanes.has(lane.id) ? null : laneCols(lane.id)}
                 </section>
               ) : (
                 <LaneSection
@@ -707,6 +739,8 @@ export function KanbanBoard({
                   laneTotal={laneTotalOf(lane.id)}
                   manageable={canManage}
                   onRename={onRenameLane}
+                  collapsed={collapsedLanes.has(lane.id)}
+                  onToggleCollapse={() => toggleLaneCollapse(lane.id)}
                 >
                   {laneCols(lane.id)}
                 </LaneSection>
@@ -828,6 +862,30 @@ function ColumnDragShell({
   );
 }
 
+/** Chevron toggle that collapses/expands a swimlane's columns row. */
+function LaneCollapseToggle({
+  collapsed,
+  onToggle,
+  name,
+}: {
+  collapsed: boolean;
+  onToggle: () => void;
+  name: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={!collapsed}
+      aria-label={collapsed ? `Развернуть дорожку «${name}»` : `Свернуть дорожку «${name}»`}
+      title={collapsed ? 'Развернуть' : 'Свернуть'}
+      className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+    >
+      {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+    </button>
+  );
+}
+
 /** WIP/count pill shown next to a lane name. */
 function LaneCount({ total, wipLimit }: { total: number; wipLimit: number | null }) {
   const over = wipLimit != null && total > wipLimit;
@@ -855,6 +913,8 @@ function LaneSection({
   laneTotal,
   manageable,
   onRename,
+  collapsed,
+  onToggleCollapse,
   children,
 }: {
   laneId: string;
@@ -863,6 +923,8 @@ function LaneSection({
   laneTotal: number;
   manageable: boolean;
   onRename: (id: string, name: string) => void;
+  collapsed: boolean;
+  onToggleCollapse: () => void;
   children: ReactNode;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: `lanedrop-${laneId}`, data: { type: 'lane' } });
@@ -906,6 +968,7 @@ function LaneSection({
       }
     >
       <div className="flex items-center gap-2">
+        <LaneCollapseToggle collapsed={collapsed} onToggle={onToggleCollapse} name={name} />
         {manageable ? (
           // Non-button (a11y): dnd-kit `attributes` already supplies role/tabIndex,
           // so a native <button>'s Space/Enter default doesn't fight the keyboard
@@ -954,7 +1017,7 @@ function LaneSection({
         )}
         <LaneCount total={laneTotal} wipLimit={wipLimit} />
       </div>
-      {children}
+      {collapsed ? null : children}
     </section>
   );
 }
