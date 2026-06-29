@@ -17,8 +17,13 @@ describe('slaStateFor', () => {
   it('none when no due time', () => {
     expect(slaStateFor(null, null, now)).toBe('none');
   });
-  it('met once the clock is stopped (doneAt set), regardless of due', () => {
-    expect(slaStateFor(new Date(now - H), new Date(now), now)).toBe('met');
+  it('met when the clock stopped BEFORE the due time', () => {
+    // due now, responded/resolved an hour ago → in срок.
+    expect(slaStateFor(new Date(now), new Date(now - H), now)).toBe('met');
+  });
+  it('breached when the clock stopped AFTER the due time (late)', () => {
+    // due an hour ago, only stopped now → the SLA was missed, not met.
+    expect(slaStateFor(new Date(now - H), new Date(now), now)).toBe('breached');
   });
   it('breached when past due and not done', () => {
     expect(slaStateFor(new Date(now - 1), null, now)).toBe('breached');
@@ -46,16 +51,28 @@ describe('ticketSlaState', () => {
     );
     expect(s).toBe('breached');
   });
-  it('is met when both clocks stopped', () => {
+  it('is met when both clocks stopped ON TIME', () => {
     const s = ticketSlaState(
       {
         firstResponseDueAt: new Date(now - H),
-        firstRespondedAt: new Date(now - 2 * H),
+        firstRespondedAt: new Date(now - 2 * H), // responded before due
         resolutionDueAt: new Date(now - H),
-        resolvedAt: new Date(now - 30 * 60_000),
+        resolvedAt: new Date(now - 2 * H), // resolved before due
       },
       now,
     );
     expect(s).toBe('met');
+  });
+  it('is breached when a clock stopped LATE', () => {
+    const s = ticketSlaState(
+      {
+        firstResponseDueAt: new Date(now - 2 * H),
+        firstRespondedAt: new Date(now - 2 * H + 60_000), // responded a minute after due
+        resolutionDueAt: new Date(now + 10 * H),
+        resolvedAt: null,
+      },
+      now,
+    );
+    expect(s).toBe('breached');
   });
 });

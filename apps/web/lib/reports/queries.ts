@@ -26,7 +26,15 @@ async function fetchEntries(scope: ScopedQuery, range: ReportsRange) {
       ...(scope.projectId
         ? { task: { projectId: scope.projectId } }
         : {
-            task: { projectId: { in: scope.visibleProjectIds } },
+            // Team/all scope: also admit no-task ("Без задачи") entries —
+            // a relation filter alone silently drops every taskId=null row, so
+            // untracked time was always 0 and team totals were undercounted.
+            // No-task entries have no project, so they belong only to the team
+            // view; the project-scoped branch above intentionally excludes them.
+            OR: [
+              { task: { projectId: { in: scope.visibleProjectIds } } },
+              { taskId: null },
+            ],
           }),
     },
     select: {
