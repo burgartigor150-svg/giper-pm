@@ -15,6 +15,7 @@ export const STATUS_CATEGORIES = [
   'BACKLOG',
   'TODO',
   'IN_PROGRESS',
+  'TESTING',
   'REVIEW',
   'BLOCKED',
   'DONE',
@@ -46,6 +47,7 @@ export const isClosing = (c: StatusCategory): boolean => c === 'DONE';
 export const isCanceled = (c: StatusCategory): boolean => c === 'CANCELED';
 export const isInProgress = (c: StatusCategory): boolean => c === 'IN_PROGRESS';
 export const isReview = (c: StatusCategory): boolean => c === 'REVIEW';
+export const isTesting = (c: StatusCategory): boolean => c === 'TESTING';
 /** "Work has started" — past the queue and not cancelled (IN_PROGRESS/REVIEW/BLOCKED/DONE). */
 export const startsWork = (c: StatusCategory): boolean =>
   c !== 'BACKLOG' && c !== 'TODO' && c !== 'CANCELED';

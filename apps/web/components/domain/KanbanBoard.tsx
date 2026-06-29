@@ -1085,6 +1085,7 @@ const CATEGORY_LABELS: Record<StatusCategory, string> = {
   BACKLOG: 'Бэклог',
   TODO: 'К выполнению',
   IN_PROGRESS: 'В работе',
+  TESTING: 'Тестирование',
   REVIEW: 'На проверке',
   BLOCKED: 'Заблокировано',
   DONE: 'Готово',
@@ -1097,7 +1098,7 @@ const CATEGORY_LABELS: Record<StatusCategory, string> = {
  * a second DONE column is unreachable (drag-in needs an итог + close routes to
  * the first DONE). The materialized default DONE column handles closing.
  */
-const PICKABLE_CATEGORIES: StatusCategory[] = ['BACKLOG', 'TODO', 'IN_PROGRESS', 'REVIEW', 'BLOCKED'];
+const PICKABLE_CATEGORIES: StatusCategory[] = ['BACKLOG', 'TODO', 'IN_PROGRESS', 'TESTING', 'REVIEW', 'BLOCKED'];
 
 /** ＋ a free-form board column: a name + a status category (drives done-detection). */
 function AddColumnControl({ onAdd }: { onAdd: (name: string, category: StatusCategory) => void }) {

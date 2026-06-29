@@ -135,10 +135,11 @@ const STATUS_SEED: ReadonlyArray<{ cat: string; name: string; order: number; col
   { cat: 'BACKLOG', name: 'Бэклог', order: 0, color: '#94a3b8' },
   { cat: 'TODO', name: 'К выполнению', order: 1, color: '#60a5fa' },
   { cat: 'IN_PROGRESS', name: 'В работе', order: 2, color: '#fbbf24' },
-  { cat: 'REVIEW', name: 'На проверке', order: 3, color: '#a78bfa' },
-  { cat: 'BLOCKED', name: 'Заблокировано', order: 4, color: '#f87171' },
-  { cat: 'DONE', name: 'Готово', order: 5, color: '#34d399' },
-  { cat: 'CANCELED', name: 'Отменено', order: 6, color: '#6b7280' },
+  { cat: 'TESTING', name: 'Тестирование', order: 3, color: '#22d3ee' },
+  { cat: 'REVIEW', name: 'На проверке', order: 4, color: '#a78bfa' },
+  { cat: 'BLOCKED', name: 'Заблокировано', order: 5, color: '#f87171' },
+  { cat: 'DONE', name: 'Готово', order: 6, color: '#34d399' },
+  { cat: 'CANCELED', name: 'Отменено', order: 7, color: '#6b7280' },
 ];
 
 export async function seedProjectStatuses(projectId: string): Promise<void> {

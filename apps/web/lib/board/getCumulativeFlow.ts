@@ -11,6 +11,7 @@ const FLOW_STATUSES: { status: TaskStatus; label: string; color: string }[] = [
   { status: 'DONE', label: 'Готово', color: '#22c55e' },
   { status: 'BLOCKED', label: 'Заблок.', color: '#ef4444' },
   { status: 'REVIEW', label: 'Ревью', color: '#f59e0b' },
+  { status: 'TESTING', label: 'Тест', color: '#22d3ee' },
   { status: 'IN_PROGRESS', label: 'В работе', color: '#3b82f6' },
   { status: 'TODO', label: 'К работе', color: '#38bdf8' },
   { status: 'BACKLOG', label: 'Бэклог', color: '#94a3b8' },

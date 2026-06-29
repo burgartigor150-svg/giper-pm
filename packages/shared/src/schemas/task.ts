@@ -4,6 +4,7 @@ export const taskStatusSchema = z.enum([
   'BACKLOG',
   'TODO',
   'IN_PROGRESS',
+  'TESTING',
   'REVIEW',
   'BLOCKED',
   'DONE',

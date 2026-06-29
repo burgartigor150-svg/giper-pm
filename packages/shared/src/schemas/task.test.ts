@@ -14,17 +14,18 @@ import {
 } from './task';
 
 describe('enums', () => {
-  it('taskStatusSchema has 7 statuses including CANCELED', () => {
+  it('taskStatusSchema has 8 statuses including TESTING and CANCELED', () => {
     expect(taskStatusSchema.options).toEqual([
       'BACKLOG',
       'TODO',
       'IN_PROGRESS',
+      'TESTING',
       'REVIEW',
       'BLOCKED',
       'DONE',
       'CANCELED',
     ]);
-    expect(taskStatusSchema.options).toHaveLength(7);
+    expect(taskStatusSchema.options).toHaveLength(8);
   });
 
   it('priority/type enums + page size', () => {

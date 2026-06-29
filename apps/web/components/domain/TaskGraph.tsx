@@ -58,6 +58,7 @@ const STATUS_COLOR: Record<string, string> = {
   BACKLOG: '#94a3b8',
   TODO: '#3b82f6',
   IN_PROGRESS: '#f59e0b',
+  TESTING: '#22d3ee',
   REVIEW: '#a855f7',
   BLOCKED: '#ef4444',
   DONE: '#10b981',

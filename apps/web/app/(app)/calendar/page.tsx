@@ -107,7 +107,7 @@ export default async function CalendarPage({
       lookaheadStart,
       lookaheadEnd,
       { id: me.id, role: me.role },
-      { ...filters, status: ['BACKLOG', 'TODO', 'IN_PROGRESS', 'REVIEW'] },
+      { ...filters, status: ['BACKLOG', 'TODO', 'IN_PROGRESS', 'TESTING', 'REVIEW'] },
     ),
     projectsPromise,
     // Personal/team calendar events overlapping the visible range.

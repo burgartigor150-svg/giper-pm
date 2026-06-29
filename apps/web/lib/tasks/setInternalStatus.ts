@@ -16,6 +16,7 @@ const VALID: TaskStatus[] = [
   'BACKLOG',
   'TODO',
   'IN_PROGRESS',
+  'TESTING',
   'REVIEW',
   'BLOCKED',
   'DONE',

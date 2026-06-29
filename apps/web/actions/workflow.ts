@@ -11,11 +11,11 @@ import { DomainError } from '@/lib/errors';
 type ActionResult = { ok: true } | { ok: false; error: { code: string; message: string } };
 
 const STATUSES: readonly TaskStatus[] = [
-  'BACKLOG', 'TODO', 'IN_PROGRESS', 'REVIEW', 'BLOCKED', 'DONE', 'CANCELED',
+  'BACKLOG', 'TODO', 'IN_PROGRESS', 'TESTING', 'REVIEW', 'BLOCKED', 'DONE', 'CANCELED',
 ];
 const STATUS_SET = new Set<string>(STATUSES);
 
-/** A self-edge (from===to) is meaningless; cap the set to the 7×7 grid. */
+/** A self-edge (from===to) is meaningless; cap the set to the N×N grid. */
 const MAX_EDGES = STATUSES.length * STATUSES.length;
 
 /**

@@ -7,10 +7,11 @@ import {
   Ban,
   CheckCircle2,
   XCircle,
+  FlaskConical,
 } from 'lucide-react';
 import { cn } from '@giper/ui/cn';
 
-type Status = 'BACKLOG' | 'TODO' | 'IN_PROGRESS' | 'REVIEW' | 'BLOCKED' | 'DONE' | 'CANCELED';
+type Status = 'BACKLOG' | 'TODO' | 'IN_PROGRESS' | 'TESTING' | 'REVIEW' | 'BLOCKED' | 'DONE' | 'CANCELED';
 
 /**
  * Status badge per design-system/giper-pm/MASTER.md §1 status table.
@@ -39,6 +40,10 @@ const STATUS: Record<
   IN_PROGRESS: {
     className: 'bg-amber-50 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300',
     Icon: CircleDot,
+  },
+  TESTING: {
+    className: 'bg-cyan-50 text-cyan-700 dark:bg-cyan-950/50 dark:text-cyan-300',
+    Icon: FlaskConical,
   },
   REVIEW: {
     className: 'bg-purple-50 text-purple-700 dark:bg-purple-950/50 dark:text-purple-300',
