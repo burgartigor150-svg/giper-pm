@@ -78,9 +78,10 @@ export default async function KnowledgeHome({
               {spaces.map((sp) => {
                 const first = sp._count.articles;
                 return (
-                  <div
+                  <Link
                     key={sp.id}
-                    className="flex flex-col gap-2 rounded-lg border border-neutral-200 p-4 transition hover:border-neutral-400 hover:shadow-sm dark:border-neutral-800 dark:hover:border-neutral-600"
+                    href={`/knowledge/space/${sp.id}`}
+                    className="flex flex-col gap-2 rounded-lg border border-neutral-200 p-4 transition hover:border-neutral-400 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:border-neutral-800 dark:hover:border-neutral-600"
                     style={sp.color ? { borderTopColor: sp.color, borderTopWidth: 3 } : undefined}
                   >
                     <div className="flex items-center gap-2">
@@ -91,7 +92,7 @@ export default async function KnowledgeHome({
                       <p className="line-clamp-2 text-sm text-muted-foreground">{sp.description}</p>
                     ) : null}
                     <p className="mt-auto text-xs text-muted-foreground">{first} статей</p>
-                  </div>
+                  </Link>
                 );
               })}
             </div>
