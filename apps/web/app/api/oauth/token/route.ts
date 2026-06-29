@@ -16,6 +16,9 @@ import {
  */
 export const dynamic = 'force-dynamic';
 
+/** Thrown inside the rotation transaction to roll back on token reuse/conflict. */
+class RotationConflict extends Error {}
+
 function bad(error: string, description?: string, status = 400) {
   return NextResponse.json(
     { error, ...(description ? { error_description: description } : {}) },
@@ -123,27 +126,44 @@ export async function POST(req: Request) {
     if (!row || row.clientId !== clientId || row.expiresAt.getTime() < Date.now()) {
       return bad('invalid_grant', 'refresh_token недействителен');
     }
-    // Issue a fresh access token; rotate the refresh token and drop the old.
+
+    // Rotate atomically: the OLD refresh row is deleted as the concurrency gate
+    // and the new pair is created in the SAME transaction. If the delete affects
+    // 0 rows (token already rotated / concurrently reused), the whole tx rolls
+    // back and we reject — the old token can never survive a failed rotation,
+    // and two concurrent redemptions of the same token cannot both succeed.
     const accessToken = randomToken('gpo_');
     const newRefresh = randomToken('gpr_');
     const now = Date.now();
-    await prisma.oAuthAccessToken.create({
-      data: {
-        tokenHash: sha256(accessToken),
-        clientId: row.clientId,
-        userId: row.userId,
-        expiresAt: new Date(now + ACCESS_TTL_SEC * 1000),
-      },
-    });
-    await prisma.oAuthRefreshToken.create({
-      data: {
-        tokenHash: sha256(newRefresh),
-        clientId: row.clientId,
-        userId: row.userId,
-        expiresAt: new Date(now + REFRESH_TTL_SEC * 1000),
-      },
-    });
-    await prisma.oAuthRefreshToken.delete({ where: { id: row.id } }).catch(() => {});
+    try {
+      await prisma.$transaction(async (tx) => {
+        const del = await tx.oAuthRefreshToken.deleteMany({ where: { id: row.id } });
+        if (del.count !== 1) throw new RotationConflict();
+        await tx.oAuthAccessToken.create({
+          data: {
+            tokenHash: sha256(accessToken),
+            clientId: row.clientId,
+            userId: row.userId,
+            expiresAt: new Date(now + ACCESS_TTL_SEC * 1000),
+          },
+        });
+        await tx.oAuthRefreshToken.create({
+          data: {
+            tokenHash: sha256(newRefresh),
+            clientId: row.clientId,
+            userId: row.userId,
+            expiresAt: new Date(now + REFRESH_TTL_SEC * 1000),
+          },
+        });
+      });
+    } catch (e) {
+      // Concurrency/reuse → invalid_grant. A real DB error propagates (500) and
+      // is NOT silently swallowed, so a broken rotation never looks successful.
+      if (e instanceof RotationConflict) {
+        return bad('invalid_grant', 'refresh_token уже использован');
+      }
+      throw e;
+    }
     return NextResponse.json({
       access_token: accessToken,
       token_type: 'Bearer',
