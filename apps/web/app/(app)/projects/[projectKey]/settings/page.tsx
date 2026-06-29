@@ -21,6 +21,7 @@ import { CustomFieldsForm } from '@/components/domain/CustomFieldsForm';
 import { ComponentsManager } from '@/components/domain/ComponentsManager';
 import { listComponentsForProject } from '@/lib/components/listComponentsForProject';
 import { WorkflowMatrixEditor } from '@/components/domain/WorkflowMatrixEditor';
+import { AutoMoveParentToggle } from '@/components/domain/AutoMoveParentToggle';
 import { listWorkflowTransitions } from '@/lib/workflow/isTransitionAllowed';
 import { WorkflowColumnGraphEditor } from '@/components/domain/WorkflowColumnGraphEditor';
 import { listWorkflowColumnTransitions } from '@/lib/workflow/isColumnTransitionAllowed';
@@ -77,7 +78,7 @@ export default async function ProjectSettingsPage({
   // the per-column trigger mode is offered only when free-form columns are on.
   const freeFormProject = await prisma.project.findUnique({
     where: { id: project.id },
-    select: { freeFormColumnsEnabled: true },
+    select: { freeFormColumnsEnabled: true, autoMoveParentOnChild: true },
   });
   const boardSwimlanes = await getBoardSwimlanes(project.id);
   const customFields = await getCustomFields(project.id);
@@ -214,6 +215,18 @@ export default async function ProjectSettingsPage({
         </CardHeader>
         <CardContent>
           <WorkflowMatrixEditor projectKey={project.key} initial={workflowTransitions} canManage />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Подзадачи</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <AutoMoveParentToggle
+            projectId={project.id}
+            initial={!!freeFormProject?.autoMoveParentOnChild}
+          />
         </CardContent>
       </Card>
 

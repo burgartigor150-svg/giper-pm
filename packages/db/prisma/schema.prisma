@@ -466,6 +466,10 @@ model Project {
   /// dynamic Status) and cards route by columnId. Off = the fixed status-bucket
   /// columns (unchanged default board).
   freeFormColumnsEnabled Boolean @default(false)
+  /// Opt-in (default OFF): auto-move a parent card by its subtasks' status — to
+  /// IN_PROGRESS when a subtask starts (parent still in queue), to DONE when all
+  /// non-canceled subtasks are done. Forward-only (never moves the parent back).
+  autoMoveParentOnChild Boolean @default(false)
 
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
