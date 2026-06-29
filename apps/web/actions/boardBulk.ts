@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
+import { prisma } from '@giper/db';
 import { taskStatusSchema } from '@giper/shared';
 import { requireAuth } from '@/lib/auth';
 import { setInternalStatus } from '@/lib/tasks/setInternalStatus';
@@ -75,6 +76,28 @@ export async function bulkMoveTasksOnBoardAction(
   }
 
   const t = parsed.data;
+
+  // Symmetry with the status target's closing-refine: a free-form column whose
+  // category is DONE/CANCELED is a closing move too, and CANCELED would slip
+  // past setInternalStatus (no итог required) and silently cancel the batch.
+  // Reject closing columns at the boundary; an unknown columnId falls through so
+  // the per-item loop counts it as failed (consistent with single-card DnD).
+  if (t.kind === 'column') {
+    const col = await prisma.boardColumn.findUnique({
+      where: { id: t.columnId },
+      select: { status: true },
+    });
+    if (col && (col.status === 'DONE' || col.status === 'CANCELED')) {
+      return {
+        ok: false,
+        error: {
+          code: 'VALIDATION',
+          message: 'Нельзя массово переместить в завершающую колонку — закройте карточки по одной',
+        },
+      };
+    }
+  }
+
   let succeeded = 0;
   let failed = 0;
 

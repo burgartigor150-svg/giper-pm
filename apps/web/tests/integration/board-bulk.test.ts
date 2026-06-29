@@ -90,10 +90,13 @@ describe('bulkMoveTasksOnBoardAction — status target', () => {
     const t = await makeTask({ projectId: p.id, creatorId: admin.id, internalStatus: 'TODO' });
     as(admin);
 
+    // @ts-expect-error — the target type narrows out closing statuses; a raw
+    // POST could still send DONE, so the runtime schema must reject it too.
     const done = await bulkMoveTasksOnBoardAction([t.id], { kind: 'status', status: 'DONE' });
     expect(done.ok).toBe(false);
     if (!done.ok) expect(done.error.code).toBe('VALIDATION');
 
+    // @ts-expect-error — see above; CANCELED is also rejected at the boundary.
     const canceled = await bulkMoveTasksOnBoardAction([t.id], { kind: 'status', status: 'CANCELED' });
     expect(canceled.ok).toBe(false);
     // Nothing moved.
@@ -152,6 +155,23 @@ describe('bulkMoveTasksOnBoardAction — column target (free-form)', () => {
     });
     expect(after.every((t) => t.columnId === col.data!.columnId)).toBe(true);
     expect(after.every((t) => t.internalStatus === 'IN_PROGRESS')).toBe(true);
+  });
+
+  it('rejects a CLOSING column (CANCELED) at the boundary — symmetric with the status path', async () => {
+    const admin = await makeUser({ role: 'ADMIN' });
+    const p = await makeProject({ ownerId: admin.id, key: 'BBCC' });
+    const col = await createBoardColumnAction(p.id, 'Отменённые', 'CANCELED');
+    if (!col.ok) throw new Error('setup: column');
+    const t = await makeTask({ projectId: p.id, creatorId: admin.id, internalStatus: 'TODO' });
+    as(admin);
+
+    const res = await bulkMoveTasksOnBoardAction([t.id], { kind: 'column', columnId: col.data!.columnId });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error.code).toBe('VALIDATION');
+    // Nothing was canceled.
+    const after = await prisma.task.findUniqueOrThrow({ where: { id: t.id } });
+    expect(after.internalStatus).toBe('TODO');
+    expect(after.columnId).toBeNull();
   });
 
   it('an unknown column id fails every item (counted, never thrown)', async () => {
