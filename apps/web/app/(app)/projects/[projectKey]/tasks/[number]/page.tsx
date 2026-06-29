@@ -46,6 +46,7 @@ import { SubtaskList } from '@/components/domain/SubtaskList';
 import { Checklists } from '@/components/domain/Checklists';
 import { SendToReviewCTA } from '@/components/domain/SendToReviewCTA';
 import { ReviewerActions } from '@/components/domain/ReviewerActions';
+import { TesterActions } from '@/components/domain/TesterActions';
 import { TaskGraph } from '@/components/domain/TaskGraph';
 import { getTaskGraph } from '@/lib/tasks/getTaskGraph';
 import { Dependencies } from '@/components/domain/Dependencies';
@@ -213,6 +214,7 @@ export default async function TaskDetailPage({ params }: { params: Params }) {
   if (task.assignee) memberPool.set(task.assignee.id, task.assignee);
   if (task.creator) memberPool.set(task.creator.id, task.creator);
   if (task.reviewer) memberPool.set(task.reviewer.id, task.reviewer);
+  if (task.tester) memberPool.set(task.tester.id, task.tester);
   for (const a of task.assignments) memberPool.set(a.user.id, a.user);
   const activeUsers = await prisma.user.findMany({
     where: { isActive: true },
@@ -463,6 +465,17 @@ export default async function TaskDetailPage({ params }: { params: Params }) {
                   }
                   internalStatus={task.internalStatus}
                 />
+                <TesterActions
+                  taskId={task.id}
+                  projectKey={task.project.key}
+                  taskNumber={task.number}
+                  canTest={
+                    me.role === 'ADMIN' ||
+                    me.role === 'PM' ||
+                    task.testerId === me.id
+                  }
+                  internalStatus={task.internalStatus}
+                />
               </CardContent>
             </Card>
           ) : null}
@@ -612,6 +625,7 @@ export default async function TaskDetailPage({ params }: { params: Params }) {
                 internalStatus={task.internalStatus}
                 priority={task.priority}
                 reviewer={task.reviewer}
+                tester={task.tester}
                 primaryAssignee={task.assignee}
                 isMirror={task.externalSource === 'bitrix24'}
                 assignments={task.assignments}

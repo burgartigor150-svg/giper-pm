@@ -19,7 +19,7 @@ import { CAPABILITY_KEYS, type CapabilityKey } from './catalog';
  * Provenance of the non-helper keys (verified against source):
  *   project.viewAll←listProjectsForUser.ts:27 · project.edit←permissions.ts canEditProject (ADMIN org leg)
  *   task.delete←permissions.ts:171 · task.staff←assignments.ts:193 · task.editAny←permissions.ts:120/138
- *   task.review.close←review.ts:39 · task.checklist.toggle←checklists.ts:200 · task.attachments.manageAny←attachments.ts:143
+ *   task.review.close←review.ts:39 · task.testing.close←testing.ts (acceptTestingAction gate) · task.checklist.toggle←checklists.ts:200 · task.attachments.manageAny←attachments.ts:143
  *   task.tags.assign←tags.ts:51 · crm.scope.*←resolveCrmAccess permissions.ts:264 · reports.teamScope←reports/scope.ts:38
  *   reports.viewScreenshots←permissions.ts canViewUserScreenshots (ADMIN leg) · settings.*←settings/* page guards + actions
  *   users.*←lib/users/* · team.*←layout.ts:30 + pmTeam.ts:25 · integrations.*←integrations.ts/telegram*
@@ -37,6 +37,7 @@ const PM_CAPS: CapabilityKey[] = [
   'task.delete',
   'task.staff',
   'task.review.close',
+  'task.testing.close',
   'task.checklist.toggle',
   'crm.view',
   'crm.edit',

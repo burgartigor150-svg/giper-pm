@@ -36,6 +36,7 @@ type Props = {
   type?: string | undefined;
   dueWithin?: string | undefined;
   reviewer?: string | undefined;
+  tester?: string | undefined;
   versionId?: string | undefined;
   versions?: VersionOption[];
   componentId?: string | undefined;
@@ -68,6 +69,7 @@ export function TaskFilters({
   type,
   dueWithin,
   reviewer,
+  tester,
   versionId,
   versions = [],
   componentId,
@@ -334,6 +336,22 @@ export function TaskFilters({
               }
             />
             На моём ревью
+          </label>
+        </div>
+
+        <div className="flex items-end">
+          <label className="flex h-10 items-center gap-2 text-sm text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={tester === 'me'}
+              onChange={(e) =>
+                pushParams((sp) => {
+                  if (e.target.checked) sp.set('tester', 'me');
+                  else sp.delete('tester');
+                })
+              }
+            />
+            Мои на QA
           </label>
         </div>
       </div>

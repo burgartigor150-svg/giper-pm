@@ -780,3 +780,105 @@ export async function setReviewerAction(
   revalidatePath(`/projects/${projectKey}/tasks/${taskNumber}`);
   return { ok: true };
 }
+
+/**
+ * Set or clear the task's tester (QA). The tester is opt-in; without one,
+ * leaving TESTING is gated only by the base editor gate. With one, only that
+ * user (or a holder of task.testing.close) can move the task out of TESTING.
+ *
+ * Permission: a resource decision — PM/lead/owner (canManageAssignments). The
+ * sitting tester can also clear the field (step down) on their own. Mirrors
+ * setReviewerAction exactly.
+ */
+export async function setTesterAction(
+  taskId: string,
+  projectKey: string,
+  taskNumber: number,
+  testerId: string | null,
+): Promise<ActionResult> {
+  const me = await requireAuth();
+  const task = await prisma.task.findUnique({
+    where: { id: taskId },
+    select: {
+      id: true,
+      projectId: true,
+      testerId: true,
+      creatorId: true,
+      assigneeId: true,
+      externalSource: true,
+      project: {
+        select: {
+          ownerId: true,
+          members: { select: { userId: true, role: true } },
+        },
+      },
+    },
+  });
+  if (!task) return { ok: false, error: { code: 'NOT_FOUND', message: 'Не найдено' } };
+  const isCurrentTesterClearing =
+    testerId === null && task.testerId === me.id;
+  // Tester assignment is a resource decision — PM/lead/owner. The
+  // sitting tester can step down on their own (clear-to-null).
+  if (
+    !canManageAssignments({ id: me.id, role: me.role }, task.project, await getEffectiveCapsForProject({ id: me.id, role: me.role }, task.projectId)) &&
+    !isCurrentTesterClearing
+  ) {
+    return {
+      ok: false,
+      error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'Только PM/лид может назначить тестировщика' },
+    };
+  }
+
+  // The tester (if any) must exist as an active user. Like the reviewer
+  // slot, we don't require formal project membership (Bitrix-mirror
+  // groups have no ProjectMember rows) — just that the user is real.
+  if (testerId) {
+    const u = await prisma.user.findUnique({
+      where: { id: testerId },
+      select: { id: true },
+    });
+    if (!u) {
+      return {
+        ok: false,
+        error: { code: 'VALIDATION', message: 'Пользователь не найден' },
+      };
+    }
+  }
+
+  await prisma.task.update({
+    where: { id: taskId },
+    data: { testerId },
+  });
+
+  // Notify the new tester + the rest of the audience. The tester gets a
+  // specific ping; everyone else gets a generic "tester changed" so they
+  // know who's gating the QA stage.
+  const link = `/projects/${projectKey}/tasks/${taskNumber}`;
+  if (testerId && testerId !== me.id) {
+    await createNotification({
+      userId: testerId,
+      kind: 'TASK_ASSIGNED',
+      title: `${me.name ?? 'Кто-то'} назначил(а) вас тестировщиком`,
+      link,
+      payload: { taskId, projectKey, taskNumber, role: 'tester' },
+    });
+  }
+  if (testerId !== task.testerId) {
+    await fanoutToTaskAudience(
+      taskId,
+      me.id,
+      {
+        kind: 'TASK_STATUS_CHANGED',
+        title: testerId
+          ? `${me.name ?? 'Кто-то'} назначил(а) тестировщика`
+          : `${me.name ?? 'Кто-то'} снял(а) тестировщика`,
+        link,
+        payload: { taskId, projectKey, taskNumber, testerId },
+      },
+      { excludeUserIds: testerId ? [testerId] : [] },
+    );
+  }
+
+  revalidatePath(`/projects/${projectKey}/tasks/${taskNumber}`);
+  return { ok: true };
+}

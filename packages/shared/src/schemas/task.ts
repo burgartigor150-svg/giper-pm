@@ -109,6 +109,8 @@ export const taskListFilterSchema = z.object({
   dueWithin: dueWithinSchema.optional(),
   /** "me" restricts to tasks where the viewer is the assigned reviewer. */
   reviewer: z.literal('me').optional(),
+  /** "me" restricts to tasks where the viewer is the assigned tester (QA). */
+  tester: z.literal('me').optional(),
   /** Release/version id the task must be slated for. */
   versionId: z.string().optional(),
   /** Component id the task must belong to. */

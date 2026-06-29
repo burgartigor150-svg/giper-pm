@@ -26,6 +26,7 @@ export async function GET(_req: Request, { params }: Ctx) {
       creatorId: true,
       assigneeId: true,
       reviewerId: true,
+      testerId: true,
       externalSource: true,
       coverImageKey: true,
       assignments: { select: { userId: true } },

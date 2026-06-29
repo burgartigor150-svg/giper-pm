@@ -17,6 +17,7 @@ export const SAVED_FILTER_PARAM_KEYS = [
   'type',
   'dueWithin',
   'reviewer',
+  'tester',
   'versionId',
   'componentId',
   'tagIds',

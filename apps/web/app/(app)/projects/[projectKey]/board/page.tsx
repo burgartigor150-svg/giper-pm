@@ -59,6 +59,7 @@ export default async function ProjectBoardPage({
   const dueParsed = dueRaw ? dueWithinSchema.safeParse(dueRaw) : null;
   const dueWithin = dueParsed?.success ? dueParsed.data : undefined;
   const reviewer = sp.reviewer === 'me' ? 'me' : undefined;
+  const tester = sp.tester === 'me' ? 'me' : undefined;
   const versionId = typeof sp.versionId === 'string' && sp.versionId ? sp.versionId : undefined;
   const componentId = typeof sp.componentId === 'string' && sp.componentId ? sp.componentId : undefined;
   // tagIds may arrive as a single string or an array depending on the
@@ -74,7 +75,7 @@ export default async function ProjectBoardPage({
   try {
     result = await listTasksForBoard(
       projectKey,
-      { assigneeId, priority, q, onlyMine, tagIds, type, dueWithin, reviewer, versionId, componentId },
+      { assigneeId, priority, q, onlyMine, tagIds, type, dueWithin, reviewer, tester, versionId, componentId },
       { id: me.id, role: me.role },
     );
   } catch (e) {
@@ -167,6 +168,7 @@ export default async function ProjectBoardPage({
           type={type}
           dueWithin={dueWithin}
           reviewer={reviewer}
+          tester={tester}
           versionId={versionId}
           versions={versions.map((v) => ({ id: v.id, name: v.name }))}
           componentId={componentId}

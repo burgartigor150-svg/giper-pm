@@ -38,6 +38,7 @@ export async function getTask(projectKey: string, number: number, user: SessionU
       bitrixCreatedById: true,
       bitrixResponsibleId: true,
       reviewerId: true,
+      testerId: true,
       parentId: true,
       internalStatus: true,
       sprintId: true,
@@ -54,6 +55,7 @@ export async function getTask(projectKey: string, number: number, user: SessionU
       creator: { select: { id: true, name: true, image: true } },
       assignee: { select: { id: true, name: true, image: true } },
       reviewer: { select: { id: true, name: true, image: true } },
+      tester: { select: { id: true, name: true, image: true } },
       parent: {
         select: {
           id: true,
@@ -221,6 +223,7 @@ export async function getTask(projectKey: string, number: number, user: SessionU
     creatorId: task.creatorId,
     assigneeId: task.assigneeId,
     reviewerId: task.reviewerId,
+    testerId: task.testerId,
     externalSource: task.externalSource,
     assignments: task.assignments.map((a) => ({ userId: a.user.id })),
     watchers: task.watchers.map((w) => ({ userId: w.userId })),

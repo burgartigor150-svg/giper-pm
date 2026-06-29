@@ -66,7 +66,7 @@ export default async function ProjectTasksListPage({
 
   // Parse filters from URL with safe defaults
   const filterRaw: Record<string, unknown> = {};
-  for (const k of ['status', 'priority', 'assigneeId', 'q', 'type', 'dueWithin', 'reviewer', 'versionId', 'componentId', 'page', 'sort', 'dir']) {
+  for (const k of ['status', 'priority', 'assigneeId', 'q', 'type', 'dueWithin', 'reviewer', 'tester', 'versionId', 'componentId', 'page', 'sort', 'dir']) {
     const v = sp[k];
     if (typeof v === 'string') filterRaw[k] = v;
   }
@@ -163,6 +163,7 @@ export default async function ProjectTasksListPage({
           type={filter.type}
           dueWithin={filter.dueWithin}
           reviewer={filter.reviewer}
+          tester={filter.tester}
           versionId={filter.versionId}
           versions={versions.map((v) => ({ id: v.id, name: v.name }))}
           componentId={filter.componentId}

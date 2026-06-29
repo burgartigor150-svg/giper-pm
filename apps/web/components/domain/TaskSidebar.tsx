@@ -9,6 +9,7 @@ import { EstimateVsActual } from './EstimateVsActual';
 import {
   assignTaskAction,
   setReviewerAction,
+  setTesterAction,
   updateTaskAction,
 } from '@/actions/tasks';
 import {
@@ -68,6 +69,7 @@ type Props = {
   internalStatus: (typeof STATUSES)[number];
   priority: (typeof PRIORITIES)[number];
   reviewer: { id: string; name: string; image: string | null } | null;
+  tester: { id: string; name: string; image: string | null } | null;
   /** Primary assignee (Task.assigneeId). Editable picker is shown for
    *  local tasks only; on Bitrix-mirror tasks the assignee is rendered
    *  read-only by BitrixMirrorPanel (upstream source of truth). */
@@ -263,6 +265,36 @@ export function TaskSidebar(props: Props) {
             {props.reviewer.name}
             <span className="text-[10px] uppercase tracking-wide">
               решает «закрывать или нет»
+            </span>
+          </div>
+        ) : null}
+      </Field>
+
+      <Field label="Тестировщик" saved={savedField === 'tester'}>
+        <UserPicker
+          value={props.tester ?? null}
+          preload={props.members}
+          disabled={!props.canManage || pending}
+          placeholder="— без тестировщика —"
+          onPick={(user) => {
+            startTransition(async () => {
+              const res = await setTesterAction(
+                props.taskId,
+                props.projectKey,
+                props.taskNumber,
+                user?.id ?? null,
+              );
+              if (res.ok) flash('tester');
+              else alert(res.error.message);
+            });
+          }}
+        />
+        {props.tester ? (
+          <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+            <Avatar src={props.tester.image} alt={props.tester.name} className="h-5 w-5" />
+            {props.tester.name}
+            <span className="text-[10px] uppercase tracking-wide">
+              проверяет качество
             </span>
           </div>
         ) : null}

@@ -31,6 +31,7 @@ export async function approveTaskAction(
     select: {
       projectId: true,
       reviewerId: true,
+      testerId: true,
       assigneeId: true,
       creatorId: true,
       internalStatus: true,
@@ -125,6 +126,7 @@ export async function rejectTaskAction(
     select: {
       projectId: true,
       reviewerId: true,
+      testerId: true,
       assigneeId: true,
       creatorId: true,
       internalStatus: true,
