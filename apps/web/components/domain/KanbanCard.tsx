@@ -8,6 +8,7 @@ import { Avatar } from '@giper/ui/components/Avatar';
 import { cn } from '@giper/ui/cn';
 import type { BoardTask } from '@/lib/tasks';
 import { TagPill } from './TagPill';
+import { BoardCardCheckbox } from './TaskBulkActions';
 
 const PRIORITY_DOT: Record<NonNullable<BoardTask['priority']>, string> = {
   LOW: 'bg-neutral-400',
@@ -21,9 +22,11 @@ type Props = {
   task: BoardTask;
   /** Show drag affordances (false on overlay clone). */
   isOverlay?: boolean;
+  /** Render the bulk-selection checkbox (board bulk mode; never on the overlay clone). */
+  selectable?: boolean;
 };
 
-export function KanbanCard({ projectKey, task, isOverlay = false }: Props) {
+export function KanbanCard({ projectKey, task, isOverlay = false, selectable = false }: Props) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: task.id,
     data: { type: 'task', status: task.status },
@@ -79,6 +82,7 @@ export function KanbanCard({ projectKey, task, isOverlay = false }: Props) {
       ) : null}
 
       <div className="flex items-start gap-2">
+        {selectable && !isOverlay ? <BoardCardCheckbox taskId={task.id} /> : null}
         <span
           className={cn(
             'mt-1.5 inline-block h-2 w-2 shrink-0 rounded-full',
