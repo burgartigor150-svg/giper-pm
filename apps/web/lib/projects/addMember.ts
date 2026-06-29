@@ -71,8 +71,19 @@ export async function removeProjectMember(
   if (project.ownerId === userIdToRemove) {
     throw new DomainError('VALIDATION', 400, 'Нельзя удалить владельца проекта');
   }
-  return prisma.projectMember.deleteMany({
-    where: { projectId, userId: userIdToRemove },
+  return prisma.$transaction(async (tx) => {
+    const removed = await tx.projectMember.deleteMany({
+      where: { projectId, userId: userIdToRemove },
+    });
+    // A removed member must also lose PASSIVE access: a TaskWatcher row both
+    // grants canViewTask visibility AND drives notification fan-out, so a stale
+    // watch would keep a removed user reading this project's tasks and getting
+    // pinged. (Active assignee/reviewer/tester relations are left as-is — those
+    // are real work that needs explicit hand-off, not silent removal.)
+    await tx.taskWatcher.deleteMany({
+      where: { userId: userIdToRemove, task: { projectId } },
+    });
+    return removed;
   });
 }
 

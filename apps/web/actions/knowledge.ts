@@ -163,6 +163,22 @@ export async function moveArticleAction(
     });
     cur = p?.parentId ?? null;
   }
+  // The new parent MUST live in the same space. The move never changes spaceId,
+  // so reparenting across spaces would leave the article in space A pointing at a
+  // space-B parent — a broken cross-space tree, a breadcrumb leak into B, and a
+  // cascade-delete trap (deleting the B parent would delete this A article).
+  if (parentId) {
+    const parent = await prisma.knowledgeArticle.findUnique({
+      where: { id: parentId },
+      select: { spaceId: true },
+    });
+    if (!parent) {
+      return { ok: false, error: { code: 'NOT_FOUND', message: 'Родительская статья не найдена' } };
+    }
+    if (parent.spaceId !== article.spaceId) {
+      return { ok: false, error: { code: 'VALIDATION', message: 'Нельзя переместить в другое пространство' } };
+    }
+  }
   await prisma.knowledgeArticle.update({
     where: { id },
     data: { parentId: parentId ?? null, order },

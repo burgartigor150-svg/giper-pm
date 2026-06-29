@@ -158,15 +158,21 @@ function publish(channel: string, payload: unknown) {
  * Decide whether a socket (already authenticated as `userId`) is allowed
  * to subscribe to a given channel.
  *   - user:<id>      — must match the authenticated id.
- *   - task:* / project:* — open to any authenticated user (per the trust
- *                          model in the file header).
+ *   - task:* / project:* / chat:* — open to any authenticated user (per the
+ *                          trust model in the file header: the realtime feed
+ *                          carries only ids; message/board content is fetched
+ *                          through the gated API, which enforces membership).
  *   - anything else  — denied.
  */
 function canSubscribe(userId: string, channel: string): boolean {
   if (channel.startsWith('user:')) {
     return channel === `user:${userId}`;
   }
-  if (channel.startsWith('task:') || channel.startsWith('project:')) {
+  if (
+    channel.startsWith('task:') ||
+    channel.startsWith('project:') ||
+    channel.startsWith('chat:')
+  ) {
     return true;
   }
   return false;
