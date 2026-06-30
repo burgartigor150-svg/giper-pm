@@ -153,6 +153,7 @@ export function MessagesShell({
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [showJumpBtn, setShowJumpBtn] = useState(false);
   const [typingUsers, setTypingUsers] = useState<Map<string, { name: string; exp: number }>>(new Map());
+  const [onlineIds, setOnlineIds] = useState<Set<string>>(new Set());
   const scrollRef = useRef<HTMLDivElement>(null);
   const nearBottomRef = useRef(true);
   const loadingOlderRef = useRef(false);
@@ -275,7 +276,18 @@ export function MessagesShell({
   // RSC tree via Next's server-render); we'll switch to in-place
   // patches once a virtualized message list is in.
   useRealtime(activeChannelId ? channelForChat(activeChannelId) : null, (payload) => {
-    const p = payload as { __typing?: boolean; userId?: string; name?: string };
+    const p = payload as {
+      __typing?: boolean;
+      userId?: string;
+      name?: string;
+      type?: string;
+      userIds?: string[];
+    };
+    if (p && p.type === 'presence:state' && Array.isArray(p.userIds)) {
+      // Who's currently in this channel (online dot). Exclude self.
+      setOnlineIds(new Set(p.userIds.filter((id) => id !== meId)));
+      return;
+    }
     if (p && p.__typing) {
       // Ephemeral typing signal — show "<name> печатает…", don't refetch.
       if (p.userId && p.userId !== meId) {
@@ -311,9 +323,10 @@ export function MessagesShell({
     }, 1000);
     return () => window.clearInterval(i);
   }, []);
-  // Clear typing when switching channels.
+  // Clear typing + presence when switching channels.
   useEffect(() => {
     setTypingUsers(new Map());
+    setOnlineIds(new Set());
   }, [activeChannelId]);
 
   const typingPublish = useTypingPublisher(
@@ -454,6 +467,14 @@ export function MessagesShell({
                 ) : null}
                 {activeChannelId ? (
                   <PinnedBar channelId={activeChannelId} onJump={scrollToMessage} />
+                ) : null}
+                {onlineIds.size > 0 ? (
+                  <div className="flex items-center gap-1.5 border-b border-border bg-background px-4 py-1 text-xs text-muted-foreground">
+                    <span className="inline-block size-2 rounded-full bg-green-500" aria-hidden="true" />
+                    {active?.kind === 'DM'
+                      ? 'в сети'
+                      : `${onlineIds.size} ${onlineIds.size === 1 ? 'в сети' : 'в сети'}`}
+                  </div>
                 ) : null}
             <div className="relative min-h-0 flex-1">
               <div className="h-full overflow-y-auto px-4 py-4" ref={scrollRef} onScroll={onScroll}>
