@@ -53,6 +53,8 @@ type Props = {
   /** Called after a video-note finishes uploading. Same intent as
    *  `onSend` returning — caller revalidates / refreshes. */
   onVideoNoteSent?: () => void;
+  /** Called (throttled by the caller) on keystrokes to emit a typing signal. */
+  onTyping?: () => void;
 };
 
 /**
@@ -69,6 +71,7 @@ export function MessageComposer({
   channelId,
   parentId = null,
   onVideoNoteSent,
+  onTyping,
 }: Props) {
   const [draft, setDraft] = useState('');
   const [pending, startTransition] = useTransition();
@@ -165,6 +168,7 @@ export function MessageComposer({
     const text = e.target.value;
     setDraft(text);
     recomputeMentionTrigger(text, e.target.selectionStart);
+    if (text.trim()) onTyping?.();
   }
 
   function pickMention(user: MentionUser) {

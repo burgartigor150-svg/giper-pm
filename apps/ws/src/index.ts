@@ -269,7 +269,7 @@ wss.on('connection', (ws) => {
       ws.close(1008, 'no auth');
       return;
     }
-    let msg: { type?: string; channel?: string };
+    let msg: { type?: string; channel?: string; name?: string };
     try {
       msg = JSON.parse(raw.toString());
     } catch {
@@ -285,6 +285,26 @@ wss.on('connection', (ws) => {
     } else if (msg.type === 'unsubscribe' && typeof msg.channel === 'string') {
       unsubscribe(ws, msg.channel);
       ws.send(JSON.stringify({ type: 'unsubscribed', channel: msg.channel }));
+    } else if (msg.type === 'typing' && typeof msg.channel === 'string') {
+      // Ephemeral typing signal. Only for chat: channels the socket is already
+      // subscribed to; fanned transiently to the OTHER sockets in the channel
+      // (never persisted, never echoed to the sender). High-frequency, so it
+      // deliberately bypasses the DB/publish path.
+      const channel = msg.channel;
+      const mine = socketChannels.get(ws);
+      if (channel.startsWith('chat:') && mine && mine.has(channel)) {
+        const set = channels.get(channel);
+        if (set) {
+          const out = JSON.stringify({
+            type: 'event',
+            channel,
+            payload: { __typing: true, userId, name: typeof msg.name === 'string' ? msg.name.slice(0, 80) : '' },
+          });
+          for (const peer of set) {
+            if (peer !== ws && peer.readyState === peer.OPEN) peer.send(out);
+          }
+        }
+      }
     } else if (msg.type === 'ping') {
       ws.send(JSON.stringify({ type: 'pong' }));
     }
