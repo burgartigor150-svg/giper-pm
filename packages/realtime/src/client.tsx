@@ -31,6 +31,8 @@ type EventHandler = (payload: unknown) => void;
 type RealtimeCtx = {
   status: 'idle' | 'connecting' | 'open' | 'closed';
   subscribe: (channel: string, handler: EventHandler) => () => void;
+  /** Send an ephemeral typing signal to a chat channel (no-op if offline). */
+  sendTyping: (channel: string, name: string) => void;
 };
 
 const Ctx = createContext<RealtimeCtx | null>(null);
@@ -166,9 +168,16 @@ export function RealtimeProvider({ url, getToken, children }: Props) {
     [sendSubscribe, sendUnsubscribe],
   );
 
+  const sendTyping = useCallback((channel: string, name: string) => {
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'typing', channel, name }));
+    }
+  }, []);
+
   const ctxValue = useMemo<RealtimeCtx>(
-    () => ({ status, subscribe }),
-    [status, subscribe],
+    () => ({ status, subscribe, sendTyping }),
+    [status, subscribe, sendTyping],
   );
 
   // Concurrent @types/react versions in the monorepo make Ctx.Provider
@@ -205,4 +214,23 @@ export function useRealtime(channel: string | null, handler: EventHandler) {
 export function useRealtimeStatus(): RealtimeCtx['status'] {
   const ctx = useContext(Ctx);
   return ctx?.status ?? 'idle';
+}
+
+/**
+ * Returns a throttled typing publisher for a chat channel. Safe to call on
+ * every keystroke — it emits at most once per `throttleMs`.
+ */
+export function useTypingPublisher(channel: string | null, throttleMs = 2500) {
+  const ctx = useContext(Ctx);
+  const lastRef = useRef(0);
+  return useCallback(
+    (name: string) => {
+      if (!ctx || !channel) return;
+      const now = Date.now();
+      if (now - lastRef.current < throttleMs) return;
+      lastRef.current = now;
+      ctx.sendTyping(channel, name);
+    },
+    [ctx, channel, throttleMs],
+  );
 }

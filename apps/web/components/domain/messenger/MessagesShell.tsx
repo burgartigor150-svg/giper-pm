@@ -7,7 +7,7 @@ import { Hash, Lock, MessageSquare, Megaphone, Search } from 'lucide-react';
 import { Avatar } from '@giper/ui/components/Avatar';
 import { Button } from '@giper/ui/components/Button';
 import { cn } from '@giper/ui/cn';
-import { useRealtime } from '@giper/realtime/client';
+import { useRealtime, useTypingPublisher } from '@giper/realtime/client';
 import { channelForChat } from '@giper/realtime';
 import {
   postMessageAction,
@@ -122,6 +122,8 @@ type Props = {
   canDeleteChannel?: boolean;
   /** Deep-link target (?msg=<id>) — scroll to + flash this message on load. */
   targetMessageId?: string | null;
+  /** Current user's display name — used for the outgoing typing signal. */
+  meName?: string | null;
 };
 
 export function MessagesShell({
@@ -136,6 +138,7 @@ export function MessagesShell({
   isMuted = false,
   canDeleteChannel = false,
   targetMessageId = null,
+  meName = null,
 }: Props) {
   const router = useRouter();
   const [messages, setMessages] = useState<MessageRow[]>(initialMessages);
@@ -149,6 +152,7 @@ export function MessagesShell({
   const [hasMore, setHasMore] = useState(true);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [showJumpBtn, setShowJumpBtn] = useState(false);
+  const [typingUsers, setTypingUsers] = useState<Map<string, { name: string; exp: number }>>(new Map());
   const scrollRef = useRef<HTMLDivElement>(null);
   const nearBottomRef = useRef(true);
   const loadingOlderRef = useRef(false);
@@ -270,9 +274,58 @@ export function MessagesShell({
   // current channel. Cheap and correct (router.refresh re-fetches the
   // RSC tree via Next's server-render); we'll switch to in-place
   // patches once a virtualized message list is in.
-  useRealtime(activeChannelId ? channelForChat(activeChannelId) : null, () => {
+  useRealtime(activeChannelId ? channelForChat(activeChannelId) : null, (payload) => {
+    const p = payload as { __typing?: boolean; userId?: string; name?: string };
+    if (p && p.__typing) {
+      // Ephemeral typing signal — show "<name> печатает…", don't refetch.
+      if (p.userId && p.userId !== meId) {
+        const uid = p.userId;
+        const name = p.name || 'Кто-то';
+        setTypingUsers((prev) => {
+          const next = new Map(prev);
+          next.set(uid, { name, exp: Date.now() + 5000 });
+          return next;
+        });
+      }
+      return;
+    }
     router.refresh();
   });
+
+  // Expire stale typing entries every second.
+  useEffect(() => {
+    const i = window.setInterval(() => {
+      setTypingUsers((prev) => {
+        if (prev.size === 0) return prev;
+        const now = Date.now();
+        let changed = false;
+        const next = new Map(prev);
+        for (const [k, v] of next) {
+          if (v.exp <= now) {
+            next.delete(k);
+            changed = true;
+          }
+        }
+        return changed ? next : prev;
+      });
+    }, 1000);
+    return () => window.clearInterval(i);
+  }, []);
+  // Clear typing when switching channels.
+  useEffect(() => {
+    setTypingUsers(new Map());
+  }, [activeChannelId]);
+
+  const typingPublish = useTypingPublisher(
+    activeChannelId ? channelForChat(activeChannelId) : null,
+  );
+  const typingLabel = (() => {
+    const names = [...typingUsers.values()].map((v) => v.name);
+    if (names.length === 0) return null;
+    if (names.length === 1) return `${names[0]} печатает…`;
+    if (names.length === 2) return `${names[0]} и ${names[1]} печатают…`;
+    return `${names.length} человек печатают…`;
+  })();
 
   const memberDms = memberChannels.filter((c) => c.kind === 'DM' || c.kind === 'GROUP_DM');
   const memberRooms = memberChannels.filter(
@@ -445,6 +498,11 @@ export function MessagesShell({
                 </button>
               ) : null}
             </div>
+            {typingLabel ? (
+              <div className="px-4 pb-1 text-xs italic text-muted-foreground" aria-live="polite">
+                {typingLabel}
+              </div>
+            ) : null}
             {canPost ? (
               <div className="border-t border-border bg-background p-3">
                 {replyTo ? (
@@ -469,6 +527,7 @@ export function MessagesShell({
                   placeholder="Написать сообщение… (@ — упомянуть пользователя, Enter — отправить)"
                   channelId={activeChannelId ?? undefined}
                   onVideoNoteSent={() => router.refresh()}
+                  onTyping={() => typingPublish(meName || 'Кто-то')}
                   onSend={async (body) => {
                     if (!activeChannelId) return;
                     const replyToId = replyTo?.id ?? null;

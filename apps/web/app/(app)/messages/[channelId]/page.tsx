@@ -38,6 +38,7 @@ export default async function MessagesChannelPage({
       isMuted={loaded.access.isMuted}
       canDeleteChannel={loaded.access.createdById === me.id}
       targetMessageId={msg ?? null}
+      meName={me.name ?? null}
     />
   );
 }
