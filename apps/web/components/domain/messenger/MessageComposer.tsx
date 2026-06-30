@@ -81,6 +81,30 @@ export function MessageComposer({
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Per-channel draft persistence (Telegram keeps an unsent draft per chat).
+  const draftKey = channelId ? `msg-draft:${channelId}` : null;
+  // Load the saved draft when switching channels.
+  useEffect(() => {
+    if (!draftKey) return;
+    try {
+      setDraft(window.localStorage.getItem(draftKey) ?? '');
+    } catch {
+      /* localStorage unavailable (private mode) — ignore */
+    }
+    setMentionState(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftKey]);
+  // Persist (or clear) the draft as it changes.
+  useEffect(() => {
+    if (!draftKey) return;
+    try {
+      if (draft.trim()) window.localStorage.setItem(draftKey, draft);
+      else window.localStorage.removeItem(draftKey);
+    } catch {
+      /* ignore */
+    }
+  }, [draft, draftKey]);
+
   async function uploadFiles(files: FileList | null) {
     if (!files || files.length === 0 || !channelId) return;
     setUploading(true);

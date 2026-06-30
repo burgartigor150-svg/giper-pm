@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useLayoutEffect, useRef, useState, useTransition } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Hash, Lock, MessageSquare, Megaphone, Search } from 'lucide-react';
@@ -35,6 +35,37 @@ import { Pin, MessageSquareReply, CornerUpLeft, X, ArrowDown, Check, CheckCheck 
  * clicks. If the target isn't in the loaded window it's a no-op (out-of-window
  * jump-to-message lands with pagination in a later slice).
  */
+/** Same calendar day in local time. */
+function sameDay(a: Date | string, b: Date | string): boolean {
+  const da = new Date(a);
+  const db = new Date(b);
+  return (
+    da.getFullYear() === db.getFullYear() &&
+    da.getMonth() === db.getMonth() &&
+    da.getDate() === db.getDate()
+  );
+}
+
+/** "Сегодня" / "Вчера" / "30 июня 2026" day divider between message groups. */
+function DaySeparator({ date }: { date: Date | string }) {
+  const d = new Date(date);
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  const label = sameDay(d, today)
+    ? 'Сегодня'
+    : sameDay(d, yesterday)
+      ? 'Вчера'
+      : d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
+  return (
+    <li className="my-1 flex justify-center">
+      <span className="rounded-full bg-muted px-2.5 py-0.5 text-[0.6875rem] font-medium text-muted-foreground">
+        {label}
+      </span>
+    </li>
+  );
+}
+
 function scrollToMessage(id: string) {
   const el = document.getElementById(`msg-${id}`);
   if (!el) return;
@@ -511,22 +542,29 @@ export function MessagesShell({
                   </div>
                 ) : (
                   <ul className="flex flex-col gap-3">
-                    {messages.map((m) => (
-                      <MessageRow
-                        key={m.id}
-                        m={m}
-                        meId={meId ?? ''}
-                        mentionsMap={mentionsMap}
-                        previewsMap={previewsMap}
-                        canPin={myChannelRole === 'ADMIN'}
-                        onChanged={() => router.refresh()}
-                        onOpenThread={() => setOpenThreadId(m.id)}
-                        onReply={() =>
-                          setReplyTo({ id: m.id, authorName: m.author.name, body: m.body })
-                        }
-                        seenThreshold={othersMaxRead}
-                      />
-                    ))}
+                    {messages.map((m, i) => {
+                      const prev = i > 0 ? messages[i - 1] : null;
+                      const showDay =
+                        !prev || !sameDay(prev.createdAt, m.createdAt);
+                      return (
+                        <Fragment key={m.id}>
+                          {showDay ? <DaySeparator date={m.createdAt} /> : null}
+                          <MessageRow
+                            m={m}
+                            meId={meId ?? ''}
+                            mentionsMap={mentionsMap}
+                            previewsMap={previewsMap}
+                            canPin={myChannelRole === 'ADMIN'}
+                            onChanged={() => router.refresh()}
+                            onOpenThread={() => setOpenThreadId(m.id)}
+                            onReply={() =>
+                              setReplyTo({ id: m.id, authorName: m.author.name, body: m.body })
+                            }
+                            seenThreshold={othersMaxRead}
+                          />
+                        </Fragment>
+                      );
+                    })}
                   </ul>
                 )}
               </div>
