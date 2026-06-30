@@ -159,20 +159,31 @@ type Props = {
   initialMemberReads?: Record<string, number>;
 };
 
+// Stable empty defaults. These MUST be module-level constants, not inline `[]`
+// / `{}` in the destructure — the messages index page renders MessagesShell
+// without initialMessages, and `initialMessages` is a dependency of the
+// reset effect below. An inline default creates a NEW array every render, so
+// the effect (which calls setState) would re-run forever → "Maximum update
+// depth exceeded", which freezes the client router (clicks stop navigating).
+const EMPTY_MESSAGES: MessageRow[] = [];
+const EMPTY_MENTIONS: MentionUser[] = [];
+const EMPTY_PREVIEWS: TaskPreview[] = [];
+const EMPTY_READS: Record<string, number> = {};
+
 export function MessagesShell({
   memberChannels,
   publicChannels,
   activeChannelId,
-  initialMessages = [],
-  mentionedUsers = [],
-  taskPreviews = [],
+  initialMessages = EMPTY_MESSAGES,
+  mentionedUsers = EMPTY_MENTIONS,
+  taskPreviews = EMPTY_PREVIEWS,
   meId,
   myChannelRole = null,
   isMuted = false,
   canDeleteChannel = false,
   targetMessageId = null,
   meName = null,
-  initialMemberReads = {},
+  initialMemberReads = EMPTY_READS,
 }: Props) {
   const router = useRouter();
   const [messages, setMessages] = useState<MessageRow[]>(initialMessages);
@@ -213,8 +224,11 @@ export function MessagesShell({
   useEffect(() => {
     const wasNearBottom = nearBottomRef.current;
     setMessages(initialMessages);
-    setExtraMentions([]);
-    setExtraPreviews([]);
+    // Idempotent resets — return the SAME reference when already empty so React
+    // bails out instead of re-rendering. Defense-in-depth against the loop above
+    // even if a caller ever passes an unstable initialMessages.
+    setExtraMentions((p) => (p.length ? [] : p));
+    setExtraPreviews((p) => (p.length ? [] : p));
     setHasMore(true);
     // Re-seed read watermarks from the server (source of truth); live
     // channel.read events advance them further between refreshes.
