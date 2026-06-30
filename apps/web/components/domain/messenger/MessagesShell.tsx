@@ -26,7 +26,20 @@ import { VideoNotePlayer } from './VideoNotePlayer';
 import { AudioNotePlayer } from './AudioNotePlayer';
 import { SystemEventCard, type SystemEvent } from './SystemEventCard';
 import { MessageActions } from './MessageActions';
-import { Pin, MessageSquareReply } from 'lucide-react';
+import { Pin, MessageSquareReply, CornerUpLeft, X } from 'lucide-react';
+
+/**
+ * Smooth-scroll to a message by id + brief highlight. Used by reply-quote
+ * clicks. If the target isn't in the loaded window it's a no-op (out-of-window
+ * jump-to-message lands with pagination in a later slice).
+ */
+function scrollToMessage(id: string) {
+  const el = document.getElementById(`msg-${id}`);
+  if (!el) return;
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  el.classList.add('ring-2', 'ring-primary', 'rounded-md');
+  window.setTimeout(() => el.classList.remove('ring-2', 'ring-primary', 'rounded-md'), 1500);
+}
 
 type ChannelKind = 'PUBLIC' | 'PRIVATE' | 'DM' | 'GROUP_DM' | 'BROADCAST';
 
@@ -62,6 +75,13 @@ type MessageRow = {
   createdAt: Date;
   reactions: Array<{ userId: string; emoji: string }>;
   attachments?: MessageAttachmentLite[];
+  replyToId?: string | null;
+  replyTo?: {
+    id: string;
+    body: string;
+    deletedAt: Date | string | null;
+    author: { name: string };
+  } | null;
   source?: 'WEB' | 'MOBILE' | 'API' | 'SYSTEM';
   eventKind?:
     | 'CALL_STARTED'
@@ -117,11 +137,13 @@ export function MessagesShell({
   const router = useRouter();
   const [messages, setMessages] = useState<MessageRow[]>(initialMessages);
   const [openThreadId, setOpenThreadId] = useState<string | null>(null);
+  const [replyTo, setReplyTo] = useState<{ id: string; authorName: string; body: string } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Close thread when navigating channels.
+  // Close thread + clear reply draft when navigating channels.
   useEffect(() => {
     setOpenThreadId(null);
+    setReplyTo(null);
   }, [activeChannelId]);
 
   // Reset when navigating between channels.
@@ -292,6 +314,9 @@ export function MessagesShell({
                       canPin={myChannelRole === 'ADMIN'}
                       onChanged={() => router.refresh()}
                       onOpenThread={() => setOpenThreadId(m.id)}
+                      onReply={() =>
+                        setReplyTo({ id: m.id, authorName: m.author.name, body: m.body })
+                      }
                     />
                   ))}
                 </ul>
@@ -299,12 +324,31 @@ export function MessagesShell({
             </div>
             {canPost ? (
               <div className="border-t border-border bg-background p-3">
+                {replyTo ? (
+                  <div className="mb-2 flex items-center gap-2 rounded-md border-l-2 border-primary/60 bg-muted/40 px-2 py-1 text-xs">
+                    <CornerUpLeft className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                    <span className="min-w-0 flex-1 truncate">
+                      <span className="text-muted-foreground">В ответ </span>
+                      <span className="font-medium">{replyTo.authorName}</span>
+                      {replyTo.body ? <span className="text-muted-foreground">: {replyTo.body}</span> : null}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setReplyTo(null)}
+                      aria-label="Отменить ответ"
+                      className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      <X className="size-3.5" />
+                    </button>
+                  </div>
+                ) : null}
                 <MessageComposer
                   placeholder="Написать сообщение… (@ — упомянуть пользователя, Enter — отправить)"
                   channelId={activeChannelId ?? undefined}
                   onVideoNoteSent={() => router.refresh()}
                   onSend={async (body) => {
                     if (!activeChannelId) return;
+                    const replyToId = replyTo?.id ?? null;
                     // Optimistic append.
                     const tempId = `temp-${Date.now()}`;
                     setMessages((prev) => [
@@ -321,9 +365,11 @@ export function MessagesShell({
                         reactions: [],
                       },
                     ]);
+                    setReplyTo(null);
                     const res = await postMessageAction({
                       channelId: activeChannelId,
                       body,
+                      replyToId,
                     });
                     if (!res.ok) {
                       setMessages((prev) => prev.filter((m) => m.id !== tempId));
@@ -423,6 +469,7 @@ function MessageRow({
   canPin,
   onChanged,
   onOpenThread,
+  onReply,
 }: {
   m: MessageRow;
   meId: string;
@@ -431,6 +478,7 @@ function MessageRow({
   canPin: boolean;
   onChanged: () => void;
   onOpenThread: () => void;
+  onReply?: () => void;
 }) {
   // Resolve task refs in this message body. We do this per-row
   // (not pre-attached per message in the server payload) because
@@ -454,7 +502,7 @@ function MessageRow({
   }
 
   return (
-    <li className="group relative flex gap-3">
+    <li id={`msg-${m.id}`} className="group relative flex scroll-mt-4 gap-3">
       <Avatar src={m.author.image} alt={m.author.name} className="h-8 w-8 shrink-0" />
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline gap-2 text-xs">
@@ -474,7 +522,18 @@ function MessageRow({
               закреплено
             </span>
           ) : null}
-          <span className="ml-auto">
+          <span className="ml-auto inline-flex items-center gap-0.5">
+            {onReply ? (
+              <button
+                type="button"
+                onClick={onReply}
+                title="Ответить"
+                aria-label="Ответить"
+                className="rounded p-1 text-muted-foreground opacity-0 transition hover:bg-muted hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100"
+              >
+                <CornerUpLeft className="size-3.5" />
+              </button>
+            ) : null}
             <MessageActions
               messageId={m.id}
               isAuthor={m.authorId === meId}
@@ -485,6 +544,23 @@ function MessageRow({
             />
           </span>
         </div>
+        {m.replyToId ? (
+          <button
+            type="button"
+            onClick={() => scrollToMessage(m.replyToId!)}
+            className="mt-0.5 flex w-full max-w-md items-center gap-1.5 rounded border-l-2 border-primary/60 bg-muted/40 px-2 py-1 text-left text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <CornerUpLeft className="size-3 shrink-0 text-muted-foreground" aria-hidden="true" />
+            <span className="min-w-0 truncate">
+              <span className="font-medium">{m.replyTo?.author.name ?? ''}</span>{' '}
+              <span className="text-muted-foreground">
+                {m.replyTo?.deletedAt
+                  ? 'сообщение удалено'
+                  : m.replyTo?.body || 'вложение'}
+              </span>
+            </span>
+          </button>
+        ) : null}
         {m.body ? (
           <div className="mt-0.5 whitespace-pre-wrap break-words text-sm">
             {renderRichText(m.body, { mentions: mentionsMap })}

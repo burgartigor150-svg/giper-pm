@@ -69,6 +69,17 @@ export async function loadChannelMessages(
       editedAt: true,
       createdAt: true,
       pinnedAt: true,
+      // Inline reply-quote preview (id + snippet + author). SetNull on delete,
+      // so replyTo may be null even when replyToId was set → render "удалено".
+      replyToId: true,
+      replyTo: {
+        select: {
+          id: true,
+          body: true,
+          deletedAt: true,
+          author: { select: { name: true } },
+        },
+      },
       reactions: {
         select: { userId: true, emoji: true },
       },
