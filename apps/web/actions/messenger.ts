@@ -544,7 +544,13 @@ export async function getOrCreateDmAction(
     },
     select: { id: true },
   });
-  revalidatePath('/messages');
+  // NOTE: no revalidatePath here. This action is invoked from the
+  // /messages/dm/[userId] server component DURING RENDER (it creates-or-gets
+  // the DM then redirects), and revalidatePath() during render throws in
+  // Next ("used revalidatePath during render which is unsupported") → a 500 on
+  // the very first DM open with a person. The redirect to /messages/<id>
+  // renders fresh and the sidebar picks up the new DM on its next render, so
+  // the revalidate was unnecessary anyway. The only caller is that page.
   return { ok: true, data: created };
 }
 
