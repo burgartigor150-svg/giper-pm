@@ -5,9 +5,17 @@ import { loadChannelMessages } from '@/lib/messenger/queries';
 import { MessagesShell } from '@/components/domain/messenger/MessagesShell';
 
 type Params = Promise<{ channelId: string }>;
+type SearchParams = Promise<{ msg?: string }>;
 
-export default async function MessagesChannelPage({ params }: { params: Params }) {
+export default async function MessagesChannelPage({
+  params,
+  searchParams,
+}: {
+  params: Params;
+  searchParams: SearchParams;
+}) {
   const { channelId } = await params;
+  const { msg } = await searchParams;
   const me = await requireAuth();
 
   const [{ memberChannels, publicChannels }, loaded] = await Promise.all([
@@ -29,6 +37,7 @@ export default async function MessagesChannelPage({ params }: { params: Params }
       myChannelRole={loaded.access.role}
       isMuted={loaded.access.isMuted}
       canDeleteChannel={loaded.access.createdById === me.id}
+      targetMessageId={msg ?? null}
     />
   );
 }

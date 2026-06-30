@@ -1614,45 +1614,50 @@ export async function toggleReactionAction(
 // Search (Postgres tsvector + GIN). Filters: channel, author, since.
 // ---------------------------------------------------------------------------
 
+export type MessageSearchHit = {
+  id: string;
+  body: string;
+  channelId: string;
+  channelName: string;
+  channelKind: string;
+  authorId: string;
+  authorName: string;
+  createdAt: Date;
+  /** ts_headline snippet with <<match>> markers for the UI to highlight. */
+  headline: string;
+};
+
 export async function searchMessagesAction(input: {
   q: string;
   channelId?: string;
   authorId?: string;
   limit?: number;
-}): Promise<
-  Array<{
-    id: string;
-    body: string;
-    channelId: string;
-    authorId: string;
-    createdAt: Date;
-  }>
-> {
+}): Promise<MessageSearchHit[]> {
   const me = await requireAuth();
   const q = input.q.trim();
   if (q.length < 2) return [];
   const limit = Math.min(input.limit ?? 50, 100);
 
   // websearch_to_tsquery handles user-typed queries with quotes/AND/OR.
-  // Restrict to channels the user can see: PUBLIC + their memberships.
-  const rows = await prisma.$queryRaw<
-    Array<{
-      id: string;
-      body: string;
-      channelId: string;
-      authorId: string;
-      createdAt: Date;
-    }>
-  >(Prisma.sql`
-    SELECT m.id, m.body, m."channelId", m."authorId", m."createdAt"
+  // Visibility: org-readable channels (PUBLIC + BROADCAST) OR the user's own
+  // memberships (private/DM). Enriched with channel + author + a ts_headline
+  // snippet so the results page can render rich, highlighted hits.
+  const rows = await prisma.$queryRaw<MessageSearchHit[]>(Prisma.sql`
+    SELECT m.id, m.body, m."channelId", m."authorId", m."createdAt",
+           c.name AS "channelName", c.kind::text AS "channelKind",
+           u.name AS "authorName",
+           ts_headline('russian', m.body, websearch_to_tsquery('russian', ${q}),
+             'StartSel=<<,StopSel=>>,MaxFragments=1,MaxWords=14,MinWords=4,ShortWord=2') AS headline
     FROM "Message" m
     JOIN "Channel" c ON c.id = m."channelId"
+    JOIN "User" u ON u.id = m."authorId"
     LEFT JOIN "ChannelMember" cm
       ON cm."channelId" = c.id AND cm."userId" = ${me.id}
     WHERE m."deletedAt" IS NULL
+      AND m.source <> 'SYSTEM'
       AND m."searchVector" @@ websearch_to_tsquery('russian', ${q})
       AND (
-        c.kind = 'PUBLIC'
+        c.kind::text IN ('PUBLIC', 'BROADCAST')
         OR cm."userId" IS NOT NULL
       )
       ${input.channelId ? Prisma.sql`AND m."channelId" = ${input.channelId}` : Prisma.empty}

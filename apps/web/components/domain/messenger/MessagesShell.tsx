@@ -22,6 +22,7 @@ import { MessageComposer } from './MessageComposer';
 import { TaskPreviewCard } from './TaskPreviewCard';
 import { CreateChannelDialog } from './CreateChannelDialog';
 import { ChannelHeader } from './ChannelHeader';
+import { PinnedBar } from './PinnedBar';
 import { VideoNotePlayer } from './VideoNotePlayer';
 import { AudioNotePlayer } from './AudioNotePlayer';
 import { SystemEventCard, type SystemEvent } from './SystemEventCard';
@@ -118,6 +119,8 @@ type Props = {
   /** True when the caller created the active channel. Surfaces the
    *  delete button in the header. */
   canDeleteChannel?: boolean;
+  /** Deep-link target (?msg=<id>) — scroll to + flash this message on load. */
+  targetMessageId?: string | null;
 };
 
 export function MessagesShell({
@@ -131,6 +134,7 @@ export function MessagesShell({
   myChannelRole = null,
   isMuted = false,
   canDeleteChannel = false,
+  targetMessageId = null,
 }: Props) {
   const mentionsMap = new Map(mentionedUsers.map((u) => [u.id, u]));
   const previewsMap = new Map(taskPreviews.map((p) => [p.key, p]));
@@ -156,6 +160,14 @@ export function MessagesShell({
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [activeChannelId, messages.length]);
+
+  // Deep link (?msg=<id>): jump to + flash the target after the list paints,
+  // overriding the bottom-scroll above. No-op if it's outside the loaded window.
+  useEffect(() => {
+    if (!targetMessageId) return;
+    const t = window.setTimeout(() => scrollToMessage(targetMessageId), 80);
+    return () => window.clearTimeout(t);
+  }, [targetMessageId, activeChannelId]);
 
   // Mark channel as read on open.
   useEffect(() => {
@@ -296,6 +308,9 @@ export function MessagesShell({
                     canDelete={canDeleteChannel}
                     isMember={myChannelRole !== null}
                   />
+                ) : null}
+                {activeChannelId ? (
+                  <PinnedBar channelId={activeChannelId} onJump={scrollToMessage} />
                 ) : null}
             <div className="flex-1 overflow-y-auto px-4 py-4" ref={scrollRef}>
               {messages.length === 0 ? (
