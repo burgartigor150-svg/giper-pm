@@ -1,7 +1,7 @@
 import { notFound } from 'next/navigation';
 import { requireAuth } from '@/lib/auth';
 import { listMyChannels } from '@/actions/messenger';
-import { loadChannelMessages } from '@/lib/messenger/queries';
+import { loadChannelMessages, loadOtherMemberReads } from '@/lib/messenger/queries';
 import { MessagesShell } from '@/components/domain/messenger/MessagesShell';
 
 type Params = Promise<{ channelId: string }>;
@@ -18,9 +18,10 @@ export default async function MessagesChannelPage({
   const { msg } = await searchParams;
   const me = await requireAuth();
 
-  const [{ memberChannels, publicChannels }, loaded] = await Promise.all([
+  const [{ memberChannels, publicChannels }, loaded, memberReads] = await Promise.all([
     listMyChannels(),
     loadChannelMessages(channelId, me.id, { limit: 80 }),
+    loadOtherMemberReads(channelId, me.id),
   ]);
   if (!loaded) notFound();
 
@@ -39,6 +40,7 @@ export default async function MessagesChannelPage({
       canDeleteChannel={loaded.access.createdById === me.id}
       targetMessageId={msg ?? null}
       meName={me.name ?? null}
+      initialMemberReads={memberReads}
     />
   );
 }
