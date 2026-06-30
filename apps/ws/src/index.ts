@@ -99,7 +99,9 @@ function unsubscribeAll(socket: WSWebSocket) {
 // individually. Tradeoff: chattier than diffs, but we never desync.
 
 function isPresenceChannel(channel: string): boolean {
-  return channel.startsWith('task:');
+  // task: → live viewers on a task; chat: → who's currently in a channel
+  // (online dot). The presence machinery dedups by userId across tabs.
+  return channel.startsWith('task:') || channel.startsWith('chat:');
 }
 
 const presenceMembers = new Map<string, Map<string, Set<WSWebSocket>>>();
