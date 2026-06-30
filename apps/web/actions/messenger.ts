@@ -94,14 +94,20 @@ async function unreadCountsFor(
   channelIds: string[],
 ): Promise<Map<string, number>> {
   if (channelIds.length === 0) return new Map();
+  // NB: use `= ANY($array)` rather than `IN (${Prisma.join(...)})`. A Prisma.Sql
+  // fragment embedded in a tagged-template $queryRaw only expands when the
+  // fragment and the client share one @prisma/client instance; under Next's
+  // bundler that can fail and the fragment gets bound as a jsonb value
+  // ("operator does not exist: text = jsonb"), 500-ing the /messages page.
+  // Passing the array as a single text[] parameter is bundler-safe.
   const rows = await prisma.$queryRaw<Array<{ channelId: string; count: bigint }>>`
     SELECT m."channelId" AS "channelId", COUNT(*)::bigint AS count
     FROM "Message" m
     JOIN "ChannelMember" cm
       ON cm."channelId" = m."channelId" AND cm."userId" = ${userId}
-    WHERE m."channelId" IN (${Prisma.join(channelIds)})
+    WHERE m."channelId" = ANY(${channelIds})
       AND m."authorId" <> ${userId}
-      AND m.source <> 'SYSTEM'
+      AND m.source::text <> 'SYSTEM'
       AND m."deletedAt" IS NULL
       AND m."createdAt" > COALESCE(cm."lastReadAt", '-infinity'::timestamp)
     GROUP BY m."channelId"
