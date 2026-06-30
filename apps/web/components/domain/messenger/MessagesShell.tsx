@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, useTransition } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Hash, Lock, MessageSquare, Megaphone, Search } from 'lucide-react';
@@ -12,6 +12,7 @@ import { channelForChat } from '@giper/realtime';
 import {
   postMessageAction,
   markChannelReadAction,
+  loadOlderMessagesAction,
 } from '@/actions/messenger';
 import { renderRichText } from '@/lib/text/renderRichText';
 import { extractTaskRefs } from '@/lib/text/taskRefs';
@@ -27,7 +28,7 @@ import { VideoNotePlayer } from './VideoNotePlayer';
 import { AudioNotePlayer } from './AudioNotePlayer';
 import { SystemEventCard, type SystemEvent } from './SystemEventCard';
 import { MessageActions } from './MessageActions';
-import { Pin, MessageSquareReply, CornerUpLeft, X } from 'lucide-react';
+import { Pin, MessageSquareReply, CornerUpLeft, X, ArrowDown } from 'lucide-react';
 
 /**
  * Smooth-scroll to a message by id + brief highlight. Used by reply-quote
@@ -136,13 +137,23 @@ export function MessagesShell({
   canDeleteChannel = false,
   targetMessageId = null,
 }: Props) {
-  const mentionsMap = new Map(mentionedUsers.map((u) => [u.id, u]));
-  const previewsMap = new Map(taskPreviews.map((p) => [p.key, p]));
   const router = useRouter();
   const [messages, setMessages] = useState<MessageRow[]>(initialMessages);
+  // Mention/task-preview lookups grow as older pages are prepended.
+  const [extraMentions, setExtraMentions] = useState<MentionUser[]>([]);
+  const [extraPreviews, setExtraPreviews] = useState<TaskPreview[]>([]);
+  const mentionsMap = new Map([...mentionedUsers, ...extraMentions].map((u) => [u.id, u]));
+  const previewsMap = new Map([...taskPreviews, ...extraPreviews].map((p) => [p.key, p]));
   const [openThreadId, setOpenThreadId] = useState<string | null>(null);
   const [replyTo, setReplyTo] = useState<{ id: string; authorName: string; body: string } | null>(null);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [showJumpBtn, setShowJumpBtn] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const nearBottomRef = useRef(true);
+  const loadingOlderRef = useRef(false);
+  const prependHeightRef = useRef<number | null>(null);
+  const lastMsgIdRef = useRef<string | null>(null);
 
   // Close thread + clear reply draft when navigating channels.
   useEffect(() => {
@@ -150,24 +161,103 @@ export function MessagesShell({
     setReplyTo(null);
   }, [activeChannelId]);
 
-  // Reset when navigating between channels.
+  // Reset paginated state when the server payload changes (channel switch OR a
+  // router.refresh() that brought new messages — realtime still drives that
+  // until the in-place-patch slice lands). Keep a bottom-anchored reader pinned
+  // to the bottom; don't yank a reader who has scrolled up into history.
   useEffect(() => {
+    const wasNearBottom = nearBottomRef.current;
     setMessages(initialMessages);
+    setExtraMentions([]);
+    setExtraPreviews([]);
+    setHasMore(true);
+    lastMsgIdRef.current = initialMessages[initialMessages.length - 1]?.id ?? null;
+    if (wasNearBottom) {
+      requestAnimationFrame(() => {
+        const el = scrollRef.current;
+        if (el) el.scrollTop = el.scrollHeight;
+      });
+    }
   }, [initialMessages]);
 
-  // Auto-scroll to bottom on first load and on new messages.
+  // Always land at the bottom when opening a different channel.
   useEffect(() => {
+    nearBottomRef.current = true;
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [activeChannelId, messages.length]);
+  }, [activeChannelId]);
 
-  // Deep link (?msg=<id>): jump to + flash the target after the list paints,
-  // overriding the bottom-scroll above. No-op if it's outside the loaded window.
+  // New message at the bottom (append): auto-scroll only when the user is
+  // already near the bottom — don't yank them down while reading history.
+  useEffect(() => {
+    const lastId = messages[messages.length - 1]?.id ?? null;
+    if (lastId !== lastMsgIdRef.current) {
+      lastMsgIdRef.current = lastId;
+      if (nearBottomRef.current) {
+        const el = scrollRef.current;
+        if (el) el.scrollTop = el.scrollHeight;
+      }
+    }
+  }, [messages]);
+
+  // Preserve scroll position when an OLDER page is prepended.
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (el && prependHeightRef.current != null) {
+      el.scrollTop = el.scrollHeight - prependHeightRef.current;
+      prependHeightRef.current = null;
+    }
+  }, [messages]);
+
+  // Deep link (?msg=<id>): jump to + flash the target after the list paints.
   useEffect(() => {
     if (!targetMessageId) return;
     const t = window.setTimeout(() => scrollToMessage(targetMessageId), 80);
     return () => window.clearTimeout(t);
   }, [targetMessageId, activeChannelId]);
+
+  async function loadOlder() {
+    if (loadingOlderRef.current || !hasMore || messages.length === 0 || !activeChannelId) return;
+    loadingOlderRef.current = true;
+    setLoadingOlder(true);
+    const el = scrollRef.current;
+    prependHeightRef.current = el ? el.scrollHeight : null;
+    try {
+      const res = await loadOlderMessagesAction({
+        channelId: activeChannelId,
+        before: new Date(messages[0]!.createdAt).toISOString(),
+        limit: 50,
+      });
+      if (res && res.messages.length > 0) {
+        setExtraMentions((prev) => [...prev, ...res.mentionedUsers]);
+        setExtraPreviews((prev) => [...prev, ...res.taskPreviews]);
+        setMessages((prev) => [...(res.messages as MessageRow[]), ...prev]);
+        setHasMore(res.hasMore);
+      } else {
+        setHasMore(false);
+        prependHeightRef.current = null;
+      }
+    } catch {
+      prependHeightRef.current = null;
+    } finally {
+      loadingOlderRef.current = false;
+      setLoadingOlder(false);
+    }
+  }
+
+  function onScroll() {
+    const el = scrollRef.current;
+    if (!el) return;
+    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    nearBottomRef.current = distFromBottom < 120;
+    setShowJumpBtn(distFromBottom > 300);
+    if (el.scrollTop < 80) void loadOlder();
+  }
+
+  function jumpToLatest() {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }
 
   // Mark channel as read on open.
   useEffect(() => {
@@ -312,30 +402,48 @@ export function MessagesShell({
                 {activeChannelId ? (
                   <PinnedBar channelId={activeChannelId} onJump={scrollToMessage} />
                 ) : null}
-            <div className="flex-1 overflow-y-auto px-4 py-4" ref={scrollRef}>
-              {messages.length === 0 ? (
-                <div className="text-sm text-muted-foreground">
-                  Здесь пока тихо. Будь первым.
-                </div>
-              ) : (
-                <ul className="flex flex-col gap-3">
-                  {messages.map((m) => (
-                    <MessageRow
-                      key={m.id}
-                      m={m}
-                      meId={meId ?? ''}
-                      mentionsMap={mentionsMap}
-                      previewsMap={previewsMap}
-                      canPin={myChannelRole === 'ADMIN'}
-                      onChanged={() => router.refresh()}
-                      onOpenThread={() => setOpenThreadId(m.id)}
-                      onReply={() =>
-                        setReplyTo({ id: m.id, authorName: m.author.name, body: m.body })
-                      }
-                    />
-                  ))}
-                </ul>
-              )}
+            <div className="relative min-h-0 flex-1">
+              <div className="h-full overflow-y-auto px-4 py-4" ref={scrollRef} onScroll={onScroll}>
+                {loadingOlder ? (
+                  <div className="pb-2 text-center text-xs text-muted-foreground">
+                    Загрузка истории…
+                  </div>
+                ) : null}
+                {messages.length === 0 ? (
+                  <div className="text-sm text-muted-foreground">
+                    Здесь пока тихо. Будь первым.
+                  </div>
+                ) : (
+                  <ul className="flex flex-col gap-3">
+                    {messages.map((m) => (
+                      <MessageRow
+                        key={m.id}
+                        m={m}
+                        meId={meId ?? ''}
+                        mentionsMap={mentionsMap}
+                        previewsMap={previewsMap}
+                        canPin={myChannelRole === 'ADMIN'}
+                        onChanged={() => router.refresh()}
+                        onOpenThread={() => setOpenThreadId(m.id)}
+                        onReply={() =>
+                          setReplyTo({ id: m.id, authorName: m.author.name, body: m.body })
+                        }
+                      />
+                    ))}
+                  </ul>
+                )}
+              </div>
+              {showJumpBtn ? (
+                <button
+                  type="button"
+                  onClick={jumpToLatest}
+                  aria-label="К последним сообщениям"
+                  title="К последним сообщениям"
+                  className="absolute bottom-3 right-4 z-10 flex size-9 items-center justify-center rounded-full border border-border bg-background shadow-md hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <ArrowDown className="size-4" />
+                </button>
+              ) : null}
             </div>
             {canPost ? (
               <div className="border-t border-border bg-background p-3">

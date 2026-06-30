@@ -6,6 +6,7 @@ import { requireAuth } from '@/lib/auth';
 import { BITRIX_BOT_EMAIL } from '@giper/integrations/bitrix24';
 import { getEffectiveCaps } from '@/lib/capabilities';
 import { ensureMembership, resolveChannelAccess } from '@/lib/messenger/access';
+import { loadChannelMessages } from '@/lib/messenger/queries';
 import { publishChatEvent } from '@/lib/realtime/publishChat';
 import { createNotification } from '@/lib/notifications/createNotifications';
 import { extractTaskRefs } from '@/lib/text/taskRefs';
@@ -1419,6 +1420,39 @@ export async function markChannelReadAction(
     );
   }
   return { ok: true };
+}
+
+/**
+ * Load one older page of channel history (infinite scroll-up). Wraps the
+ * `before` cursor already supported by loadChannelMessages. `before` is the
+ * createdAt of the OLDEST message currently in the client window (ISO string).
+ * Returns messages in chronological order (oldest-first) ready to prepend,
+ * plus the mention/task-preview lookups for the new rows and a hasMore flag.
+ * Null when the caller can't read the channel.
+ */
+export async function loadOlderMessagesAction(input: {
+  channelId: string;
+  before: string;
+  limit?: number;
+}) {
+  const me = await requireAuth();
+  const beforeDate = new Date(input.before);
+  if (Number.isNaN(beforeDate.getTime())) {
+    return { messages: [], mentionedUsers: [], taskPreviews: [], hasMore: false };
+  }
+  const limit = Math.min(input.limit ?? 50, 100);
+  const loaded = await loadChannelMessages(input.channelId, me.id, {
+    before: beforeDate,
+    limit,
+  });
+  if (!loaded) return null;
+  return {
+    // loadChannelMessages returns newest-first → reverse for prepend.
+    messages: [...loaded.messages].reverse(),
+    mentionedUsers: loaded.mentionedUsers,
+    taskPreviews: loaded.taskPreviews,
+    hasMore: loaded.messages.length === limit,
+  };
 }
 
 /**
