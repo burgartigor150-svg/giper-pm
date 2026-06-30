@@ -28,7 +28,7 @@ import { VideoNotePlayer } from './VideoNotePlayer';
 import { AudioNotePlayer } from './AudioNotePlayer';
 import { SystemEventCard, type SystemEvent } from './SystemEventCard';
 import { MessageActions } from './MessageActions';
-import { Pin, MessageSquareReply, CornerUpLeft, X, ArrowDown } from 'lucide-react';
+import { Pin, MessageSquareReply, CornerUpLeft, X, ArrowDown, Check, CheckCheck } from 'lucide-react';
 
 /**
  * Smooth-scroll to a message by id + brief highlight. Used by reply-quote
@@ -124,6 +124,8 @@ type Props = {
   targetMessageId?: string | null;
   /** Current user's display name — used for the outgoing typing signal. */
   meName?: string | null;
+  /** Other members' last-read timestamps (ms) for read-receipt ticks. */
+  initialMemberReads?: Record<string, number>;
 };
 
 export function MessagesShell({
@@ -139,6 +141,7 @@ export function MessagesShell({
   canDeleteChannel = false,
   targetMessageId = null,
   meName = null,
+  initialMemberReads = {},
 }: Props) {
   const router = useRouter();
   const [messages, setMessages] = useState<MessageRow[]>(initialMessages);
@@ -154,6 +157,12 @@ export function MessagesShell({
   const [showJumpBtn, setShowJumpBtn] = useState(false);
   const [typingUsers, setTypingUsers] = useState<Map<string, { name: string; exp: number }>>(new Map());
   const [onlineIds, setOnlineIds] = useState<Set<string>>(new Set());
+  // Other members' read watermarks (userId → ms). Seeded from the server,
+  // advanced live on channel.read events. Drives the own-message ✓/✓✓ ticks.
+  const [memberReads, setMemberReads] = useState<Record<string, number>>(initialMemberReads);
+  // The newest moment any OTHER member has read up to → a message is "seen"
+  // when its createdAt is at or before this.
+  const othersMaxRead = Object.values(memberReads).reduce((mx, t) => (t > mx ? t : mx), 0);
   const scrollRef = useRef<HTMLDivElement>(null);
   const nearBottomRef = useRef(true);
   const loadingOlderRef = useRef(false);
@@ -176,6 +185,9 @@ export function MessagesShell({
     setExtraMentions([]);
     setExtraPreviews([]);
     setHasMore(true);
+    // Re-seed read watermarks from the server (source of truth); live
+    // channel.read events advance them further between refreshes.
+    setMemberReads(initialMemberReads);
     lastMsgIdRef.current = initialMessages[initialMessages.length - 1]?.id ?? null;
     if (wasNearBottom) {
       requestAnimationFrame(() => {
@@ -278,6 +290,7 @@ export function MessagesShell({
   useRealtime(activeChannelId ? channelForChat(activeChannelId) : null, (payload) => {
     const p = payload as {
       __typing?: boolean;
+      kind?: string;
       userId?: string;
       name?: string;
       type?: string;
@@ -286,6 +299,15 @@ export function MessagesShell({
     if (p && p.type === 'presence:state' && Array.isArray(p.userIds)) {
       // Who's currently in this channel (online dot). Exclude self.
       setOnlineIds(new Set(p.userIds.filter((id) => id !== meId)));
+      return;
+    }
+    if (p && p.kind === 'channel.read') {
+      // Another member caught up → advance their read watermark so our own
+      // messages flip to "seen" (✓✓). In-place, no refetch.
+      if (p.userId && p.userId !== meId) {
+        const uid = p.userId;
+        setMemberReads((prev) => ({ ...prev, [uid]: Date.now() }));
+      }
       return;
     }
     if (p && p.__typing) {
@@ -502,6 +524,7 @@ export function MessagesShell({
                         onReply={() =>
                           setReplyTo({ id: m.id, authorName: m.author.name, body: m.body })
                         }
+                        seenThreshold={othersMaxRead}
                       />
                     ))}
                   </ul>
@@ -673,6 +696,7 @@ function MessageRow({
   onChanged,
   onOpenThread,
   onReply,
+  seenThreshold = 0,
 }: {
   m: MessageRow;
   meId: string;
@@ -682,6 +706,8 @@ function MessageRow({
   onChanged: () => void;
   onOpenThread: () => void;
   onReply?: () => void;
+  /** Newest ms any other member has read up to (own-message ✓✓ when >= createdAt). */
+  seenThreshold?: number;
 }) {
   // Resolve task refs in this message body. We do this per-row
   // (not pre-attached per message in the server payload) because
@@ -718,6 +744,13 @@ function MessageRow({
           </span>
           {m.editedAt ? (
             <span className="text-xs text-muted-foreground">(изм.)</span>
+          ) : null}
+          {m.authorId === meId && m.source !== 'SYSTEM' ? (
+            new Date(m.createdAt).getTime() <= seenThreshold ? (
+              <CheckCheck className="size-3.5 text-primary" aria-label="Прочитано" />
+            ) : (
+              <Check className="size-3.5 text-muted-foreground" aria-label="Отправлено" />
+            )
           ) : null}
           {m.pinnedAt ? (
             <span className="inline-flex items-center gap-0.5 text-xs text-muted-foreground" title="Закреплено">

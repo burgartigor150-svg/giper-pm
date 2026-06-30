@@ -24,6 +24,24 @@ export type LoadMessagesOptions = {
  * data needed for the row, plus reply counts surfaced via the cached
  * Message.replyCount column.
  */
+/**
+ * Other members' last-read timestamps (ms) for read-receipt ticks. Excludes
+ * the caller and members who've never read. The client turns these into ✓✓ on
+ * the caller's own messages and advances them live on channel.read events.
+ */
+export async function loadOtherMemberReads(
+  channelId: string,
+  meId: string,
+): Promise<Record<string, number>> {
+  const rows = await prisma.channelMember.findMany({
+    where: { channelId, userId: { not: meId }, lastReadAt: { not: null } },
+    select: { userId: true, lastReadAt: true },
+  });
+  const out: Record<string, number> = {};
+  for (const r of rows) if (r.lastReadAt) out[r.userId] = r.lastReadAt.getTime();
+  return out;
+}
+
 export async function loadChannelMessages(
   channelId: string,
   userId: string,
