@@ -1214,6 +1214,11 @@ export async function editMessageAction(
   if (!trimmed) {
     return { ok: false, error: { code: 'VALIDATION', message: 'Сообщение пустое' } };
   }
+  // Same length cap as postMessageAction — the edit path must not let a client
+  // smuggle in an over-limit body the create path would have rejected.
+  if (trimmed.length > MESSAGE_MAX) {
+    return { ok: false, error: { code: 'VALIDATION', message: `Не длиннее ${MESSAGE_MAX} символов` } };
+  }
   const msg = await prisma.message.findUnique({
     where: { id: messageId },
     select: { authorId: true, channelId: true, deletedAt: true },
