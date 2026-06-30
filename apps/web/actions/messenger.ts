@@ -549,6 +549,8 @@ export async function postMessageAction(input: {
   channelId: string;
   body: string;
   parentId?: string | null;
+  /** Telegram-style inline reply: id of the quoted message (same channel). */
+  replyToId?: string | null;
 }): Promise<ActionResult<{ id: string }>> {
   const me = await requireAuth();
   const body = input.body.trim();
@@ -584,6 +586,17 @@ export async function postMessageAction(input: {
     }
   }
 
+  // Inline reply quote: the quoted message must exist in THIS channel.
+  if (input.replyToId) {
+    const quoted = await prisma.message.findUnique({
+      where: { id: input.replyToId },
+      select: { channelId: true },
+    });
+    if (!quoted || quoted.channelId !== input.channelId) {
+      return { ok: false, error: { code: 'NOT_FOUND', message: 'Цитируемое сообщение не найдено' } };
+    }
+  }
+
   // Extract @mentions: pattern @<userId>. Use Set to de-dupe.
   const mentionedIds = Array.from(new Set([...body.matchAll(/@([a-z0-9]{24,})\b/g)].map((m) => m[1]!)));
   const validMentions = mentionedIds.length
@@ -602,6 +615,7 @@ export async function postMessageAction(input: {
         authorId: me.id,
         body,
         parentId: input.parentId ?? null,
+        replyToId: input.replyToId ?? null,
         mentions: validMentions.length
           ? { createMany: { data: validMentions.map((u) => ({ userId: u.id })) } }
           : undefined,

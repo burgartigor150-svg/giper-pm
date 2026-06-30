@@ -2389,6 +2389,14 @@ model Message {
   parent      Message?   @relation("MessageThread", fields: [parentId], references: [id], onDelete: Cascade)
   replies     Message[]  @relation("MessageThread")
 
+  // Telegram-style inline reply quote — distinct from threads. Points at the
+  // quoted message in the SAME channel; rendered as a clickable preview above
+  // the body. SetNull (not Cascade) so deleting the quoted message leaves the
+  // reply intact (the preview just shows "сообщение удалено").
+  replyToId   String?
+  replyTo     Message?   @relation("MessageReplyTo", fields: [replyToId], references: [id], onDelete: SetNull)
+  replyFrom   Message[]  @relation("MessageReplyTo")
+
   body        String     @db.Text
   // Lightweight markdown-style flag set so the renderer knows whether
   // to allow code blocks / link previews / etc. Default WEB.
@@ -2429,6 +2437,7 @@ model Message {
   @@unique([externalSource, externalId])
   @@index([channelId, createdAt])
   @@index([parentId, createdAt])
+  @@index([replyToId])
   @@index([authorId])
   /// Partial index conceptually — Postgres doesn't get a WHERE in
   /// Prisma's @@index DSL, but the b-tree includes nulls cheaply
