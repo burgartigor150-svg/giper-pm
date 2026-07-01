@@ -30,15 +30,26 @@ export async function signInWithCredentials(
   }
 }
 
-/** True when SSO (Google) is configured on this deployment. */
+/** True when Google SSO is configured on this deployment. */
 export async function isSsoEnabled(): Promise<boolean> {
   return !!(process.env.AUTH_GOOGLE_ID && process.env.AUTH_GOOGLE_SECRET);
+}
+
+/** True when Bitrix24 SSO ("Войти через Битрикс24") is configured. */
+export async function isBitrix24SsoEnabled(): Promise<boolean> {
+  return !!(process.env.BITRIX24_OAUTH_CLIENT_ID && process.env.BITRIX24_OAUTH_CLIENT_SECRET);
 }
 
 /** Start the Google OAuth flow. Only works when SSO is configured. */
 export async function signInWithGoogle(callbackUrl = '/dashboard'): Promise<void> {
   // signIn() throws NEXT_REDIRECT on success — let Next handle it.
   await signIn('google', { redirectTo: callbackUrl });
+}
+
+/** Start the Bitrix24 OAuth flow. Only works when Bitrix24 SSO is configured. */
+export async function signInWithBitrix24(callbackUrl = '/dashboard'): Promise<void> {
+  // signIn() throws NEXT_REDIRECT on success — let Next handle it.
+  await signIn('bitrix24', { redirectTo: callbackUrl });
 }
 
 export async function signOutAction() {
