@@ -135,6 +135,11 @@ services:
       # Comma-separated department ids whose members are auto-activated on
       # every sync. Empty/unset → manual activation only.
       BITRIX24_ACTIVE_DEPARTMENTS: ${BITRIX24_ACTIVE_DEPARTMENTS:-}
+      # Bitrix24 SSO ("Войти через Битрикс24"). When both creds are set the
+      # login page becomes Bitrix24-only. Empty/unset → password form (no-op).
+      BITRIX24_OAUTH_CLIENT_ID: ${BITRIX24_OAUTH_CLIENT_ID:-}
+      BITRIX24_OAUTH_CLIENT_SECRET: ${BITRIX24_OAUTH_CLIENT_SECRET:-}
+      BITRIX24_PORTAL: ${BITRIX24_PORTAL:-giper.bitrix24.ru}
 
       # Realtime
       WS_AUTH_SECRET: ${WS_AUTH_SECRET}
