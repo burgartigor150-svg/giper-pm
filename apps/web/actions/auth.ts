@@ -45,12 +45,8 @@ export async function signInWithGoogle(callbackUrl = '/dashboard'): Promise<void
   // signIn() throws NEXT_REDIRECT on success — let Next handle it.
   await signIn('google', { redirectTo: callbackUrl });
 }
-
-/** Start the Bitrix24 OAuth flow. Only works when Bitrix24 SSO is configured. */
-export async function signInWithBitrix24(callbackUrl = '/dashboard'): Promise<void> {
-  // signIn() throws NEXT_REDIRECT on success — let Next handle it.
-  await signIn('bitrix24', { redirectTo: callbackUrl });
-}
+// Bitrix24 SSO is a redirect flow driven by /api/auth/b24/{login,callback}
+// (Bitrix24 isn't RFC-OAuth), not a server action — the button links there.
 
 export async function signOutAction() {
   await signOut({ redirectTo: '/login' });
