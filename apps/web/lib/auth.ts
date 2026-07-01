@@ -86,18 +86,62 @@ export const authConfig: NextAuthConfig = {
           }),
         ]
       : []),
+    // SSO (Bitrix24) — "Войти через Битрикс24". Bitrix24 cloud OAuth is not
+    // RFC-compliant (no token_type, creds in query, user.current via REST), so
+    // the redirect round-trip is driven by hand in /api/auth/b24/{login,callback}
+    // (see lib/b24Oauth.ts). This Credentials provider is the LAST leg: the
+    // callback route hands us the one-time `code`, we exchange it, read
+    // user.current, and gate to an EXISTING active giper-pm user by email
+    // (resolveSsoUser). Role always comes from our DB — Bitrix24 can't elevate.
+    // Registered only when creds are present (same no-op / instant-rollback
+    // property as Google). Not directly usable from a login form: it needs a
+    // valid Bitrix24 `code`, which only the state-checked callback route holds.
+    ...(process.env.BITRIX24_OAUTH_CLIENT_ID && process.env.BITRIX24_OAUTH_CLIENT_SECRET
+      ? [
+          Credentials({
+            id: 'bitrix24',
+            name: 'Bitrix24',
+            credentials: { code: {}, redirectUri: {} },
+            async authorize(creds) {
+              const code = String(creds?.code ?? '');
+              const redirectUri = String(creds?.redirectUri ?? '');
+              if (!code || !redirectUri) return null;
+              const { b24ExchangeCode, b24FetchCurrentUser } = await import('./b24Oauth');
+              const token = await b24ExchangeCode(code, redirectUri);
+              if (token.error || !token.access_token) return null;
+              const b24user = await b24FetchCurrentUser(token);
+              const email = String(b24user?.EMAIL ?? '').trim().toLowerCase();
+              if (!email) return null;
+              // Gate: only existing active giper-pm users; role from our DB.
+              const resolved = await resolveSsoUser({ email, emailVerified: true });
+              if (!resolved) return null;
+              const name =
+                [b24user?.LAST_NAME, b24user?.NAME].filter(Boolean).join(' ').trim() || email;
+              return {
+                id: resolved.id,
+                email,
+                name,
+                role: resolved.role,
+                mustChangePassword: false,
+              };
+            },
+          }),
+        ]
+      : []),
   ],
   callbacks: {
     // Allowlist gate for OAuth: a Google login is accepted ONLY if its
     // verified email matches an existing active user. We never auto-create
     // users, and the role always comes from our DB — Google can't elevate.
     async signIn({ user, account, profile }) {
-      if (account?.provider !== 'google') return true; // credentials: vetted in authorize()
+      // Credentials-based providers (password, bitrix24) are vetted in their
+      // own authorize(); only the true OAuth provider (Google) is gated here.
+      if (account?.provider !== 'google') return true;
       const verified = (profile as { email_verified?: boolean } | undefined)?.email_verified === true;
       const resolved = await resolveSsoUser({ email: profile?.email ?? user?.email, emailVerified: verified });
       if (!resolved) return false;
       // Hydrate the user object from the DB so the jwt callback persists OUR
-      // id/role, not Google's `sub`/profile.
+      // id/role, not Google's sub/profile.
       user.id = resolved.id;
       (user as { role?: UserRole }).role = resolved.role;
       (user as { mustChangePassword?: boolean }).mustChangePassword = false;
