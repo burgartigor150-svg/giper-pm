@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { prisma } from '@giper/db';
 import { requireAuth } from '@/lib/auth';
-import { canEditTaskInternal } from '@/lib/permissions';
+import { canEditTaskInternal, canViewTask } from '@/lib/permissions';
 import { getEffectiveCapsForProject } from '@/lib/capabilities';
 
 /**
@@ -183,10 +183,17 @@ export async function toggleChecklistItemAction(
               projectId: true,
               creatorId: true,
               assigneeId: true,
+              reviewerId: true,
+              testerId: true,
               externalSource: true,
+              // Every stake canViewTask honors, so any task viewer (incl. a
+              // co-assignee / reviewer / tester / watcher) can tick an item.
+              assignments: { where: { userId: me.id }, select: { userId: true } },
+              watchers: { where: { userId: me.id }, select: { userId: true } },
               project: {
                 select: {
                   ownerId: true,
+                  externalSource: true,
                   members: { select: { userId: true, role: true } },
                 },
               },
@@ -197,14 +204,13 @@ export async function toggleChecklistItemAction(
     },
   });
   if (!item) return { ok: false, error: { code: 'NOT_FOUND', message: 'Не найдено' } };
-  // Toggling doesn't require canEdit — any viewer can tick.
+  // Toggling doesn't require canEdit — any viewer of the task can tick (the
+  // full per-stake set, incl. reviewer/tester/co-assignee/watcher + leadership),
+  // or a project role carrying task.checklist.toggle.
   const task = item.checklist.task;
   const isMember =
-    (await getEffectiveCapsForProject({ id: me.id, role: me.role }, task.projectId)).has('task.checklist.toggle') ||
-    task.creatorId === me.id ||
-    task.assigneeId === me.id ||
-    task.project.ownerId === me.id ||
-    task.project.members.some((m) => m.userId === me.id);
+    canViewTask({ id: me.id, role: me.role }, task) ||
+    (await getEffectiveCapsForProject({ id: me.id, role: me.role }, task.projectId)).has('task.checklist.toggle');
   if (!isMember) {
     return {
       ok: false,

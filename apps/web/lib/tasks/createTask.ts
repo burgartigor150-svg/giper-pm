@@ -56,12 +56,37 @@ export async function createTask(input: CreateTaskInput, user: SessionUser) {
     throw new DomainError('INSUFFICIENT_PERMISSIONS', 403);
   }
 
-  // Validate assignee is in the project (or the actor is unassigning).
+  // Validate assignee has a real relationship to the project (or the actor is
+  // unassigning). Native member / owner is the cheap path; on Bitrix-mirror
+  // projects most colleagues are workgroup members (ProjectBitrixMember) or task
+  // participants rather than native members — accept those too, mirroring the
+  // access legs, so you can hand a task to a real teammate.
   if (input.assigneeId) {
-    const isMember =
+    let assigneeOk =
       input.assigneeId === project.ownerId ||
       project.members.some((m) => m.userId === input.assigneeId);
-    if (!isMember) {
+    if (!assigneeOk) {
+      const [bx, stake] = await Promise.all([
+        prisma.projectBitrixMember.count({
+          where: { projectId: project.id, userId: input.assigneeId },
+        }),
+        prisma.task.count({
+          where: {
+            projectId: project.id,
+            OR: [
+              { creatorId: input.assigneeId },
+              { assigneeId: input.assigneeId },
+              { reviewerId: input.assigneeId },
+              { testerId: input.assigneeId },
+              { assignments: { some: { userId: input.assigneeId } } },
+              { watchers: { some: { userId: input.assigneeId } } },
+            ],
+          },
+        }),
+      ]);
+      assigneeOk = bx > 0 || stake > 0;
+    }
+    if (!assigneeOk) {
       throw new DomainError('VALIDATION', 400, 'Нельзя назначить не-участника');
     }
   }

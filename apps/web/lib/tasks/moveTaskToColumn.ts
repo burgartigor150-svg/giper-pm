@@ -34,6 +34,9 @@ export async function moveTaskToColumn(
       columnId: true,
       creatorId: true,
       assigneeId: true,
+      reviewerId: true,
+      testerId: true,
+      assignments: { where: { userId: user.id }, select: { userId: true } },
       project: {
         select: { key: true, ownerId: true, members: { select: { userId: true, role: true } } },
       },
@@ -41,14 +44,18 @@ export async function moveTaskToColumn(
   });
   if (!task) throw new DomainError('NOT_FOUND', 404, 'Задача не найдена');
   // Board move gate — same stakeholder/leadership predicate as setInternalStatus
-  // (the status core). The cross-category branch below re-checks it inside
-  // setInternalStatus, but the same-category fast path skips the core, so gate
-  // here too or it would be an unauthenticated-edit (IDOR) hole.
+  // (the status core): active stakeholders (creator/assignee/co-assignee/
+  // reviewer/tester) + leadership. The cross-category branch below re-checks it
+  // inside setInternalStatus, but the same-category fast path skips the core, so
+  // gate here too or it would be an unauthenticated-edit (IDOR) hole.
   const allow =
     user.role === 'ADMIN' ||
     user.role === 'PM' ||
     task.creatorId === user.id ||
     task.assigneeId === user.id ||
+    task.reviewerId === user.id ||
+    task.testerId === user.id ||
+    task.assignments.length > 0 ||
     task.project.ownerId === user.id ||
     task.project.members.some((m) => m.userId === user.id && m.role === 'LEAD');
   if (!allow) throw new DomainError('INSUFFICIENT_PERMISSIONS', 403, 'Недостаточно прав');

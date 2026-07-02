@@ -21,7 +21,14 @@ export async function addComment(
       assignments: { select: { userId: true } },
       watchers: { select: { userId: true } },
       project: {
-        select: { ownerId: true, members: { select: { userId: true, role: true } } },
+        // externalSource is required for canViewAllProjectTasks' native-LEAD
+        // see-all leg (`externalSource === null`); omitting it made undefined
+        // !== null and wrongly 403'd a native-project LEAD from commenting.
+        select: {
+          ownerId: true,
+          externalSource: true,
+          members: { select: { userId: true, role: true } },
+        },
       },
     },
   });
