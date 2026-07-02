@@ -35,15 +35,16 @@ export async function getProject(projectKey: string, user: SessionUser) {
           user: { select: { id: true, name: true, email: true, image: true, role: true } },
         },
       },
+      // Current user's Bitrix workgroup membership (visibility/access leg).
+      bitrixMembers: { where: { userId: user.id }, select: { userId: true } },
       _count: { select: { tasks: true } },
     },
   });
   if (!project) throw new DomainError('NOT_FOUND', 404, 'Проект не найден');
 
-  // Visibility probe: does the user have a task stake here? Combined
-  // with owner/member (already selected above) this is the full rule —
-  // Bitrix sonet_group membership is NOT a visibility leg (see
-  // canViewProject / listProjectsForUser).
+  // Visibility probe: does the user have a task stake here? Combined with
+  // owner / native member / Bitrix workgroup member (selected above) this is
+  // the full rule (see canViewProject / listProjectsForUser).
   const userTaskCount = await prisma.task.count({
     where: {
       projectId: project.id,

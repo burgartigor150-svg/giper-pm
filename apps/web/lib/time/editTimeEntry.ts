@@ -30,6 +30,8 @@ export async function editTimeEntry(
           select: {
             ownerId: true,
             members: { select: { userId: true, role: true } },
+            // Bitrix workgroup membership — same visibility leg as logTimeManually.
+            bitrixMembers: { where: { userId: user.id }, select: { userId: true } },
           },
         },
       },

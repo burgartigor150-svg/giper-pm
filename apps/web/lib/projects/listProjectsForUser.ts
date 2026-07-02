@@ -38,33 +38,29 @@ export async function listProjectsForUser(user: SessionUser, filter: ListFilter 
   if (wantAll) {
     // No visibility filter — admin/PM browsing the whole org.
   } else {
-    // Visibility = owner OR explicit project member OR task stake.
-    //
-    // We DELIBERATELY do NOT show a project just because the user is a
-    // synced Bitrix workgroup member (ProjectBitrixMember). Bitrix
-    // workgroups can be large and a member often holds no task there —
-    // surfacing every such project buried the ones that actually matter.
-    // A user sees a project only where they have a real stake:
+    // Visibility = owner OR native member OR Bitrix workgroup member OR task
+    // stake. A user sees a project where they have a real stake:
     //
     //   • owner            — they created/own it (never lose a fresh project)
-    //   • member           — explicitly added (ProjectMember) — NATIVE projects
-    //                         only. Bitrix-mirror projects auto-add the
-    //                         workgroup OWNER as a LEAD ProjectMember (so they
-    //                         render in the members list); that is NOT a real
-    //                         "I work here" signal and buried the list with
-    //                         every workgroup a user nominally owns upstream.
-    //                         For mirror projects, membership grants nothing —
-    //                         visibility is owner or a task stake (this extends
-    //                         #88: Bitrix membership is not a visibility leg).
+    //   • member           — explicitly added (ProjectMember), NATIVE projects
+    //                         only (mirror projects auto-add the workgroup OWNER
+    //                         as LEAD, which is not an "I work here" signal).
+    //   • Bitrix member     — synced ProjectBitrixMember for a mirror workgroup.
+    //                         REINSTATED (was dropped in #88 to declutter): the
+    //                         org's projects are almost all Bitrix mirrors, and
+    //                         without this the 77 MEMBER employees who hold no
+    //                         task in a workgroup can't even reach it to create
+    //                         a task or log time. Their real workgroup membership
+    //                         is the intended access signal (median 3 projects/
+    //                         user, so no meaningful flood).
     //   • task stake        — creator/assignee/reviewer/co-assignee/watcher
-    //                         on any task in the project
     //
-    // Strict for everyone, including ADMIN/PM — no role bypass.
-    // Admin-grade access (audit log, settings) is gated separately, and
-    // org-wide browse is the explicit `scope='all'` opt-in above.
+    // Strict for everyone, including ADMIN/PM — no role bypass. Org-wide browse
+    // is the explicit `scope='all'` opt-in above.
     where.OR = [
       { ownerId: user.id },
       { externalSource: null, members: { some: { userId: user.id } } },
+      { bitrixMembers: { some: { userId: user.id } } },
       {
         tasks: {
           some: {

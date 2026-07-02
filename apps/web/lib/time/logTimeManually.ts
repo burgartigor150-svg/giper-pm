@@ -19,6 +19,7 @@ export async function logTimeManually(input: LogTimeInput, user: SessionUser) {
           select: {
             ownerId: true,
             members: { select: { userId: true, role: true } },
+            bitrixMembers: { where: { userId: user.id }, select: { userId: true } },
           },
         },
       },

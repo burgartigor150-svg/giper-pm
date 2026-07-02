@@ -300,16 +300,20 @@ describe('listProjectsForUser', () => {
  * matter. Visibility is now a real stake only: owner, explicit member,
  * or a task stake. These tests pin that membership alone grants nothing.
  */
-describe('listProjectsForUser — Bitrix membership is NOT a visibility leg', () => {
-  it('Bitrix-mirror member with no task/owner/member stake does NOT see the workgroup', async () => {
+describe('listProjectsForUser — Bitrix workgroup membership IS a visibility leg', () => {
+  it('Bitrix-mirror member with no task/owner/member stake DOES see the workgroup', async () => {
+    // REINSTATED (was excluded in #88): the org's projects are almost all
+    // Bitrix mirrors, so a synced workgroup member with no task must still
+    // reach the project to create a task / log time. Their membership IS the
+    // access signal.
     const owner = await makeUser();
     const me = await makeUser({ role: 'MEMBER' });
     const p = await makeProject({ ownerId: owner.id });
-    // Bitrix sync added me to this group — but I hold no task here.
+    // Bitrix sync added me to this group — I hold no task, but membership is enough.
     await prisma.projectBitrixMember.create({
       data: { projectId: p.id, bitrixUserId: 'BX-42', userId: me.id },
     });
-    expect(await listProjectsForUser(sessionUser(me))).toHaveLength(0);
+    expect((await listProjectsForUser(sessionUser(me))).map((x) => x.id)).toEqual([p.id]);
   });
 
   it('Bitrix member WITH a task stake sees the project (via the task leg, no dup)', async () => {
@@ -397,14 +401,14 @@ describe('getProject', () => {
     expect((await getProject(p.key, sessionUser(bxUser))).id).toBe(p.id);
   });
 
-  it('Bitrix-mirror member with no task CANNOT open the project (membership is not a leg)', async () => {
+  it('Bitrix-mirror member with no task CAN open the project (membership is a leg)', async () => {
     const owner = await makeUser();
     const me = await makeUser({ role: 'MEMBER' });
     const p = await makeProject({ ownerId: owner.id, key: 'GBM' });
     await prisma.projectBitrixMember.create({
       data: { projectId: p.id, bitrixUserId: 'BX-501', userId: me.id },
     });
-    await expectDomain(getProject(p.key, sessionUser(me)), 'INSUFFICIENT_PERMISSIONS');
+    expect((await getProject(p.key, sessionUser(me))).id).toBe(p.id);
   });
 
   it('Bitrix-mirror member WITH a task stake can open the project', async () => {

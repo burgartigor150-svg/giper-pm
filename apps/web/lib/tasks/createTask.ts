@@ -26,6 +26,7 @@ export async function createTask(input: CreateTaskInput, user: SessionUser) {
       id: true,
       ownerId: true,
       members: { select: { userId: true, role: true } },
+      bitrixMembers: { where: { userId: user.id }, select: { userId: true } },
     },
   });
   if (!project) throw new DomainError('NOT_FOUND', 404, 'Проект не найден');

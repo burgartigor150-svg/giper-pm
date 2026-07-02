@@ -97,6 +97,7 @@ export async function listTasksForBoard(
           user: { select: { id: true, name: true, image: true } },
         },
       },
+      bitrixMembers: { where: { userId: user.id }, select: { userId: true } },
     },
   });
   if (!project) throw new DomainError('NOT_FOUND', 404);
