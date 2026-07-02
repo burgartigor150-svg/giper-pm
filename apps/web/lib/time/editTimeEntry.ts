@@ -1,7 +1,7 @@
 import { prisma } from '@giper/db';
 import type { EditTimeEntryInput } from '@giper/shared';
 import { DomainError } from '../errors';
-import { canEditTimeEntry, canViewProject, type SessionUser } from '../permissions';
+import { canEditTimeEntry, canViewProject, canViewTask, type SessionUser } from '../permissions';
 import { hasOverlappingEntry } from './findOverlap';
 
 export async function editTimeEntry(
@@ -26,18 +26,26 @@ export async function editTimeEntry(
     const task = await prisma.task.findUnique({
       where: { id: input.taskId },
       select: {
+        // Task-stake fields — a stakeholder can move their entry onto the task
+        // even without project membership (mirrors logTimeManually / read gates).
+        creatorId: true,
+        assigneeId: true,
+        reviewerId: true,
+        testerId: true,
+        assignments: { where: { userId: user.id }, select: { userId: true } },
+        watchers: { where: { userId: user.id }, select: { userId: true } },
         project: {
           select: {
             ownerId: true,
+            externalSource: true,
             members: { select: { userId: true, role: true } },
-            // Bitrix workgroup membership — same visibility leg as logTimeManually.
             bitrixMembers: { where: { userId: user.id }, select: { userId: true } },
           },
         },
       },
     });
     if (!task) throw new DomainError('NOT_FOUND', 404, 'Задача не найдена');
-    if (!canViewProject(user, task.project)) {
+    if (!canViewTask(user, task) && !canViewProject(user, task.project)) {
       throw new DomainError('INSUFFICIENT_PERMISSIONS', 403);
     }
   }

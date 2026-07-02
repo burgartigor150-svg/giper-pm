@@ -1,6 +1,6 @@
 import { prisma } from '@giper/db';
 import { DomainError } from '../errors';
-import { canViewProject, type SessionUser } from '../permissions';
+import { canViewProject, canViewTask, type SessionUser } from '../permissions';
 import { stopTimer } from './stopTimer';
 
 /**
@@ -14,9 +14,19 @@ export async function startTimer(taskId: string, user: SessionUser, note?: strin
     where: { id: taskId },
     select: {
       id: true,
+      // Task-stake fields: a user working on the task (assignee/creator/
+      // reviewer/tester/co-assignee/watcher) can log time on it even without
+      // project membership — mirrors the read gates (canViewTask).
+      creatorId: true,
+      assigneeId: true,
+      reviewerId: true,
+      testerId: true,
+      assignments: { where: { userId: user.id }, select: { userId: true } },
+      watchers: { where: { userId: user.id }, select: { userId: true } },
       project: {
         select: {
           ownerId: true,
+          externalSource: true,
           members: { select: { userId: true, role: true } },
           bitrixMembers: { where: { userId: user.id }, select: { userId: true } },
         },
@@ -24,7 +34,9 @@ export async function startTimer(taskId: string, user: SessionUser, note?: strin
     },
   });
   if (!task) throw new DomainError('NOT_FOUND', 404, 'Задача не найдена');
-  if (!canViewProject(user, task.project)) {
+  // Allowed if the user has a stake in THIS task (canViewTask) OR access to the
+  // project by membership (owner / native member / Bitrix workgroup member).
+  if (!canViewTask(user, task) && !canViewProject(user, task.project)) {
     throw new DomainError('INSUFFICIENT_PERMISSIONS', 403);
   }
 
