@@ -42,13 +42,15 @@ export type ProjectForPerm = {
    */
   hasTaskForCurrentUser?: boolean;
   /**
-   * Optional precomputed signal that *this user* is mirrored in the
-   * Bitrix sonet_group for this project (ProjectBitrixMember row).
-   * Primary source of truth for visibility on Bitrix-mirrored
-   * projects — a user sees the project the moment Bitrix sync adds
-   * them, even before any task is assigned.
+   * Rows from ProjectBitrixMember for *this user* (load filtered:
+   * `bitrixMembers: { where: { userId: me }, select: { userId: true } }`).
+   * A synced Bitrix sonet_group member sees + can act in the mirrored
+   * project the moment Bitrix sync adds them, even before any task is
+   * assigned — this is how the 77 MEMBER users get access to their
+   * workgroups' projects (task create, time log, board). When the
+   * relation isn't loaded the leg is simply skipped (safe default).
    */
-  isBitrixMemberForCurrentUser?: boolean;
+  bitrixMembers?: { userId: string | null }[];
 };
 
 export type TaskForPerm = {
@@ -120,6 +122,10 @@ export function canManageAssignments(
 export function canViewProject(user: SessionUser, project: ProjectForPerm): boolean {
   if (project.ownerId === user.id) return true;
   if (project.members?.some((m) => m.userId === user.id)) return true;
+  // Synced Bitrix workgroup membership grants access to the mirrored project
+  // (create tasks, log time, open the board) — the primary access leg for
+  // regular employees whose projects are Bitrix mirrors.
+  if (project.bitrixMembers?.some((m) => m.userId === user.id)) return true;
   if (project.hasTaskForCurrentUser) return true;
   return false;
 }

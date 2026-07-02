@@ -35,6 +35,8 @@ export async function getGanttData(projectKey: string, user: SessionUser) {
       ownerId: true,
       externalSource: true,
       members: { select: { userId: true, role: true } },
+      // Bitrix workgroup membership — same visibility leg as getProject.
+      bitrixMembers: { where: { userId: user.id }, select: { userId: true } },
     },
   });
   if (!project) throw new DomainError('NOT_FOUND', 404);

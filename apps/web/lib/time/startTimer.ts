@@ -18,6 +18,7 @@ export async function startTimer(taskId: string, user: SessionUser, note?: strin
         select: {
           ownerId: true,
           members: { select: { userId: true, role: true } },
+          bitrixMembers: { where: { userId: user.id }, select: { userId: true } },
         },
       },
     },
