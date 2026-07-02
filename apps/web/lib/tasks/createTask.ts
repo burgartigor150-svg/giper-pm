@@ -30,7 +30,29 @@ export async function createTask(input: CreateTaskInput, user: SessionUser) {
     },
   });
   if (!project) throw new DomainError('NOT_FOUND', 404, 'Проект не найден');
-  if (!canCreateTask(user, project)) {
+  // Access = owner / native member / Bitrix workgroup member (canCreateTask), OR
+  // a task stake in the project (participant via an assigned/created/watched
+  // task) — the same task-stake leg the read gates (getProject) already honor.
+  // Without this, an employee assigned to a task in a Bitrix-mirror project can
+  // OPEN it but not create a task there. VIEWER never creates.
+  let allowed = canCreateTask(user, project);
+  if (!allowed && user.role !== 'VIEWER') {
+    const stake = await prisma.task.count({
+      where: {
+        projectId: project.id,
+        OR: [
+          { creatorId: user.id },
+          { assigneeId: user.id },
+          { reviewerId: user.id },
+          { testerId: user.id },
+          { assignments: { some: { userId: user.id } } },
+          { watchers: { some: { userId: user.id } } },
+        ],
+      },
+    });
+    allowed = stake > 0;
+  }
+  if (!allowed) {
     throw new DomainError('INSUFFICIENT_PERMISSIONS', 403);
   }
 
