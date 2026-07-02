@@ -108,16 +108,15 @@ export function canManageAssignments(
  * A user sees a project iff ANY of these is true:
  *   - they are the project owner (covers freshly-created projects)
  *   - they are a ProjectMember (internal team-role assignment)
+ *   - they are a Bitrix workgroup member (ProjectBitrixMember, userId==me) —
+ *     the primary access leg for regular employees, since the org's projects
+ *     are almost all Bitrix mirrors (reinstated in #206; loaded filtered)
  *   - they have a task stake in the project
  *     (`hasTaskForCurrentUser`) — creator/assignee/reviewer/co-assignee/watcher
  *
- * Bitrix sonet_group membership is intentionally NOT a leg: workgroups
- * can be large and a synced member often holds no task there, so it
- * buried the projects that actually matter. Mirrored membership without
- * a real stake grants nothing. Kept in lockstep with listProjectsForUser.
- *
- * Admin-grade access (audit log, user management, global settings)
- * goes through `canSeeSettings` and friends — not here.
+ * Kept in lockstep with listProjectsForUser. Admin-grade access (audit log,
+ * user management, global settings) goes through `canSeeSettings` and friends —
+ * not here.
  */
 export function canViewProject(user: SessionUser, project: ProjectForPerm): boolean {
   if (project.ownerId === user.id) return true;

@@ -60,6 +60,8 @@ export async function setInternalStatus(
       reviewerId: true,
       testerId: true,
       parentId: true,
+      // Co-assignees — an active stakeholder who works the card may move it.
+      assignments: { where: { userId: user.id }, select: { userId: true } },
       project: {
         select: {
           key: true,
@@ -72,13 +74,23 @@ export async function setInternalStatus(
   });
   if (!task) throw new DomainError('NOT_FOUND', 404, 'Не найдено');
 
-  // Same gate as the board's setInternalStatusAction — ignores the
+  // Entry gate — who may move the card at all. Active stakeholders (creator,
+  // assignee, co-assignee, reviewer, tester) + leadership (owner / LEAD) + org
+  // ADMIN/PM. This mirrors who can OPEN the card (canViewTask minus watcher):
+  // a bare reviewer/tester could previously OPEN a card and IS meant to move it
+  // out of REVIEW/TESTING (approveTaskAction/rejectTaskAction let them), but this
+  // gate threw first — making the REVIEW/TESTING sub-gates below dead code for
+  // them. Widening the ENTRY gate does NOT weaken sign-off: the REVIEW/TESTING
+  // sub-gates still restrict who may LEAVE those stages. Ignores the
   // externalSource veto on purpose (internal edits are allowed on mirrors).
   const allow =
     user.role === 'ADMIN' ||
     user.role === 'PM' ||
     task.creatorId === user.id ||
     task.assigneeId === user.id ||
+    task.reviewerId === user.id ||
+    task.testerId === user.id ||
+    task.assignments.length > 0 ||
     task.project.ownerId === user.id ||
     task.project.members.some((m) => m.userId === user.id && m.role === 'LEAD');
   if (!allow) throw new DomainError('INSUFFICIENT_PERMISSIONS', 403, 'Недостаточно прав');
